@@ -1,0 +1,110 @@
+services:
+  # リバースプロキシ
+  nginx:
+    # イメージ
+    image: nginx:latest
+
+    # ポート
+    ports:
+      - "8443:8443"
+
+    tty: true
+
+    # ディレクトリ共有
+    volumes:
+      # 設定ファイル
+      - ./nginx/configs:/etc/nginx/conf.d/
+
+      # 静的ファイル
+      - ./nginx/statics:/var/www/nginx/statics/:ro
+
+      # SSL証明書
+      - ./nginx/keys:/etc/nginx/ssl:ro
+
+      # ロギングディレクトリ
+      - ./nginx/logs:/var/log/nginx:rw
+
+    # 自動再起動
+    restart: always
+    depends_on:
+      - frontend
+      - auth
+      - build
+      - deploy
+  # フロントエンドのコンテナ
+  frontend:
+    # ホスト名設定
+    hostname: frontend
+
+    # イメージ
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: release
+    
+    # ttyを有効化
+    tty: true
+
+    restart: always
+
+  # Auth サービス
+  auth:
+    hostname: auth
+    build:
+      context: ./containers/auth
+      dockerfile: dockerfile
+      target: release
+    tty: true
+    restart: always
+    depends_on:
+      - db
+
+  # Build サービス
+  build:
+    hostname: build
+    build:
+      context: ./containers/build
+      dockerfile: dockerfile
+      target: release
+    tty: true
+    restart: always
+    depends_on:
+      - db
+
+  # Deploy サービス
+  deploy:
+    hostname: deploy
+    build:
+      context: ./containers/deploy
+      dockerfile: dockerfile
+      target: release
+    tty: true
+    restart: always
+    depends_on:
+      - db
+
+  # データベース (PostgreSQL)
+  db:
+    image: postgres:latest
+    restart: always
+    # set shared memory limit when using docker compose
+    shm_size: 128mb
+    environment:
+      POSTGRES_DB: acp
+      POSTGRES_USER: acp
+      POSTGRES_PASSWORD: example
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    tty: true
+
+  # データベース管理ツール
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - "8081:8080"
+
+volumes:
+  # postgres のデータベース
+  postgres_data:
+    driver: local

@@ -1,0 +1,94 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  GREETING: Hello, World!
+
+tasks:
+  default:
+    cmds:
+      - echo "{{.GREETING}}"
+    silent: true
+  
+  # リセットコマンド
+  reset:
+    cmds:
+      - echo "コンテナを削除します"
+      # コンテナを削除
+      - cmd: docker compose down -v --rmi all
+      # コンテナを立ち上げる
+      - task: setup
+    silent: true
+
+  # セットアップするコマンド
+  setup:
+    # envファイルを生成する
+    - echo "configファイルを生成します"
+    - task: config
+
+    # カギを生成する
+    - echo "各種カギを生成します"
+    - task: genkey
+
+    # コンテナを立ち上げます
+    - echo "コンテナを立ち上げます"
+    - docker compose up -d
+
+  # カギを生成するコマンド
+  genkey:
+    cmds:
+      - cmd: docker run --rm -it -v .\\openssl\\jwtKeys:/jwtkeys -v .\\nginx\\keys:/sslkeys {{.Build_Image}}
+        platforms: [windows]
+      - cmd: docker run --rm -it -v ./openssl/jwtKeys:/jwtkeys -v ./nginx/keys:/sslkeys {{.Build_Image}}
+        platforms: [linux,darwin]
+    vars:
+      Build_Image:
+        sh: docker build -q ./openssl
+
+    # 設定を更新するコマンド
+  config:
+    cmds:
+      - cmd: docker run --rm -it -v .\\config:/config/data {{.Build_Image}}
+        platforms: [windows]
+      - cmd: docker run --rm -it -v ./config:/config/data {{.Build_Image}}
+        platforms: [linux,darwin]
+      - echo "設定用のイメージを削除しています"
+      - docker rmi -f {{.Build_Image}}
+    vars:
+      Build_Image:
+        sh: docker build -q ./config
+
+  # release ビルドを行うコマンド
+  release:
+    cmds:
+      - echo "releaseビルドで起動します"
+      - cmd: docker compose -f docker-compose-build.yaml up -d --remove-orphans --build
+
+  # 全サービスのログを表示
+  logs:
+    cmds:
+      - docker compose logs -f
+
+  # フロントエンドのログを表示
+  logs:frontend:
+    cmds:
+      - docker compose logs -f frontend
+
+  # バックエンド各サービスのログを表示
+  logs:auth:
+    cmds:
+      - docker compose logs -f auth
+
+  logs:build:
+    cmds:
+      - docker compose logs -f build
+
+  logs:deploy:
+    cmds:
+      - docker compose logs -f deploy
+
+  # 全バックエンドサービスのログをまとめて表示
+  logs:backend:
+    cmds:
+      - docker compose logs -f auth build deploy
