@@ -32,53 +32,62 @@ def create_env_file(file_path, content):
         file.write(content.strip())
     print(f"✅ ファイル '{file_path}' を生成しました。")
 
-def create_database_env():
+def create_db_env(db_password):
     """
-    database.env を自動生成する
+    db.env (PostgreSQL用) を生成する
     """
-
-    # データベースのパスワードを自動生成（長さ64文字）
-    db_password = generate_random_key()
-
-    # auth.env のテンプレート
-    auth_env_template = f"""
-MYSQL_DATABASE = root
-MYSQL_USER = app
-MYSQL_ROOT_PASSWORD = {db_password}
+    db_env_content = f"""
+POSTGRES_DB=acp
+POSTGRES_USER=acp
+POSTGRES_PASSWORD={db_password}
 """
-    create_env_file("database.env", auth_env_template)
+    create_env_file("db.env", db_env_content)
 
-    return db_password
+def create_services_env(db_password, jwt_secret):
+    """
+    各マイクロサービス共通の services.env を生成する
+    """
+    services_env_content = f"""
+DB_HOST=db
+DB_USER=acp
+DB_PASSWORD={db_password}
+DB_NAME=acp
+DB_PORT=5432
+JWT_SECRET={jwt_secret}
+"""
+    create_env_file("services.env", services_env_content)
 
 def main():
     """
     メイン処理：複数の設定ファイル生成関数を呼び出します。
     """
+    # 背景: PostgreSQL を使用するマイクロサービス構成に合わせて env ファイルを生成するように変更
+
     # 作業ディレクトリを./dataに移動し、存在しなければ作成
     data_dir = "./data"
     os.makedirs(data_dir, exist_ok=True)
     os.chdir(data_dir)
 
-    print("--- OAuth およびアプリケーション設定の開始 ---")
+    print("--- サービスの環境設定の生成を開始 ---")
 
     # ファイルの上書き確認を行い、許可されない場合は終了
-    files_to_check = ["database.env", "app.env"]
+    files_to_check = ["db.env", "services.env"]
     if not confirm_overwrite_all(files_to_check):
         return
 
-    # database.env ファイルを生成
-    db_password = create_database_env()
+    # ランダムなパスワードとシークレットを生成
+    db_password = generate_random_key(32)
+    jwt_secret = generate_random_key(64)
 
-    # app.env のテンプレート
-    app_env_template = f"""
-DATABASE_URI="app:{db_password}@tcp(db:3306)/app?charset=utf8mb4&parseTime=True&loc=Local"
-"""
+    # db.env ファイルを生成
+    create_db_env(db_password)
 
-    # app.env ファイルを生成
-    create_env_file("app.env", app_env_template)
+    # services.env ファイルを生成
+    create_services_env(db_password, jwt_secret)
 
     print(f"\n--- 設定完了！ ---")
-    print(f"設定ファイルがすべて './data' ディレクトリに生成されました。")
+    print(f"設定ファイルがすべて '{os.path.abspath('.')}' ディレクトリに生成されました。")
+    print(f"Docker Compose 等でこれらのファイルを env_file として読み込んでください。")
 
 if __name__ == "__main__":
     main()
