@@ -2,7 +2,9 @@ package main
 
 import (
 	"deploy/controllers"
+	"deploy/pkg/database"
 	"deploy/services"
+	"log"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -10,6 +12,11 @@ import (
 )
 
 func main() {
+	// データベース接続の初期化
+	if err := database.Connect(); err != nil {
+		log.Fatalf("データベース接続に失敗しました: %v", err)
+	}
+
 	echoServer := echo.New()
 	echoServer.Use(middleware.Logger())
 	echoServer.Use(middleware.Recover())
