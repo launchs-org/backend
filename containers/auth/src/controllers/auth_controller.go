@@ -21,11 +21,11 @@ func NewAuthController(service services.AuthService) *AuthController {
 }
 
 // Login ログイン処理を行うエンドポイント
-func (a *AuthController) Login(echoContext echo.Context) error {
+func (controller *AuthController) Login(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "login logic here"})
 }
 
 // ValidateToken トークンの有効性を確認するエンドポイント
-func (a *AuthController) ValidateToken(echoContext echo.Context) error {
+func (controller *AuthController) ValidateToken(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "validate token logic here"})
 }

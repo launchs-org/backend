@@ -21,36 +21,36 @@ func NewDeploymentController(service services.DeploymentService) *DeploymentCont
 }
 
 // CreateDeployment デプロイメントを作成するエンドポイント
-func (d *DeploymentController) CreateDeployment(echoContext echo.Context) error {
+func (controller *DeploymentController) CreateDeployment(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusCreated, echo.Map{"message": "create deployment logic here"})
 }
 
 // GetDeployment デプロイメント情報を取得するエンドポイント
-func (d *DeploymentController) GetDeployment(echoContext echo.Context) error {
+func (controller *DeploymentController) GetDeployment(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "get deployment logic here"})
 }
 
 // ListDeployments デプロイメント一覧を取得するエンドポイント
-func (d *DeploymentController) ListDeployments(echoContext echo.Context) error {
+func (controller *DeploymentController) ListDeployments(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "list deployments logic here"})
 }
 
 // DeleteDeployment デプロイメントを削除するエンドポイント
-func (d *DeploymentController) DeleteDeployment(echoContext echo.Context) error {
+func (controller *DeploymentController) DeleteDeployment(echoContext echo.Context) error {
 	return echoContext.NoContent(http.StatusNoContent)
 }
 
 // UpdateReplicas レプリカ数を更新するエンドポイント
-func (d *DeploymentController) UpdateReplicas(echoContext echo.Context) error {
+func (controller *DeploymentController) UpdateReplicas(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "update replicas logic here"})
 }
 
 // UpdateEnvVars 環境変数を更新するエンドポイント
-func (d *DeploymentController) UpdateEnvVars(echoContext echo.Context) error {
+func (controller *DeploymentController) UpdateEnvVars(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "update env vars logic here"})
 }
 
 // UpdatePorts ポート設定を更新するエンドポイント
-func (d *DeploymentController) UpdatePorts(echoContext echo.Context) error {
+func (controller *DeploymentController) UpdatePorts(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "update ports logic here"})
 }

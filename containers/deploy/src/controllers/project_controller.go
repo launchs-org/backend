@@ -21,22 +21,22 @@ func NewProjectController(service services.ProjectService) *ProjectController {
 }
 
 // CreateProject プロジェクトを作成するエンドポイント
-func (p *ProjectController) CreateProject(echoContext echo.Context) error {
+func (controller *ProjectController) CreateProject(echoContext echo.Context) error {
 	// リクエストのパースとサービスの呼び出し
 	return echoContext.JSON(http.StatusCreated, echo.Map{"message": "project creation logic here"})
 }
 
 // GetProject プロジェクトを取得するエンドポイント
-func (p *ProjectController) GetProject(echoContext echo.Context) error {
+func (controller *ProjectController) GetProject(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "get project logic here"})
 }
 
 // ListProjects プロジェクト一覧を取得するエンドポイント
-func (p *ProjectController) ListProjects(echoContext echo.Context) error {
+func (controller *ProjectController) ListProjects(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "list projects logic here"})
 }
 
 // DeleteProject プロジェクトを削除するエンドポイント
-func (p *ProjectController) DeleteProject(echoContext echo.Context) error {
+func (controller *ProjectController) DeleteProject(echoContext echo.Context) error {
 	return echoContext.NoContent(http.StatusAccepted)
 }

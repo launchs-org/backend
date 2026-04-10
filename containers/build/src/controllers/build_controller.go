@@ -21,16 +21,16 @@ func NewBuildController(service services.BuildService) *BuildController {
 }
 
 // TriggerBuild ビルドを開始するエンドポイント
-func (b *BuildController) TriggerBuild(echoContext echo.Context) error {
+func (controller *BuildController) TriggerBuild(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusAccepted, echo.Map{"message": "trigger build logic here"})
 }
 
 // GetBuildStatus ビルドステータスを取得するエンドポイント
-func (b *BuildController) GetBuildStatus(echoContext echo.Context) error {
+func (controller *BuildController) GetBuildStatus(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "get build status logic here"})
 }
 
 // GetBuildLogs ビルドログを取得するエンドポイント
-func (b *BuildController) GetBuildLogs(echoContext echo.Context) error {
+func (controller *BuildController) GetBuildLogs(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "get build logs logic here"})
 }
