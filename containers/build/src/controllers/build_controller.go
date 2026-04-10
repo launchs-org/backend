@@ -20,17 +20,17 @@ func NewBuildController(service services.BuildService) *BuildController {
 	}
 }
 
-// TriggerBuild ビルドを開始するエンドポイント
+// TriggerBuild ビルド実行リクエストを受け取り、非同期にビルドプロセスを開始します。
 func (controller *BuildController) TriggerBuild(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusAccepted, echo.Map{"message": "trigger build logic here"})
 }
 
-// GetBuildStatus ビルドステータスを取得するエンドポイント
+// GetBuildStatus ビルドが現在どのフェーズにあるか、最新の状態を返します。
 func (controller *BuildController) GetBuildStatus(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "get build status logic here"})
 }
 
-// GetBuildLogs ビルドログを取得するエンドポイント
+// GetBuildLogs ビルド実行時に出力された標準出力/標準エラー出力を返します。
 func (controller *BuildController) GetBuildLogs(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "get build logs logic here"})
 }

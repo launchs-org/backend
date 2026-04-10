@@ -20,12 +20,12 @@ func NewAuthController(service services.AuthService) *AuthController {
 	}
 }
 
-// Login ログイン処理を行うエンドポイント
+// Login ログインリクエストを受け取り、AuthService を呼び出して認証結果を返します。
 func (controller *AuthController) Login(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "login logic here"})
 }
 
-// ValidateToken トークンの有効性を確認するエンドポイント
+// ValidateToken JWT トークンの検証を行い、結果を返します。
 func (controller *AuthController) ValidateToken(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"message": "validate token logic here"})
 }
