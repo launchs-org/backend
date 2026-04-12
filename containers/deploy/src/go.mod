@@ -1,3 +1,7 @@
+module deploy
+
+go 1.25.3
+
 replace shared => /app/shared
 
 require (
