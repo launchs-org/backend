@@ -2,10 +2,10 @@ package main
 
 import (
 	"auth/controllers"
-	"auth/pkg/database"
 	"auth/services"
 	"log"
 	"net/http"
+	"shared/models"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -13,8 +13,14 @@ import (
 
 func main() {
 	// データベース接続の初期化
-	if err := database.Connect(); err != nil {
+	db, err := models.NewDatabase()
+	if err != nil {
 		log.Fatalf("データベース接続に失敗しました: %v", err)
+	}
+
+	// データベースのマイグレーション
+	if err := db.AutoMigrate(); err != nil {
+		log.Fatalf("データベースのマイグレーションに失敗しました: %v", err)
 	}
 
 	echoServer := echo.New()
@@ -22,7 +28,7 @@ func main() {
 	echoServer.Use(middleware.Recover())
 
 	// サービスの初期化
-	authService := services.NewAuthService()
+	authService := services.NewAuthService(db)
 
 	// コントローラーの初期化
 	authController := controllers.NewAuthController(authService)

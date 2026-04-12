@@ -1,8 +1,9 @@
-module deploy
+replace shared => /app/shared
 
-go 1.25.3
-
-require github.com/labstack/echo/v4 v4.13.4
+require (
+	github.com/labstack/echo/v4 v4.13.4
+	shared v0.0.0
+)
 
 require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
