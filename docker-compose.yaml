@@ -102,6 +102,8 @@ services:
   db:
     image: postgres:17
     restart: always
+    ports:
+      - "5432:5432"
     # set shared memory limit when using docker compose
     shm_size: 128mb
     environment:
@@ -118,7 +120,25 @@ services:
     image: adminer
     restart: always
     ports:
-      - "8081:8080" # ホスト側のポートが衝突しないよう 8081 に変更
+      - "8081:8080"
+
+  # テスト実行用コンテナ
+  test:
+    build:
+      context: .
+      dockerfile: ./containers/test/dockerfile
+    volumes:
+      - .:/app
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=acp
+      - DB_PASSWORD=example
+      - DB_NAME=acp
+    depends_on:
+      - db
+    profiles:
+      - test
 
 volumes:
   # postgres のデータベース
