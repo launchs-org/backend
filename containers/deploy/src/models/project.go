@@ -1,14 +1,33 @@
 package models
 
 import (
-	"time"
+	sharedModels "shared/models"
 )
 
-// Project プロジェクトの詳細情報を保持するモデル
-type Project struct {
-	ID        string    `gorm:"primaryKey" json:"id"`        // UUID
-	Name      string    `json:"name"`
-	Namespace string    `gorm:"uniqueIndex" json:"namespace"` // K8s Namespace 名
-	OwnerID   string    `gorm:"index" json:"owner_id"`
-	CreatedAt time.Time `json:"created_at"`
+// CreateProject 新しいプロジェクトをデータベースに保存します
+func CreateProject(project *sharedModels.Project) error {
+	return sharedModels.Instance.Create(project).Error
+}
+
+// GetProjectByID IDに一致するプロジェクトをデータベースから取得します
+func GetProjectByID(id string) (*sharedModels.Project, error) {
+	var project sharedModels.Project
+	if err := sharedModels.Instance.Where("id = ?", id).First(&project).Error; err != nil {
+		return nil, err
+	}
+	return &project, nil
+}
+
+// GetProjectsByOwner 所有者に紐づくプロジェクト一覧を取得します
+func GetProjectsByOwner(ownerID string) ([]sharedModels.Project, error) {
+	var projects []sharedModels.Project
+	if err := sharedModels.Instance.Where("owner_id = ?", ownerID).Find(&projects).Error; err != nil {
+		return nil, err
+	}
+	return projects, nil
+}
+
+// DeleteProject プロジェクトをデータベースから削除します
+func DeleteProject(id string) error {
+	return sharedModels.Instance.Where("id = ?", id).Delete(&sharedModels.Project{}).Error
 }

@@ -1,10 +1,22 @@
 package models
 
-// Port Deployment に紐づく公開ポート
-type Port struct {
-	ID           string `gorm:"primaryKey" json:"id"`
-	DeploymentID string `gorm:"index" json:"deployment_id"`
-	Port         int    `json:"port"`
-	Protocol     string `gorm:"default:TCP" json:"protocol"` // TCP / UDP
-	Description  string `json:"description"`                 // 任意メモ
+import (
+	sharedModels "shared/models"
+)
+
+// ListPortsByDeployment デプロイメントに紐づくポート設定一覧を取得します
+func ListPortsByDeployment(deploymentID string) ([]sharedModels.Port, error) {
+	var ports []sharedModels.Port
+	if err := sharedModels.Instance.Where("deployment_id = ?", deploymentID).Find(&ports).Error; err != nil {
+		return nil, err
+	}
+	return ports, nil
+}
+
+// SavePortsByDeployment デプロイメントのポート設定を保存します
+func SavePortsByDeployment(ports []sharedModels.Port) error {
+	if len(ports) == 0 {
+		return nil
+	}
+	return sharedModels.Instance.Save(&ports).Error
 }
