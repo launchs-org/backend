@@ -16,6 +16,10 @@ app/src/tmp/
 # その他
 .DS_Store
 
-# .env 除外
-config/app.env
-config/database.env
+# 生成された設定・環境変数フォルダを除外
+data/
+config/*.env
+containers/auth/src/tmp/main
+containers/build/src/tmp/build-errors.log
+containers/deploy/src/tmp/build-errors.log
+go.work.sum

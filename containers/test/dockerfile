@@ -1,0 +1,10 @@
+FROM golang:1.25.3-bookworm
+
+WORKDIR /app
+
+# 依存関係のインストールに必要な最小限のパッケージ
+RUN apt update && apt install -y wget curl git
+
+# ソースコード全体をコピーしてテストが動くようにする（go.workも含む）
+# ただしボリュームマウントするので、ここでは作業ディレクトリの設定のみ
+CMD ["go", "test", "-v", "./..."]

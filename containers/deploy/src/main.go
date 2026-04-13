@@ -3,13 +3,26 @@ package main
 import (
 	"deploy/controllers"
 	"deploy/services"
+	"log"
 	"net/http"
+	"shared/models"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
 
 func main() {
+	// データベース接続の初期化
+	db, err := models.NewDatabase()
+	if err != nil {
+		log.Fatalf("データベース接続に失敗しました: %v", err)
+	}
+
+	// データベースのマイグレーション
+	if err := db.AutoMigrate(); err != nil {
+		log.Fatalf("データベースのマイグレーションに失敗しました: %v", err)
+	}
+
 	echoServer := echo.New()
 	echoServer.Use(middleware.Logger())
 	echoServer.Use(middleware.Recover())

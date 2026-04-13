@@ -92,3 +92,20 @@ tasks:
   logs:backend:
     cmds:
       - docker compose logs -f auth build deploy
+
+  # データベース接続テスト
+  test:db:
+    desc: データベース接続テストを実行します
+    cmds:
+      - |
+        if [ ! -f .env.test ]; then
+          cp .env.test.example .env.test
+          echo ".env.test を作成しました。必要に応じて設定を修正してください。"
+        fi
+      - export $(cat .env.test | xargs) && go test -v ./shared/models/...
+
+  # コンテナ内でテスト実行
+  test:docker:
+    desc: テスト用コンテナを起動してテストを実行します
+    cmds:
+      - docker compose run --rm test go test -v ./shared/... ./containers/auth/src/... ./containers/build/src/... ./containers/deploy/src/...

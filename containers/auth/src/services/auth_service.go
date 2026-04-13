@@ -1,5 +1,9 @@
 package services
 
+import (
+	"shared/models"
+)
+
 // AuthService 認証とトークン発行に関するビジネスロジックを定義するインターフェース
 type AuthService interface {
 	Login(username string, password string) (string, error)
@@ -9,11 +13,14 @@ type AuthService interface {
 
 // authService AuthService の実装
 type authService struct {
+	db *models.Database
 }
 
 // NewAuthService AuthService の新しいインスタンスを作成する
-func NewAuthService() AuthService {
-	return &authService{}
+func NewAuthService(db *models.Database) AuthService {
+	return &authService{
+		db: db,
+	}
 }
 
 // Login ユーザー名とパスワードを検証し、JWT トークンを発行します。
