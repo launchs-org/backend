@@ -13,36 +13,56 @@ type Database struct {
 	Conn *gorm.DB
 }
 
+// DatabaseConfig データベース接続設定を保持する構造体
+type DatabaseConfig struct {
+	Host     string
+	User     string
+	Password string
+	DBName   string
+	Port     string
+	SSLMode  string
+	TimeZone string
+}
+
+// DefaultConfig は環境変数からデフォルトのデータベース設定を取得します
+func DefaultConfig() *DatabaseConfig {
+	return &DatabaseConfig{
+		Host:     getEnv("DB_HOST", "db"),
+		User:     getEnv("DB_USER", "acp"),
+		Password: getEnv("DB_PASSWORD", "example"),
+		DBName:   getEnv("DB_NAME", "acp"),
+		Port:     getEnv("DB_PORT", "5432"),
+		SSLMode:  getEnv("DB_SSLMODE", "disable"),
+		TimeZone: getEnv("DB_TIMEZONE", "Asia/Tokyo"),
+	}
+}
+
+func getEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return value
+	}
+	return fallback
+}
+
 // Instance はデータベース接続のインスタンスを保持するグローバル変数です。
 var Instance *gorm.DB
 
-// NewDatabase 新しいデータベース接続を作成します
+// NewDatabase デフォルト設定でデータベース接続を作成します
 func NewDatabase() (*Database, error) {
-	host := os.Getenv("DB_HOST")
-	if host == "" {
-		host = "db"
-	}
-	user := os.Getenv("DB_USER")
-	if user == "" {
-		user = "acp"
-	}
-	password := os.Getenv("DB_PASSWORD")
-	if password == "" {
-		password = "example"
-	}
-	dbname := os.Getenv("DB_NAME")
-	if dbname == "" {
-		dbname = "acp"
-	}
-	port := os.Getenv("DB_PORT")
-	if port == "" {
-		port = "5432"
-	}
+	return NewDatabaseWithConfig(DefaultConfig())
+}
 
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable TimeZone=Asia/Tokyo",
-		host, user, password, dbname, port)
+// NewDatabaseWithConfig 指定された設定でデータベース接続を作成します
+func NewDatabaseWithConfig(config *DatabaseConfig) (*Database, error) {
+	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=%s TimeZone=%s",
+		config.Host, config.User, config.Password, config.DBName, config.Port, config.SSLMode, config.TimeZone)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	return Open(postgres.Open(dsn))
+}
+
+// Open 指定された gorm.Dialector でデータベース接続を開きます
+func Open(dialector gorm.Dialector) (*Database, error) {
+	db, err := gorm.Open(dialector, &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect database: %w", err)
 	}

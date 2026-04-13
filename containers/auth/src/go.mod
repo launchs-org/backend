@@ -2,7 +2,7 @@ module auth
 
 go 1.25.3
 
-replace shared => /app/shared
+replace shared => ../../../shared
 
 require (
 	github.com/labstack/echo/v4 v4.13.4
