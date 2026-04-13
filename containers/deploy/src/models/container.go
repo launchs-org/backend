@@ -1,16 +1,28 @@
 package models
 
 import (
-	"time"
+	sharedModels "shared/models"
 )
 
-// Container ビルドごとのバージョン実体を保持するモデル
-type Container struct {
-	ID           string    `gorm:"primaryKey" json:"id"`        // UUID
-	DeploymentID string    `gorm:"index" json:"deployment_id"`
-	ProjectID    string    `gorm:"index" json:"project_id"`             // GC・削除時の効率化
-	Image        string    `json:"image"`                               // Harbor URL (tag=UUID)
-	Status       string    `json:"status"`    // Building / Success / Failed / Retired
-	BuildLog     []byte    `gorm:"type:blob" json:"-"`         // 圧縮ログ (JSONには含めない)
-	CreatedAt    time.Time `json:"created_at"`
+// CreateContainer 新しいコンテナをデータベースに保存します
+func CreateContainer(container *sharedModels.Container) error {
+	return sharedModels.Instance.Create(container).Error
+}
+
+// GetContainerByID IDに一致するコンテナをデータベースから取得します
+func GetContainerByID(id string) (*sharedModels.Container, error) {
+	var container sharedModels.Container
+	if err := sharedModels.Instance.Where("id = ?", id).First(&container).Error; err != nil {
+		return nil, err
+	}
+	return &container, nil
+}
+
+// GetContainersByDeployment デプロイメントに紐づくコンテナ一覧を取得します
+func GetContainersByDeployment(deploymentID string) ([]sharedModels.Container, error) {
+	var containers []sharedModels.Container
+	if err := sharedModels.Instance.Where("deployment_id = ?", deploymentID).Find(&containers).Error; err != nil {
+		return nil, err
+	}
+	return containers, nil
 }
