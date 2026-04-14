@@ -2,8 +2,9 @@ package services
 
 import (
 	"errors"
+	"os"
 	repo "auth/models"
-	s_models "shared/models"
+	s_models "github.com/launchs-org/backend/shared/models"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -12,8 +13,33 @@ import (
 type AuthService interface {
 	// 認証関連
 	Login(username string, password string) (string, error)
+	SignUp(username string, password string, email string) error
 	ValidateToken(token string) (bool, error)
 	IssueInternalToken(serviceName string) (string, error)
+// ...
+
+// SignUp 新規ユーザーを登録します。環境変数で許可されている場合のみ実行可能です。
+func (service *authService) SignUp(username string, password string, email string) error {
+	// サインアップが許可されているか確認
+	if os.Getenv("ALLOW_SIGNUP") != "true" {
+		return errors.New("サインアップは現在無効です")
+	}
+
+	// パスワードをハッシュ化
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	// ユーザーを作成
+	user := &s_models.User{
+		Username: username,
+		Password: string(hashedPassword),
+		Email:    email,
+	}
+
+	return service.CreateUser(user)
+}
 
 	// ユーザー管理 (CRUD)
 	CreateUser(user *s_models.User) error
