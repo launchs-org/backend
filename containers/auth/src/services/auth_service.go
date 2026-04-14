@@ -6,6 +6,7 @@ import (
 	repo "auth/models"
 	s_models "github.com/launchs-org/backend/shared/models"
 
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -99,8 +100,26 @@ func (service *authService) Login(username string, password string) (string, err
 }
 
 // ValidateToken 送信されたトークンの妥当性を検証します。
-func (service *authService) ValidateToken(token string) (bool, error) {
-	// バリデーションロジックは後ほど
+func (service *authService) ValidateToken(tokenString string) (bool, error) {
+	// 秘密鍵を取得
+	secretKey := []byte(os.Getenv("JWT_SECRET_KEY"))
+	if len(secretKey) == 0 {
+		return false, errors.New("秘密鍵が設定されていません")
+	}
+
+	// トークンのパースと検証
+	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+		// アルゴリズムがHMACであることを確認
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("予期しない署名メソッドです")
+		}
+		return secretKey, nil
+	})
+
+	if err != nil || !token.Valid {
+		return false, errors.New("無効なトークンです")
+	}
+
 	return true, nil
 }
 
