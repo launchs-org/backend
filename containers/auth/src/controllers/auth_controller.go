@@ -62,3 +62,14 @@ func (controller *AuthController) SignUp(echoContext echo.Context) error {
 
 	return echoContext.JSON(http.StatusCreated, echo.Map{"message": "ユーザー登録が完了しました"})
 }
+
+// ValidateToken JWT トークンの検証を行い、結果を返します。
+func (controller *AuthController) ValidateToken(echoContext echo.Context) error {
+	token := echoContext.Request().Header.Get("Authorization")
+	// 本来は "Bearer " を除去するなどの処理が必要
+	_, err := controller.authService.ValidateToken(token)
+	if err != nil {
+		return echoContext.JSON(http.StatusUnauthorized, echo.Map{"error": "無効なトークンです"})
+	}
+	return echoContext.JSON(http.StatusOK, echo.Map{"valid": true})
+}
