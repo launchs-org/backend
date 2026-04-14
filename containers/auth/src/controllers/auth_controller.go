@@ -43,7 +43,22 @@ func (controller *AuthController) Login(echoContext echo.Context) error {
 	return echoContext.JSON(http.StatusOK, echo.Map{"token": token})
 }
 
-// ValidateToken JWT トークンの検証を行い、結果を返します。
-func (controller *AuthController) ValidateToken(echoContext echo.Context) error {
-	return echoContext.JSON(http.StatusOK, echo.Map{"message": "validate token logic here"})
+// SignUp 新規ユーザー登録リクエストを処理します。
+func (controller *AuthController) SignUp(echoContext echo.Context) error {
+	type signUpRequest struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
+	}
+	req := new(signUpRequest)
+	if err := echoContext.Bind(req); err != nil {
+		return echoContext.JSON(http.StatusBadRequest, echo.Map{"error": "リクエスト形式が不正です"})
+	}
+
+	// 登録処理を実行
+	if err := controller.authService.SignUp(req.Username, req.Password, req.Email); err != nil {
+		return echoContext.JSON(http.StatusForbidden, echo.Map{"error": err.Error()})
+	}
+
+	return echoContext.JSON(http.StatusCreated, echo.Map{"message": "ユーザー登録が完了しました"})
 }

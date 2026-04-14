@@ -1,24 +1,27 @@
 package services
 
 import (
+	"os"
 	"testing"
 	"golang.org/x/crypto/bcrypt"
-	s_models "shared/models"
 )
 
-// MockDB として動作する構造体等は本来必要ですが、今回は簡易的に
-// NewAuthService のシグネチャに合わせて db を渡します。
-// 実際にはモックライブラリ等が必要になる可能性があります。
-
 func TestLogin(t *testing.T) {
-	// 簡易テスト：パスワードハッシュの生成と検証の確認
 	password := "password123"
 	hashedPassword, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 
-	// ここでは DB モックが未実装のため、Loginメソッドを直接テストするのは困難です。
-	// まずはLoginメソッドが期待通りにハッシュを比較できるかを確認するロジックを別途検証します。
-
 	if err := bcrypt.CompareHashAndPassword(hashedPassword, []byte(password)); err != nil {
 		t.Errorf("パスワードの検証に失敗しました: %v", err)
+	}
+}
+
+// TestSignUp サインアップ機能のテスト
+func TestSignUp(t *testing.T) {
+	// 1. 環境変数が設定されていない場合（許可されていない状態）
+	os.Setenv("ALLOW_SIGNUP", "false")
+	service := &authService{} // モックDBは必要だが、ALLOW_SIGNUPチェックが先なので簡易的にテスト
+	err := service.SignUp("testuser", "pass", "test@example.com")
+	if err == nil || err.Error() != "サインアップは現在無効です" {
+		t.Errorf("許可されていないはずのサインアップが成功しました: %v", err)
 	}
 }
