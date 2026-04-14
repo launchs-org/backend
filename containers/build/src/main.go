@@ -28,7 +28,7 @@ func main() {
 	echoServer.Use(middleware.Recover())
 
 	// サービスの初期化
-	buildService := services.NewBuildService()
+	buildService := services.NewBuildService(db)
 
 	// コントローラーの初期化
 	buildController := controllers.NewBuildController(buildService)
