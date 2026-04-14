@@ -5,7 +5,7 @@ import (
 	"build/services"
 	"log"
 	"net/http"
-	"github.com/launchs-org/backend/shared/models"
+	"shared/models"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"

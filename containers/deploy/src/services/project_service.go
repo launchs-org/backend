@@ -1,7 +1,7 @@
 package services
 
 import (
-	s_models "github.com/launchs-org/backend/shared/models"
+	s_models "shared/models"
 )
 
 // ProjectService プロジェクトに関するビジネスロジックを定義するインターフェース

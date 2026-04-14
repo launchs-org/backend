@@ -2,7 +2,7 @@ package services
 
 import (
 	repo "build/models"
-	s_models "github.com/launchs-org/backend/shared/models"
+	s_models "shared/models"
 )
 
 // BuildService ビルドとイメージ管理に関するビジネスロジックを定義するインターフェース

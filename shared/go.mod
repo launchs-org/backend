@@ -1,6 +1,6 @@
-module github.com/launchs-org/backend/shared
+module shared
 
-go 1.23.0
+go 1.26.1
 
 require (
 	gorm.io/driver/postgres v1.5.9

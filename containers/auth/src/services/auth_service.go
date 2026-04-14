@@ -4,7 +4,7 @@ import (
 	"errors"
 	"os"
 	repo "auth/models"
-	s_models "github.com/launchs-org/backend/shared/models"
+	s_models "shared/models"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
