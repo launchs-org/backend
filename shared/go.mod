@@ -1,6 +1,6 @@
 module shared
 
-go 1.26.1
+go 1.23.0
 
 require (
 	gorm.io/driver/postgres v1.5.9
