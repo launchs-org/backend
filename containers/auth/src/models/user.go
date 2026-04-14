@@ -1,7 +1,7 @@
 package models
 
 import (
-	sharedModels "shared/models"
+	sharedModels "github.com/launchs-org/backend/shared/models"
 )
 
 // CreateUser 新しいユーザーをデータベースに保存します

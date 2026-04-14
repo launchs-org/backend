@@ -1,4 +1,4 @@
-module shared
+module github.com/launchs-org/backend/shared
 
 go 1.23.0
 

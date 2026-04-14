@@ -5,7 +5,7 @@ import (
 	"deploy/services"
 	"log"
 	"net/http"
-	"shared/models"
+	"github.com/launchs-org/backend/shared/models"
 
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -28,8 +28,8 @@ func main() {
 	echoServer.Use(middleware.Recover())
 
 	// サービスの初期化
-	projectService := services.NewProjectService()
-	deploymentService := services.NewDeploymentService()
+	projectService := services.NewProjectService(db)
+	deploymentService := services.NewDeploymentService(db)
 
 	// コントローラーの初期化
 	projectController := controllers.NewProjectController(projectService)

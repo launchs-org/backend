@@ -1,8 +1,7 @@
 package services
 
 import (
-	repo "deploy/models"
-	s_models "shared/models"
+	s_models "github.com/launchs-org/backend/shared/models"
 
 	"gorm.io/gorm"
 )
