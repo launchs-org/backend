@@ -1,8 +1,11 @@
 package services
 
 import (
+	"errors"
 	repo "auth/models"
 	s_models "shared/models"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 // AuthService 認証とトークン発行に関するビジネスロジックを定義するインターフェース
@@ -54,13 +57,19 @@ func (service *authService) DeleteUser(userID string) error {
 
 // Login ユーザー名とパスワードを検証し、JWT トークンを発行します。
 func (service *authService) Login(username string, password string) (string, error) {
+	// ユーザーを検索
 	user, err := repo.GetUserByUsername(username)
 	if err != nil {
-		return "", err
+		return "", errors.New("無効なユーザー名またはパスワードです")
 	}
-	// パスワード検証ロジックなどは後ほど
-	_ = user
-	return "jwt-token", nil
+
+	// パスワードを比較 (bcryptを使用)
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
+		return "", errors.New("無効なユーザー名またはパスワードです")
+	}
+
+	// 認証成功時、トークンを発行
+	return "mock-jwt-token", nil
 }
 
 // ValidateToken 送信されたトークンの妥当性を検証します。
