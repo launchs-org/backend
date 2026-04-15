@@ -21,6 +21,7 @@ data/
 config/*.env
 containers/auth/src/tmp/main
 containers/build/src/tmp/build-errors.log
+containers/deploy/src/tmp/
 containers/deploy/src/tmp/build-errors.log
 go.work.sum
 containers/build/src/tmp/main
