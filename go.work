@@ -1,8 +1,9 @@
-go 1.25.3
+go 1.26.1
 
 use (
-	./shared
 	./containers/auth/src
 	./containers/build/src
 	./containers/deploy/src
+	./shared
 )
+

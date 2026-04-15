@@ -28,8 +28,8 @@ func main() {
 	echoServer.Use(middleware.Recover())
 
 	// サービスの初期化
-	projectService := services.NewProjectService()
-	deploymentService := services.NewDeploymentService()
+	projectService := services.NewProjectService(db)
+	deploymentService := services.NewDeploymentService(db)
 
 	// コントローラーの初期化
 	projectController := controllers.NewProjectController(projectService)

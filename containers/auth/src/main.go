@@ -41,8 +41,12 @@ func main() {
 	// V1 API グループ
 	apiV1 := echoServer.Group("/v1")
 	{
-		apiV1.POST("/login", authController.Login)
-		apiV1.GET("/validate", authController.ValidateToken)
+		authg := apiV1.Group("/auth")
+		{
+			authg.POST("/login", authController.Login)
+			authg.POST("/signup", authController.SignUp)
+			authg.GET("/validate", authController.ValidateToken)
+		}
 	}
 
 	echoServer.Logger.Fatal(echoServer.Start(":8080"))

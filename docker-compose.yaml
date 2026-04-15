@@ -57,12 +57,11 @@ services:
   auth:
     hostname: auth
     build:
-      context: ./containers/auth
-      dockerfile: dockerfile
+      context: .
+      dockerfile: ./containers/auth/dockerfile
       target: Develop
     volumes:
-      - ./containers/auth/src:/app/src
-      - ./shared:/app/src/shared
+      - .:/app
     tty: true
     restart: always
     depends_on:
@@ -72,12 +71,11 @@ services:
   build:
     hostname: build
     build:
-      context: ./containers/build
-      dockerfile: dockerfile
+      context: .
+      dockerfile: ./containers/build/dockerfile
       target: Develop
     volumes:
-      - ./containers/build/src:/app/src
-      - ./shared:/app/src/shared
+      - .:/app
     tty: true
     restart: always
     depends_on:
@@ -87,12 +85,11 @@ services:
   deploy:
     hostname: deploy
     build:
-      context: ./containers/deploy
-      dockerfile: dockerfile
+      context: .
+      dockerfile: ./containers/deploy/dockerfile
       target: Develop
     volumes:
-      - ./containers/deploy/src:/app/src
-      - ./shared:/app/src/shared
+      - .:/app
     tty: true
     restart: always
     depends_on:
