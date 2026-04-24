@@ -1,0 +1,5 @@
+config/auth.env
+config/app.env
+nginx/keys/
+openssl/jwtKeys/
+auth/icons/

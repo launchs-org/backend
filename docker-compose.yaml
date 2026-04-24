@@ -1,0 +1,70 @@
+services:
+  nginx:
+    hostname: nginx
+    image: nginx:latest
+    ports:
+        - 8947:8443
+    restart: always
+    tty: true
+    volumes:
+      - ./nginx/configs:/etc/nginx/conf.d/
+      - ./nginx/keys:/etc/nginx/keys
+      - ./nginx/statics:/etc/nginx/static/statics
+    depends_on:
+      - app
+      - auth
+  app:
+    build:
+      context: ./backend
+      dockerfile: dockerfile
+      target: develop
+    volumes:
+      - ./backend/src:/app
+    env_file:
+      - ./config/app.env
+      - ./openssl/jwtKeys/public.env
+    tty: true
+    restart: always
+    depends_on:
+      # マイグレーションが終わるまで
+      migrate:
+        condition: service_completed_successfully
+  auth:
+    image: ghcr.io/mattuu0/authbase/auth:latest
+    env_file:
+      - ./config/auth.env
+      - ./openssl/jwtKeys/private.env
+    restart: always
+    volumes:
+      - ./auth/icons:/assets/icons
+    depends_on:
+      # マイグレーションが終わるまで
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    image: ghcr.io/mattuu0/authbase/auth:latest
+    env_file:
+        - ./config/auth.env
+    command: ["/auth","migrate","-r"]
+
+  mysql:
+    hostname: db
+    image: mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      TZ: Asia/Tokyo
+    volumes:
+      - dbdata:/var/lib/mysql
+      - ./database/my.cnf:/etc/mysql/conf.d/my.cnf
+      - ./database/script/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "db", "-u", "root", "-proot" ]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  dbdata:
+    driver: local

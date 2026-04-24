@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ユーザー情報</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./styles/home.css">
+</head>
+<body>
+
+    <div class="user-info-container">
+        <h1>ユーザー情報</h1>
+
+        <div class="info-card">
+            <dl>
+                <dt>User ID:</dt>
+                <dd id="user-id"></dd>
+
+                <dt>Name:</dt>
+                <dd id="user-name"></dd>
+
+                <dt>Email:</dt>
+                <dd id="user-email"></dd>
+
+                <dt>Provider Code:</dt>
+                <dd id="prov-code"></dd>
+
+                <dt>Provider UID:</dt>
+                <dd id="prov-uid"></dd>
+            </dl>
+        </div>
+
+        <img src="" id="user-icon" alt="">
+
+        <div class="icon-selector">
+            <label for="file-input">アイコンを選択</label>
+            <input type="file" id="file-input" accept="image/*">
+            <button id="upload-button">アップロード</button>
+        </div>
+
+        <Button id="logout-button">ログアウト</Button>
+    </div>
+
+    <script src="./authbase/authbase.js"></script>
+    <script src="./scripts/home.js"></script>
+</body>
+</html>

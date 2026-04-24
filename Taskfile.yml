@@ -1,0 +1,91 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  GREETING: Hello, World!
+
+tasks:
+  # コンテナ落として全て削除
+  clean:
+    cmds:
+      - docker compose down --remove-orphans --rmi all --volumes
+    silent: true
+  
+  # コンテナ落とす
+  down:
+    cmds:
+      - docker compose down
+    silent: true
+  
+  # コンテナ起動
+  up:
+    cmds:
+      - docker compose up -d --build
+    silent: true
+
+  # auth にアタッチ
+  atauth:
+    cmds:
+      - docker compose logs auth
+      - docker compose attach auth
+
+  # データベース接続
+  dbshell:
+    cmds:
+      - docker compose exec {{.DBContainer}} mysql -u root -p {{.Database}} --password=$DBPassword
+    env:
+      DBPassword: root
+    vars:
+      # Database: maindb
+      Database: authdb
+      DBContainer: mysql
+    silent: true
+  
+  # データベースのリセット
+  dbreset:
+    cmds:
+      - docker compose down mysql --volumes --remove-orphans
+      - docker compose up mysql -d --build
+    silent: true
+  
+  # 初回セットアップ
+  setup:
+    cmds:
+      - echo "セットアップを開始します"
+      - echo "設定用のコンテナを生成しています"
+      - task: config
+      - echo "JWT鍵を生成しています"
+      - task: genkey
+      - echo "コンテナを起動しています"
+      - task: up
+    silent: true
+      # - task: dbreset
+      # - task: dashb
+  # dashb:
+  #   cmds:
+  #     - docker compose exec dashboard npm i --verbose --force
+  #     - docker compose exec dashboard npm run build
+  #     - docker compose logs -f auth
+
+  genkey:
+    cmds:
+      - cmd: docker run --rm -it -v .\\openssl\\jwtKeys:/jwtkeys -v .\\nginx\\keys:/sslkeys {{.Build_Image}}
+        platforms: [windows]
+      - cmd: docker run --rm -it -v ./openssl/jwtKeys:/jwtkeys -v ./nginx/keys:/sslkeys {{.Build_Image}}
+        platforms: [linux,darwin]
+    vars:
+      Build_Image:
+        sh: docker build -q ./openssl
+  
+  config:
+    cmds:
+      - cmd: docker run --rm -it -v .\\config:/config/data {{.Build_Image}}
+        platforms: [windows]
+      - cmd: docker run --rm -it -v ./config:/config/data {{.Build_Image}}
+        platforms: [linux,darwin]
+      - echo "設定用のイメージを削除しています"
+      - docker rmi -f {{.Build_Image}}
+    vars:
+      Build_Image:
+        sh: docker build -q ./config
