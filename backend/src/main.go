@@ -1,6 +1,10 @@
 package main
 
 import (
+	"backend/database"
+	"backend/deploy/batch"
+	"backend/deploy/kubernetes"
+	"backend/deploy/routes"
 	"backend/middlewares"
 	"net/http"
 
@@ -9,6 +13,14 @@ import (
 )
 
 func main() {
+	// データベース初期化
+	database.Init()
+
+	// Kubernetes クライアント初期化
+	if err := kubernetes.Init(); err != nil {
+		panic("failed to initialize kubernetes client: " + err.Error())
+	}
+
 	router := echo.New()
 	router.Use(middleware.RequestLogger())
 	router.Use(middleware.Recover())
@@ -16,13 +28,15 @@ func main() {
 	// ミドルウェア初期化
 	middlewares.Init()
 
-	router.GET("/", func(ctx *echo.Context) error {
-		return ctx.String(http.StatusOK, "Hello, World!")
-	})
+	// ログローテーションバッチの開始
+	batch.StartLogRotation()
 
-	router.GET("/authed", middlewares.RequireAuth(func(ctx *echo.Context) error {
-		return ctx.JSON(http.StatusOK,map[string]string{"message": "authed"})
-	}))
+	// デプロイ管理ルートの初期化
+	routes.InitDeployRoutes(router)
+
+	router.GET("/", func(ctx *echo.Context) error {
+		return (*ctx).String(http.StatusOK, "Hello, World!")
+	})
 
 	if err := router.Start("0.0.0.0:8090"); err != nil {
 		router.Logger.Error("failed to start server", "error", err)
