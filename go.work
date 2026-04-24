@@ -1,9 +1,0 @@
-go 1.26.1
-
-use (
-	./containers/auth/src
-	./containers/build/src
-	./containers/deploy/src
-	./shared
-)
-
