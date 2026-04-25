@@ -3,7 +3,7 @@ services:
     hostname: nginx
     image: nginx:latest
     ports:
-        - 8947:8443
+        - 8950:8443
     restart: always
     tty: true
     volumes:
@@ -13,6 +13,26 @@ services:
     depends_on:
       - app
       - auth
+  frontend:
+    # ホスト名設定
+    hostname: frontend
+
+    # イメージ
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development-dependencies-env
+
+    # ディレクトリ共有
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    
+    # ttyを有効化
+    tty: true
+
+    restart: always
+
   app:
     build:
       context: ./backend
