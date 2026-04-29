@@ -1,31 +1,49 @@
 package main
 
 import (
-	"backend/database"
-	"backend/middlewares"
-	"net/http"
-
-	"github.com/labstack/echo/v5"
-	"github.com/labstack/echo/v5/middleware"
+	"backend/database" // データベース
+	"backend/middlewares" // ミドルウェア
+	"backend/model"    // モデル
+	"net/http"         // HTTP
+	"github.com/labstack/echo/v5" // Echo
+	"github.com/labstack/echo/v5/middleware" // Echoミドルウェア
 )
 
+// main はアプリケーションのエントリーポイントです
 func main() {
-	// データベース初期化
+	// データベース接続の初期化
 	database.Init()
+	// Kubernetes クライアントの初期化
+	database.InitK8s()
 
+	// データベースの自動マイグレーションを実行 (Projectテーブルの作成・更新)
+	if err := database.DB.AutoMigrate(&model.Project{}); err != nil {
+		// マイグレーション失敗時はパニック
+		panic("failed to migrate database: " + err.Error())
+	}
+
+	// Echo インスタンスを作成
 	router := echo.New()
+	// リクエストログ出力ミドルウェアを適用
 	router.Use(middleware.RequestLogger())
+	// パニック復帰ミドルウェアを適用
 	router.Use(middleware.Recover())
 
-	// ミドルウェア初期化
+	// ミドルウェアのグローバル初期化
 	middlewares.Init()
 
+	// ルーティング設定の初期化
+	InitRouter(router)
 
+	// ルートパスのエンドポイント
 	router.GET("/", func(ctx *echo.Context) error {
+		// Welcomeメッセージを返す
 		return (*ctx).String(http.StatusOK, "Hello, World!")
 	})
 
+	// ポート 8090 でサーバーを起動
 	if err := router.Start("0.0.0.0:8090"); err != nil {
+		// 起動失敗時はログ出力
 		router.Logger.Error("failed to start server", "error", err)
 	}
 }
