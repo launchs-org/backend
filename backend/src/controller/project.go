@@ -71,3 +71,87 @@ func CreateProject(ctx *echo.Context) error {
 		"data": project, // 作成されたプロジェクトデータ
 	})
 }
+// GetProject はプロジェクトの詳細を取得するエンドポイントのハンドラーです
+func GetProject(ctx *echo.Context) error {
+	// パスパラメータからプロジェクトIDを取得
+	id := (*ctx).Param("id")
+
+	// コンテキストからユーザーIDを取得
+	userID, ok := (*ctx).Get("UserID").(string)
+	// 取得に失敗した場合
+	if !ok {
+		// 認証エラーとして401を返す
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED", // エラーコード
+			"message": "認証に失敗しました", // エラーメッセージ
+		})
+	}
+
+	// プロジェクト取得サービスを呼び出す
+	project, err := service.GetProjectByID((*ctx).Request().Context(), id, userID)
+
+	// サービス実行中にエラーが発生した場合
+	if err != nil {
+		// エラーの種類に応じてステータスコードを分ける
+		switch err {
+		case service.ErrProjectNotFound:
+			// 見つからない場合は404を返す
+			return (*ctx).JSON(http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND", // エラーコード
+				"message": "プロジェクトが見つかりません", // エラーメッセージ
+			})
+		case service.ErrForbidden:
+			// 権限がない場合は403を返す
+			return (*ctx).JSON(http.StatusForbidden, map[string]string{
+				"code":    "FORBIDDEN", // エラーコード
+				"message": "このプロジェクトへのアクセス権限がありません", // エラーメッセージ
+			})
+		default:
+			// その他のエラーは500を返す
+			return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR", // エラーコード
+				"message": err.Error(),       // エラー内容
+			})
+		}
+	}
+
+	// 正常に取得できた場合は200ステータスとデータを返す
+	return (*ctx).JSON(http.StatusOK, map[string]interface{}{
+		"data": project, // プロジェクトデータ
+	})
+}
+
+// ListProjects はプロジェクト一覧を取得するエンドポイントのハンドラーです
+func ListProjects(ctx *echo.Context) error {
+	// コンテキストからユーザーIDを取得
+	userID, ok := (*ctx).Get("UserID").(string)
+	// 取得に失敗した場合
+	if !ok {
+		// 認証エラーとして401を返す
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED", // エラーコード
+			"message": "認証に失敗しました", // エラーメッセージ
+		})
+	}
+
+	// プロジェクト一覧取得サービスを呼び出す
+	projects, err := service.ListProjects((*ctx).Request().Context(), userID)
+
+	// サービス実行中にエラーが発生した場合
+	if err != nil {
+		// 500エラーを返す
+		return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR", // エラーコード
+			"message": err.Error(),       // エラー内容
+		})
+	}
+
+	// 正常に取得できた場合は200ステータスとデータを返す
+	// デザインに合わせて items と total を含む形式にする
+	return (*ctx).JSON(http.StatusOK, map[string]interface{}{
+		"data": map[string]interface{}{
+			"items": projects,       // プロジェクト一覧
+			"total": len(projects), // 合計件数
+		},
+	})
+}

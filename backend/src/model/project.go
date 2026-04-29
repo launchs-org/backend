@@ -38,3 +38,32 @@ func GetProjectByName(name string) (*Project, error) {
 	// 取得したプロジェクトを返す
 	return &project, nil
 }
+// GetProjectByID はIDからプロジェクトを取得します
+func GetProjectByID(id string) (*Project, error) {
+	// 取得結果を格納する変数
+	var project Project
+	// IDが一致するプロジェクトを1件取得する
+	err := database.DB.Where("id = ?", id).First(&project).Error
+	// エラーがある場合 (見つからない場合を含む)
+	if err != nil {
+		// nilとエラーを返す
+		return nil, err
+	}
+	// 取得したプロジェクトを返す
+	return &project, nil
+}
+
+// GetProjectsByOwnerID は所有者IDからプロジェクト一覧を取得します
+func GetProjectsByOwnerID(ownerID string) ([]Project, error) {
+	// 取得結果を格納するスライス
+	var projects []Project
+	// 所有者IDが一致するプロジェクトを全件取得する (ソフトデリートされていないもの)
+	err := database.DB.Where("owner_id = ?", ownerID).Find(&projects).Error
+	// エラーがある場合
+	if err != nil {
+		// 空のスライスとエラーを返す
+		return nil, err
+	}
+	// 取得したプロジェクト一覧を返す
+	return projects, nil
+}
