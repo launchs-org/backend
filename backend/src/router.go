@@ -29,10 +29,7 @@ func InitRouter(router *echo.Echo) {
 			projectsGroup.GET("/:id", controller.GetProject)
 
 			// DELETE /v1/projects/:id - プロジェクトの削除 (未実装)
-			projectsGroup.DELETE("/:id", func(c *echo.Context) error {
-				// モックレスポンス
-				return c.String(http.StatusOK, "Hello, World!")
-			})
+			projectsGroup.DELETE("/:id", controller.DeleteProject)
 
 			// POST /v1/projects/:id/containers - コンテナの作成とビルド (未実装)
 			projectsGroup.POST("/:id/containers", func(c *echo.Context) error {

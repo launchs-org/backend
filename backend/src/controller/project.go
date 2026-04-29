@@ -155,3 +155,27 @@ func ListProjects(ctx *echo.Context) error {
 		},
 	})
 }
+
+// プロジェクトを削除するコントローラー
+func DeleteProject(ctx *echo.Context) error {
+	// パスパラメータからプロジェクトIDを取得
+	id := (*ctx).Param("id")
+
+	// コンテキストからユーザーIDを取得
+	OwnerID := (*ctx).Get("UserID").(string)
+
+	// プロジェクト削除サービスを呼び出す
+	err := service.DeleteProject((*ctx).Request().Context(), id, OwnerID)
+
+	// サービス実行中にエラーが発生した場合
+	if err != nil {
+		// 500エラーを返す
+		return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR", // エラーコード
+			"message": err.Error(),       // エラー内容
+		})
+	}
+
+	// 正常に削除できた場合は204ステータスを返す
+	return (*ctx).NoContent(http.StatusNoContent)
+}

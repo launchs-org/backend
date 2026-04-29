@@ -67,3 +67,9 @@ func GetProjectsByOwnerID(ownerID string) ([]Project, error) {
 	// 取得したプロジェクト一覧を返す
 	return projects, nil
 }
+
+// プロジェクトを削除する関数
+func DeleteProject(id string) error {
+	// プロジェクトを削除
+	return database.DB.Where("id = ?", id).Delete(&Project{}).Error
+}

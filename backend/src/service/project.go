@@ -124,3 +124,32 @@ func ListProjects(ctx context.Context, userID string) ([]model.Project, error) {
 	// プロジェクト一覧を返す
 	return projects, nil
 }
+
+
+// プロジェクトを削除するサービス
+func DeleteProject(ctx context.Context, id string, userID string) error {
+	// データベースからIDでプロジェクトを取得
+	project, err := model.GetProjectByID(id)
+	// エラーが発生した場合
+	if err != nil {
+		// 見つからない場合は ErrProjectNotFound を返す
+		return ErrProjectNotFound
+	}
+
+	// 所有者チェック (他のユーザーのプロジェクトにはアクセスできない)
+	if project.OwnerID != userID {
+		// 権限エラーを返す
+		return ErrForbidden
+	}
+
+	// Kubernetes API を呼び出して Namespace を実際に削除
+	err = database.K8sClientset.CoreV1().Namespaces().Delete(ctx, project.Namespace, metav1.DeleteOptions{})
+	// K8sリソース作成に失敗した場合
+	if err != nil {
+		// エラーをラップして返す
+		return fmt.Errorf("Kubernetes Namespace の削除に失敗しました: %w", err)
+	}
+
+	// プロジェクトを削除
+	return model.DeleteProject(id)
+}
