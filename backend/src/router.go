@@ -19,20 +19,14 @@ func InitRouter(router *echo.Echo) {
 		// プロジェクト関連のリソースグループを作成する
 		projectsGroup := v1Group.Group("/projects")
 		{
-			// GET /v1/projects - プロジェクト一覧を取得する (未実装)
-			projectsGroup.GET("/", func(c *echo.Context) error {
-				// モックレスポンス
-				return c.String(http.StatusOK, "Hello, World!")
-			})
+			// GET /v1/projects - プロジェクト一覧を取得する
+			projectsGroup.GET("/", controller.ListProjects)
 
 			// POST /v1/projects - プロジェクトを新規作成する
 			projectsGroup.POST("/", controller.CreateProject)
 
-			// GET /v1/projects/:id - プロジェクトの詳細取得 (未実装)
-			projectsGroup.GET("/:id", func(c *echo.Context) error {
-				// モックレスポンス
-				return c.String(http.StatusOK, "Hello, World!")
-			})
+			// GET /v1/projects/:id - プロジェクトの詳細取得
+			projectsGroup.GET("/:id", controller.GetProject)
 
 			// DELETE /v1/projects/:id - プロジェクトの削除 (未実装)
 			projectsGroup.DELETE("/:id", func(c *echo.Context) error {

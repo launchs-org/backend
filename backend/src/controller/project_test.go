@@ -133,3 +133,115 @@ func TestCreateProjectConflictController(t *testing.T) {
 		t.Errorf("status code = %v, want %v", rec.Code, http.StatusConflict)
 	}
 }
+
+// TestGetProjectController は GetProject ハンドラーのテストです
+func TestGetProjectController(t *testing.T) {
+	// 1. 初期化
+	db, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db.AutoMigrate(&model.Project{})
+	database.DB = db
+	e := echo.New()
+
+	// 2. テスト用データを投入
+	p1 := model.Project{ID: "proj-1", Name: "my-app", OwnerID: "user-1"}
+	model.CreateProject(&p1)
+
+	// 3. テストケース
+	tests := []struct {
+		name       string
+		projectID  string
+		userID     string
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "正常系: プロジェクトが取得できること",
+			projectID:  "proj-1",
+			userID:     "user-1",
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "異常系: 他人のプロジェクトにアクセス (403)",
+			projectID:  "proj-1",
+			userID:     "user-other",
+			wantStatus: http.StatusForbidden,
+			wantCode:   "FORBIDDEN",
+		},
+		{
+			name:       "異常系: 存在しないプロジェクト (404)",
+			projectID:  "not-exists",
+			userID:     "user-1",
+			wantStatus: http.StatusNotFound,
+			wantCode:   "NOT_FOUND",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/v1/projects/"+tt.projectID, nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetPathValues(echo.PathValues{{Name: "id", Value: tt.projectID}})
+			if tt.userID != "" {
+				c.Set("UserID", tt.userID)
+			}
+
+			GetProject(c)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status code = %v, want %v", rec.Code, tt.wantStatus)
+			}
+
+			if tt.wantCode != "" {
+				var resp map[string]string
+				json.Unmarshal(rec.Body.Bytes(), &resp)
+				if resp["code"] != tt.wantCode {
+					t.Errorf("error code = %v, want %v", resp["code"], tt.wantCode)
+				}
+			}
+		})
+	}
+}
+
+// TestListProjectsController は ListProjects ハンドラーのテストです
+func TestListProjectsController(t *testing.T) {
+	// 1. 初期化
+	db, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db.AutoMigrate(&model.Project{})
+	database.DB = db
+	e := echo.New()
+
+	// 2. テスト用データを投入
+	model.CreateProject(&model.Project{ID: "p1", Name: "app-1", OwnerID: "user-1"})
+	model.CreateProject(&model.Project{ID: "p2", Name: "app-2", OwnerID: "user-1"})
+	model.CreateProject(&model.Project{ID: "p3", Name: "app-3", OwnerID: "user-2"})
+
+	// 3. テスト実行
+	t.Run("正常系: 自分のプロジェクトのみ取得されること", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/projects/", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.Set("UserID", "user-1")
+
+		ListProjects(c)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status code = %v, want %v", rec.Code, http.StatusOK)
+		}
+
+		var resp struct {
+			Data struct {
+				Items []model.Project `json:"items"`
+				Total int             `json:"total"`
+			} `json:"data"`
+		}
+		json.Unmarshal(rec.Body.Bytes(), &resp)
+
+		if resp.Data.Total != 2 {
+			t.Errorf("total = %v, want 2", resp.Data.Total)
+		}
+		if len(resp.Data.Items) != 2 {
+			t.Errorf("items count = %v, want 2", len(resp.Data.Items))
+		}
+	})
+}

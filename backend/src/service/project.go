@@ -21,6 +21,10 @@ var (
 	ErrInvalidProjectName   = errors.New("INVALID_PROJECT_NAME")
 	// プロジェクト名重複のエラー
 	ErrProjectAlreadyExists = errors.New("PROJECT_ALREADY_EXISTS")
+	// プロジェクトが見つからないエラー
+	ErrProjectNotFound      = errors.New("NOT_FOUND")
+	// 権限がないエラー
+	ErrForbidden            = errors.New("FORBIDDEN")
 )
 
 // CreateProjectInput はプロジェクト作成の入力データです
@@ -85,4 +89,38 @@ func CreateProject(ctx context.Context, input CreateProjectInput) (*model.Projec
 
 	// 作成したプロジェクトを返す
 	return project, nil
+}
+
+// GetProjectByID はプロジェクトの詳細を取得します
+func GetProjectByID(ctx context.Context, id string, userID string) (*model.Project, error) {
+	// データベースからIDでプロジェクトを取得
+	project, err := model.GetProjectByID(id)
+	// エラーが発生した場合
+	if err != nil {
+		// 見つからない場合は ErrProjectNotFound を返す
+		return nil, ErrProjectNotFound
+	}
+
+	// 所有者チェック (他のユーザーのプロジェクトにはアクセスできない)
+	if project.OwnerID != userID {
+		// 権限エラーを返す
+		return nil, ErrForbidden
+	}
+
+	// プロジェクトを返す
+	return project, nil
+}
+
+// ListProjects はユーザーが所有するプロジェクト一覧を取得します
+func ListProjects(ctx context.Context, userID string) ([]model.Project, error) {
+	// データベースから所有者IDでプロジェクト一覧を取得
+	projects, err := model.GetProjectsByOwnerID(userID)
+	// エラーが発生した場合
+	if err != nil {
+		// 内部エラーとしてそのまま返す (実際は空の場合もエラーにならない想定だが、DBエラー等のため)
+		return nil, err
+	}
+
+	// プロジェクト一覧を返す
+	return projects, nil
 }
