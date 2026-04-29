@@ -40,6 +40,7 @@ services:
       target: develop
     volumes:
       - ./backend/src:/app
+      - /root/.kube/config:/root/.kube/config
     env_file:
       - ./config/app.env
       - ./openssl/jwtKeys/public.env
