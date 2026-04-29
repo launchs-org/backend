@@ -3,3 +3,5 @@ config/app.env
 nginx/keys/
 openssl/jwtKeys/
 auth/icons/
+
+backend/src/tmp/
