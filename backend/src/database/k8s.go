@@ -12,7 +12,7 @@ import (
 )
 
 // K8sClientset は Kubernetes クライアントセットを保持するグローバル変数です
-var K8sClientset *kubernetes.Clientset
+var K8sClientset kubernetes.Interface
 
 // InitK8s は Kubernetes クライアントを初期化します
 func InitK8s() {
