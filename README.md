@@ -145,12 +145,9 @@ DB_PASSWORD=example
 DB_NAME=acp
 ```
 
-## 2. コンテナ内でのテスト実行
-
-ローカルに Go 環境がない場合や、よりクリーンな環境でテストしたい場合は、専用のテストコンテナを使用できます。
+## 2. テスト実行
 
 ### 実行方法
 ```bash
-task test:docker
+docker compose exec -T app go test ./controller/... ./service/... ./model/...
 ```
-このコマンドは `test` コンテナをビルド（初回のみ）し、コンテナ内から `db` サービスに接続してテストを実行します。
