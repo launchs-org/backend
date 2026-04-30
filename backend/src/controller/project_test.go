@@ -4,15 +4,16 @@ import (
 	"backend/database" // データベースパッケージ
 	"backend/model"    // モデルパッケージ
 	"backend/service"  // サービスパッケージ
-	"bytes"           // バイト操作
+	"bytes"            // バイト操作
 	"encoding/json"    // JSON
-	"net/http"         // HTTP
+	"log"
+	"net/http"          // HTTP
 	"net/http/httptest" // HTTPテスト
-	"testing"          // テストパッケージ
+	"testing"           // テストパッケージ
 
-	"github.com/labstack/echo/v5" // Echo
-	"gorm.io/driver/sqlite"      // SQLite
-	"gorm.io/gorm"               // GORM
+	"github.com/labstack/echo/v5"      // Echo
+	"gorm.io/driver/sqlite"            // SQLite
+	"gorm.io/gorm"                     // GORM
 	"k8s.io/client-go/kubernetes/fake" // K8sフェイク
 )
 
@@ -242,6 +243,51 @@ func TestListProjectsController(t *testing.T) {
 		}
 		if len(resp.Data.Items) != 2 {
 			t.Errorf("items count = %v, want 2", len(resp.Data.Items))
+		}
+	})
+}
+
+// プロジェクト削除をテスト
+func TestDeleteProjectController(t *testing.T) {
+	// 1. 初期化
+	db, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	db.AutoMigrate(&model.Project{})
+	database.DB = db
+	database.K8sClientset = fake.NewSimpleClientset()
+	e := echo.New()
+
+	// 2. テスト用データを投入
+	model.CreateProject(&model.Project{ID: "p1", Name: "app-1", OwnerID: "user-1"})
+
+	// 3. テスト実行
+	t.Run("正常系: プロジェクトが削除できること", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodDelete, "/v1/projects/p1", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetPathValues(echo.PathValues{{Name: "id", Value: "p1"}})
+		c.Set("UserID", "user-1")
+
+		DeleteProject(c)
+
+		if rec.Code != http.StatusOK {
+			log.Println(rec.Body.String())
+			t.Errorf("status code = %v, want %v", rec.Code, http.StatusOK)
+		}
+	})
+
+	// 存在しないプロジェクトを削除する
+	t.Run("異常系: 存在しないプロジェクト (500)", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodDelete, "/v1/projects/not-exists", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetPathValues(echo.PathValues{{Name: "id", Value: "not-exists"}})
+		c.Set("UserID", "user-1")
+
+		DeleteProject(c)
+
+		if rec.Code != http.StatusInternalServerError {
+			log.Println(rec.Body.String())
+			t.Errorf("status code = %v, want %v", rec.Code, http.StatusInternalServerError)
 		}
 	})
 }
