@@ -94,7 +94,7 @@ BUILD_TIMEOUT=10m
 # K8s Job Pod がこのサーバーに tar を送信してくる URL
 # K8s Service 経由の内部 DNS を使う
 # 例: http://launchs-backend.default.svc.cluster.local:8080/internal/upload
-UPLOAD_ENDPOINT=http://launchs-backend.default.svc.cluster.local:8080/internal/upload
+UPLOAD_ENDPOINT=https://10.10.11.8:8090/app/internal/upload
 # tar 受取時の Bearer 認証トークン（Job Pod → このサーバー間の認証）
 UPLOAD_TOKEN=internal-secret-token
 # tar 一時保存ディレクトリ（プッシュ後に削除）

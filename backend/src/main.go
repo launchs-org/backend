@@ -1,11 +1,12 @@
 package main
 
 import (
-	"backend/database" // データベース
+	"backend/database"    // データベース
 	"backend/middlewares" // ミドルウェア
-	"backend/model"    // モデル
-	"net/http"         // HTTP
-	"github.com/labstack/echo/v5" // Echo
+	"backend/model"       // モデル
+	"net/http" // HTTP
+
+	"github.com/labstack/echo/v5"            // Echo
 	"github.com/labstack/echo/v5/middleware" // Echoミドルウェア
 )
 
@@ -16,8 +17,14 @@ func main() {
 	// Kubernetes クライアントの初期化
 	database.InitK8s()
 
-	// データベースの自動マイグレーションを実行 (Projectテーブルの作成・更新)
-	if err := database.DB.AutoMigrate(&model.Project{}); err != nil {
+	// データベースの自動マイグレーションを実行 (各種テーブルの作成・更新)
+	if err := database.DB.AutoMigrate(
+		&model.Project{},
+		&model.Container{},
+		&model.BuildJob{},
+		&model.Image{},
+		&model.Service{},
+	); err != nil {
 		// マイグレーション失敗時はパニック
 		panic("failed to migrate database: " + err.Error())
 	}
