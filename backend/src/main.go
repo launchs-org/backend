@@ -29,6 +29,7 @@ func main() {
 		&model.BuildJob{},
 		&model.Image{},
 		&model.Service{},
+		&model.Ingress{},
 	); err != nil {
 		// マイグレーション失敗時はパニック
 		panic("failed to migrate database: " + err.Error())

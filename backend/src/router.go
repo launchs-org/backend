@@ -93,23 +93,14 @@ func InitRouter(router *echo.Echo) {
 				return c.String(http.StatusOK, "Hello, World!")
 			})
 
-			// PATCH /v1/containers/:id/service - サービス設定更新 (未実装)
-			containersGroup.PATCH("/:id/service", func(c *echo.Context) error {
-				// モックレスポンス
-				return c.String(http.StatusOK, "Hello, World!")
-			})
+			// PATCH /v1/containers/:id/service - サービス設定更新
+			containersGroup.PATCH("/:id/service", controller.UpdateService)
 
-			// POST /v1/containers/:id/ingress - Ingress作成 (未実装)
-			containersGroup.POST("/:id/ingress", func(c *echo.Context) error {
-				// モックレスポンス
-				return c.String(http.StatusOK, "Hello, World!")
-			})
+			// POST /v1/containers/:id/ingress - Ingress作成
+			containersGroup.POST("/:id/ingress", controller.CreateIngress)
 
-			// DELETE /v1/containers/:id/ingress - Ingress削除 (未実装)
-			containersGroup.DELETE("/:id/ingress", func(c *echo.Context) error {
-				// モックレスポンス
-				return c.String(http.StatusOK, "Hello, World!")
-			})
+			// DELETE /v1/containers/:id/ingress - Ingress削除
+			containersGroup.DELETE("/:id/ingress", controller.DeleteIngress)
 		}
 
 		// ビルドジョブ関連のグループ

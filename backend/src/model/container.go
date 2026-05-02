@@ -23,6 +23,8 @@ type Container struct {
 	Status        string    `gorm:"default:'Stopped'" json:"status"`           // ステータス
 	CreatedAt     time.Time `json:"created_at"`                                // 作成日時
 	UpdatedAt     time.Time `json:"updated_at"`                                // 更新日時
+	Service       *Service  `gorm:"foreignKey:ContainerID" json:"service"`         // サービス設定
+	Ingress       *Ingress  `gorm:"foreignKey:ContainerID" json:"ingress"`         // Ingress設定
 }
 
 // GetContainerCountByProjectIDAndName はプロジェクトIDとコンテナ名からコンテナの数を取得します
@@ -59,7 +61,7 @@ func UpdateContainerStatus(id, status string) error {
 // GetContainerByID はIDからコンテナを取得します
 func GetContainerByID(id string) (*Container, error) {
 	var container Container
-	err := database.DB.Where("id = ?", id).First(&container).Error
+	err := database.DB.Preload("Service").Preload("Ingress").Where("id = ?", id).First(&container).Error
 	if err != nil {
 		return nil, err
 	}

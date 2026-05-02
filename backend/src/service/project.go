@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid" // UUID生成
 	corev1 "k8s.io/api/core/v1" // K8s API
+	networkingv1 "k8s.io/api/networking/v1" // K8s Networking API
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // K8s Meta API
 )
 
@@ -81,6 +82,52 @@ func CreateProject(ctx context.Context, input CreateProjectInput) (*model.Projec
 		// エラーをラップして返す
 		return nil, fmt.Errorf("Kubernetes Namespace の作成に失敗しました: %w", err)
 	}
+
+	// NetworkPolicy を作成 (traefik, cloudflared, 自身のnamespaceからのアクセスを許可)
+	netPol := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "allow-traefik-cloudflared-local",
+			Namespace: namespace,
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{}, // 全てのPod
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeIngress,
+				networkingv1.PolicyTypeEgress,
+			},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": "traefik",
+								},
+							},
+						},
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": "cloudflared",
+								},
+							},
+						},
+						{
+							NamespaceSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": namespace,
+								},
+							},
+						},
+					},
+				},
+			},
+			Egress: []networkingv1.NetworkPolicyEgressRule{
+				{}, // 全ての宛先への通信を許可
+			},
+		},
+	}
+	_, _ = database.K8sClientset.NetworkingV1().NetworkPolicies(namespace).Create(ctx, netPol, metav1.CreateOptions{})
 
 	// データベースにプロジェクト情報を保存
 	if err := model.CreateProject(project); err != nil {

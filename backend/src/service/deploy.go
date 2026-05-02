@@ -106,6 +106,23 @@ func deployToKubernetes(containerID string, imageRef string) {
 		if d.Status.ReadyReplicas == *deployment.Spec.Replicas {
 			model.UpdateContainerStatus(containerID, "Running")
 			fmt.Printf("deployment %s is running\n", container.Name)
+
+			// Serviceを同期 (有効かつポート設定がある場合)
+			svc, err := model.GetServiceByContainerID(containerID)
+			if err == nil {
+				if svc.IsActive {
+					var ports []ServicePort
+					_ = json.Unmarshal([]byte(svc.Ports), &ports)
+					if len(ports) > 0 {
+						_, _ = syncK8sService(ctx, namespace, container.Name, svc.Type, ports)
+					} else {
+						_ = deleteK8sService(ctx, namespace, container.Name)
+					}
+				} else {
+					// 非有効時は削除
+					_ = deleteK8sService(ctx, namespace, container.Name)
+				}
+			}
 			return
 		}
 	}
