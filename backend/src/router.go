@@ -9,6 +9,9 @@ import (
 
 // InitRouter はルーターを初期化する関数です
 func InitRouter(router *echo.Echo) {
+	// 内部用エンドポイント (tarアップロード)
+	router.POST("/internal/upload", controller.UploadTar)
+
 	// API V1用のグループを作成する
 	v1Group := router.Group("/v1")
 	// V1グループ全体に認証ミドルウェアを適用する
@@ -31,11 +34,8 @@ func InitRouter(router *echo.Echo) {
 			// DELETE /v1/projects/:id - プロジェクトの削除 (未実装)
 			projectsGroup.DELETE("/:id", controller.DeleteProject)
 
-			// POST /v1/projects/:id/containers - コンテナの作成とビルド (未実装)
-			projectsGroup.POST("/:id/containers", func(c *echo.Context) error {
-				// モックレスポンス
-				return c.String(http.StatusOK, "Hello, World!")
-			})
+			// POST /v1/projects/:id/containers - コンテナの作成とビルド
+			projectsGroup.POST("/:id/containers", controller.CreateContainer)
 
 			// GET /v1/projects/:id/histories - プロジェクトのスナップショット一覧 (未実装)
 			projectsGroup.GET("/:id/histories", func(c *echo.Context) error {

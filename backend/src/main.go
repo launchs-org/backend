@@ -16,8 +16,14 @@ func main() {
 	// Kubernetes クライアントの初期化
 	database.InitK8s()
 
-	// データベースの自動マイグレーションを実行 (Projectテーブルの作成・更新)
-	if err := database.DB.AutoMigrate(&model.Project{}); err != nil {
+	// データベースの自動マイグレーションを実行 (各種テーブルの作成・更新)
+	if err := database.DB.AutoMigrate(
+		&model.Project{},
+		&model.Container{},
+		&model.BuildJob{},
+		&model.Image{},
+		&model.Service{},
+	); err != nil {
 		// マイグレーション失敗時はパニック
 		panic("failed to migrate database: " + err.Error())
 	}

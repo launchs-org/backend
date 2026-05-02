@@ -265,13 +265,14 @@ func tarPushContainer(cfg BuildConfig, res corev1.ResourceRequirements, jobID st
 		Args: []string{
 			`apk add --no-cache curl
 until [ -f /workspace/build.done ]; do sleep 3; done
-curl --fail --max-time 300 \
+curl -k --fail \
   -X POST "${UPLOAD_URL}" \
   -H "Authorization: Bearer ${UPLOAD_TOKEN}" \
   -H "X-Job-Id: ${JOB_ID}" \
   -H "X-Image-Name: ${IMAGE_NAME}" \
   -H "X-Image-Tag: ${IMAGE_TAG}" \
   -H "Content-Type: application/octet-stream" \
+  -H "Transfer-Encoding: chunked" \
   --data-binary @/workspace/output.tar`,
 		},
 		// SecurityContext: &corev1.SecurityContext{
