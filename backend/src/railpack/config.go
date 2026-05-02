@@ -39,6 +39,9 @@ type BuildConfig struct {
 	// ── タイムアウト ─────────────────────────────────────────
 	// Timeout: ビルド全体のタイムアウト (省略時: 10分)
 	Timeout time.Duration
+
+	// JobID: Kubernetes Job の識別子に使用するID (省略時は自動生成)
+	JobID string
 }
 
 // ResourceConfig は各コンテナのリソース制限設定です。

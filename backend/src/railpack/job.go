@@ -39,7 +39,10 @@ func createJob(ctx context.Context, clientset *kubernetes.Clientset, cfg BuildCo
 		resource.BinarySI,
 	)
 
-	jobID    := uuid.New().String()
+	jobID := cfg.JobID
+	if jobID == "" {
+		jobID = uuid.New().String()
+	}
 	jobName  := "railpack-" + jobID
 	deadline := int64(cfg.Timeout.Seconds())
 
