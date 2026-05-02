@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"github.com/btcsuite/btcutil/base58"
+
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -138,7 +141,7 @@ func deleteK8sService(ctx context.Context, namespace, name string) error {
 func syncK8sService(ctx context.Context, namespace, name, svcType string, ports []ServicePort) (*corev1.Service, error) {
 	// K8sクライアントを取得
 	clientset := database.K8sClientset.(*kubernetes.Clientset)
-	
+
 	// K8s用のポート設定に変換
 	var k8sPorts []corev1.ServicePort
 	// 各ポート設定をループ
@@ -215,8 +218,14 @@ func CreateIngress(ctx context.Context, containerID, ownerID string, httpPort in
 		return nil, errors.New("ingress already exists for this container")
 	}
 
+	// sha256にする
+	hasher := sha256.Sum256([]byte(fmt.Sprintf("%s-%s", project.ID, container.ID)))
+	//sha256をbase58に変換
+	encoded := base58.Encode(hasher[:])
+
 	// 4. サブドメインを生成 (例: {project}-{container}.launchs.org)
-	subdomain := fmt.Sprintf("%s-%s.launchs.org", project.Name, container.Name)
+	// subdomain := fmt.Sprintf("%s-%s.launchs.org", project.Name, container.Name)
+	subdomain := fmt.Sprintf("%s.launchs.org", encoded)
 
 	// 5. DBにレコードを作成
 	ing := &model.Ingress{
@@ -247,55 +256,55 @@ func CreateIngress(ctx context.Context, containerID, ownerID string, httpPort in
 }
 
 func syncK8sIngressRoute(ctx context.Context, namespace, name, host, path string, port int) error {
-    // Dynamic Clientを取得 (事前に database.DynamicClient として初期化しておく)
-    client := database.K8sDynamicClient // dynamic.Interface
-    
-    // IngressRoute のリソース定義 (GVR)
-    resourceGVR := schema.GroupVersionResource{
-        Group:    "traefik.io",
-        Version:  "v1alpha1",
-        Resource: "ingressroutes",
-    }
-	
-    // Unstructured (汎用構造体) で IngressRoute を組み立て
-    ingressRoute := &unstructured.Unstructured{
-        Object: map[string]interface{}{
-            "apiVersion": "traefik.io/v1alpha1",
-            "kind":       "IngressRoute",
-            "metadata": map[string]interface{}{
-                "name":      name,
-                "namespace": namespace,
-            },
-            "spec": map[string]interface{}{
-                "entryPoints": []interface{}{"web", "websecure"},
-                "routes": []interface{}{
-                    map[string]interface{}{
-                        "match": fmt.Sprintf("Host(`%s`) && PathPrefix(`%s`)", host, path),
-                        "kind":  "Rule",
-                        "services": []interface{}{
-                            map[string]interface{}{
-                                "name": name,
-                                "port": port,
-                            },
-                        },
-                    },
-                },
-            },
-        },
-    }
+	// Dynamic Clientを取得 (事前に database.DynamicClient として初期化しておく)
+	client := database.K8sDynamicClient // dynamic.Interface
 
-    // 既存確認
-    res, err := client.Resource(resourceGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
-    if err != nil {
-        // 新規作成
-        _, err = client.Resource(resourceGVR).Namespace(namespace).Create(ctx, ingressRoute, metav1.CreateOptions{})
-        return err
-    }
+	// IngressRoute のリソース定義 (GVR)
+	resourceGVR := schema.GroupVersionResource{
+		Group:    "traefik.io",
+		Version:  "v1alpha1",
+		Resource: "ingressroutes",
+	}
 
-    // 更新 (ResourceVersionをセットしてUpdate)
-    ingressRoute.SetResourceVersion(res.GetResourceVersion())
-    _, err = client.Resource(resourceGVR).Namespace(namespace).Update(ctx, ingressRoute, metav1.UpdateOptions{})
-    return err
+	// Unstructured (汎用構造体) で IngressRoute を組み立て
+	ingressRoute := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "traefik.io/v1alpha1",
+			"kind":       "IngressRoute",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+			},
+			"spec": map[string]interface{}{
+				"entryPoints": []interface{}{"web", "websecure"},
+				"routes": []interface{}{
+					map[string]interface{}{
+						"match": fmt.Sprintf("Host(`%s`) && PathPrefix(`%s`)", host, path),
+						"kind":  "Rule",
+						"services": []interface{}{
+							map[string]interface{}{
+								"name": name,
+								"port": port,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// 既存確認
+	res, err := client.Resource(resourceGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		// 新規作成
+		_, err = client.Resource(resourceGVR).Namespace(namespace).Create(ctx, ingressRoute, metav1.CreateOptions{})
+		return err
+	}
+
+	// 更新 (ResourceVersionをセットしてUpdate)
+	ingressRoute.SetResourceVersion(res.GetResourceVersion())
+	_, err = client.Resource(resourceGVR).Namespace(namespace).Update(ctx, ingressRoute, metav1.UpdateOptions{})
+	return err
 }
 
 // DeleteIngress はIngressを削除し、Kubernetesリソースを同期します
