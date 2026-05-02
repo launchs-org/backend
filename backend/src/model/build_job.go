@@ -26,3 +26,23 @@ type BuildJob struct {
 func UpdateBuildJobStatus(id string, updates map[string]interface{}) error {
 	return database.DB.Model(&BuildJob{}).Where("id = ?", id).Updates(updates).Error
 }
+
+// GetBuildJobsByContainerID はコンテナIDからビルドジョブのリストを作成日時の降順で取得します
+func GetBuildJobsByContainerID(containerID string) ([]BuildJob, error) {
+	var jobs []BuildJob
+	err := database.DB.Where("container_id = ?", containerID).Order("created_at desc").Find(&jobs).Error
+	if err != nil {
+		return nil, err
+	}
+	return jobs, nil
+}
+
+// GetBuildJobByID はIDからビルドジョブを取得します
+func GetBuildJobByID(id string) (*BuildJob, error) {
+	var job BuildJob
+	err := database.DB.Where("id = ?", id).First(&job).Error
+	if err != nil {
+		return nil, err
+	}
+	return &job, nil
+}

@@ -16,6 +16,7 @@ type Project struct {
 	CreatedAt       time.Time      `json:"created_at"`                                            // 作成日時
 	UpdatedAt       time.Time      `json:"updated_at"`                                            // 更新日時
 	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`                                        // 削除日時 (ソフトデリート)
+	Containers      []Container    `json:"containers" gorm:"foreignKey:ProjectID"`                // コンテナ一覧
 }
 
 // CreateProject はプロジェクトをデータベースに保存します
@@ -43,7 +44,7 @@ func GetProjectByID(id string) (*Project, error) {
 	// 取得結果を格納する変数
 	var project Project
 	// IDが一致するプロジェクトを1件取得する
-	err := database.DB.Where("id = ?", id).First(&project).Error
+	err := database.DB.Preload("Containers").Where("id = ?", id).First(&project).Error
 	// エラーがある場合 (見つからない場合を含む)
 	if err != nil {
 		// nilとエラーを返す

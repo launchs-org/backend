@@ -1,11 +1,12 @@
 package main
 
 import (
-	"backend/database" // データベース
+	"backend/database"    // データベース
 	"backend/middlewares" // ミドルウェア
-	"backend/model"    // モデル
-	"net/http"         // HTTP
-	"github.com/labstack/echo/v5" // Echo
+	"backend/model"       // モデル
+	"net/http" // HTTP
+
+	"github.com/labstack/echo/v5"            // Echo
 	"github.com/labstack/echo/v5/middleware" // Echoミドルウェア
 )
 

@@ -55,3 +55,13 @@ func CreateContainerWithRelatedRecords(image *Image, container *Container, servi
 func UpdateContainerStatus(id, status string) error {
 	return database.DB.Model(&Container{}).Where("id = ?", id).Update("status", status).Error
 }
+
+// GetContainerByID はIDからコンテナを取得します
+func GetContainerByID(id string) (*Container, error) {
+	var container Container
+	err := database.DB.Where("id = ?", id).First(&container).Error
+	if err != nil {
+		return nil, err
+	}
+	return &container, nil
+}
