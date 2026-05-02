@@ -5,6 +5,7 @@ import (
 	"os"       // OS機能
 	"path/filepath" // パス操作
 
+	"k8s.io/client-go/dynamic"    // K8s Dynamic Client
 	"k8s.io/client-go/kubernetes" // K8s クライアント
 	"k8s.io/client-go/rest"      // K8s REST
 	"k8s.io/client-go/tools/clientcmd" // K8s 設定
@@ -13,6 +14,8 @@ import (
 
 // K8sClientset は Kubernetes クライアントセットを保持するグローバル変数です
 var K8sClientset kubernetes.Interface
+// K8sDynamicClient は Kubernetes ダイナミッククライアントを保持するグローバル変数です
+var K8sDynamicClient dynamic.Interface
 
 // InitK8s は Kubernetes クライアントを初期化します
 func InitK8s() {
@@ -48,5 +51,13 @@ func InitK8s() {
 	if err != nil {
 		// パニックで終了
 		panic(fmt.Sprintf("Kubernetes クライアントの作成に失敗しました: %v", err))
+	}
+
+	// ダイナミッククライアントを新規作成
+	K8sDynamicClient, err = dynamic.NewForConfig(config)
+	// 作成に失敗した場合
+	if err != nil {
+		// パニックで終了
+		panic(fmt.Sprintf("Kubernetes ダイナミッククライアントの作成に失敗しました: %v", err))
 	}
 }
