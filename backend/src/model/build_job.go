@@ -1,9 +1,11 @@
 package model
 
 import (
+	"context"
 	"time"
 
 	"backend/database"
+	"gorm.io/gorm"
 )
 
 // BuildJob はビルドジョブを表すモデルです
@@ -15,7 +17,7 @@ type BuildJob struct {
 	Branch        string     `json:"branch"`                                   // ブランチ
 	Directory     string     `json:"directory"`                                // ディレクトリ
 	Status        string     `json:"status"`                                   // ステータス
-	BuildLog      []byte     `gorm:"type:blob" json:"-"`                       // ビルドログ
+	BuildLog      []byte     `gorm:"type:longblob" json:"-"`                  // ビルドログ
 	StartedAt     *time.Time `json:"started_at"`                               // 開始日時
 	FinishedAt    *time.Time `json:"finished_at"`                              // 終了日時
 	CreatedAt     time.Time  `json:"created_at"`                               // 作成日時
@@ -45,4 +47,25 @@ func GetBuildJobByID(id string) (*BuildJob, error) {
 		return nil, err
 	}
 	return &job, nil
+}
+
+// AppendBuildLog はビルドログを追記します
+func AppendBuildLog(id string, log []byte) error {
+	// MySQLの CONCAT を使用して追記します
+	// 初期値が NULL の場合を考慮して COALESCE を使用します
+	err := database.DB.Model(&BuildJob{}).Where("id = ?", id).Update("build_log", gorm.Expr("CONCAT(COALESCE(build_log, ''), ?)", log)).Error
+	if err != nil {
+		database.DB.Logger.Error(context.Background(), "failed to append build log: %v", err)
+	}
+	return err
+}
+
+// GetBuildJobLog はビルドログを取得します
+func GetBuildJobLog(id string) ([]byte, error) {
+	var job BuildJob
+	err := database.DB.Select("build_log").Where("id = ?", id).First(&job).Error
+	if err != nil {
+		return nil, err
+	}
+	return job.BuildLog, nil
 }
