@@ -134,6 +134,7 @@ func InitRouter(router *echo.Echo) {
 
 		// WebSocket関連
 		v1Group.GET("/ws/build-jobs/:id", controller.StreamBuildJobLogsWS)
+		v1Group.GET("/ws/containers/:id/logs", controller.StreamContainerLogsWS)
 	}
 
 }

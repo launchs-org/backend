@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"backend/database"
+	"backend/k8slogwatcher"
 	"backend/model"
 
 	"github.com/google/uuid"
@@ -328,4 +329,44 @@ func GetContainer(ctx context.Context, containerID string, ownerID string) (map[
 	return map[string]interface{}{
 		"data": container,
 	}, nil
+}
+
+// StreamContainerLogs はコンテナの実行ログをストリーミングします
+func StreamContainerLogs(ctx context.Context, containerID string, ownerID string, logCallback func(k8slogwatcher.LogEntry)) error {
+	// 1. コンテナを取得
+	container, err := model.GetContainerByID(containerID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrContainerNotFound
+		}
+		return err
+	}
+
+	// 2. プロジェクトを取得して権限チェック
+	project, err := model.GetProjectByID(container.ProjectID)
+	if err != nil {
+		return err
+	}
+	if project.OwnerID != ownerID {
+		return ErrForbidden
+	}
+
+	// 3. 購読を開始 (1時間前からのログを取得)
+	sinceTime := time.Now().Add(-1 * time.Hour)
+	
+	// GlobalWatcher を使用して Deployment (コンテナ名と一致) を監視
+	sub, err := k8slogwatcher.GlobalWatcher.Subscribe(ctx, project.Namespace, container.Name, sinceTime, logCallback)
+	if err != nil {
+		return fmt.Errorf("failed to subscribe container logs: %w", err)
+	}
+
+	// コンテキストがキャンセルされるまで待機 (WebSocketが切れるまで)
+	<-ctx.Done()
+
+	// 購読を停止
+	k8slogwatcher.GlobalWatcher.Unsubscribe(project.Namespace, container.Name)
+
+	_ = sub // Subscription を使用しない場合の警告回避
+
+	return nil
 }

@@ -31,6 +31,8 @@ type Subscription struct {
 	streamer       *logStreamer
 	publisher      *logPublisher
 	subscriber     *logSubscriber
+	sinceTime      time.Time      // 初期購読時の履歴取得開始時間
+	k8sClient      *kubernetes.Clientset
 }
 
 // newSubscription は新しい Subscription を生成します（start は別途呼び出す）。
@@ -46,6 +48,8 @@ func newSubscription(ctx context.Context, opts subscriptionOptions) (*Subscripti
 		streamer:       newLogStreamer(opts.k8sClient, opts.namespace, opts.deploymentName),
 		publisher:      newLogPublisher(opts.redisClient, opts.namespace, opts.deploymentName),
 		subscriber:     newLogSubscriber(opts.redisClient, opts.namespace, opts.deploymentName),
+		sinceTime:      opts.sinceTime,
+		k8sClient:      opts.k8sClient,
 	}
 
 	return sub, nil
@@ -94,7 +98,7 @@ func (sub *Subscription) onBecomeLeader(leaderCtx context.Context) {
 	logEntryChan := make(chan LogEntry, 100)
 
 	// Pod ログのストリーミングを開始
-	go sub.streamer.streamAll(leaderCtx, time.Now(), logEntryChan)
+	go sub.streamer.streamAll(leaderCtx, sub.sinceTime, logEntryChan)
 
 	// ストリーミングされたログを Redis に発行
 	for {
@@ -115,6 +119,43 @@ func (sub *Subscription) onBecomeLeader(leaderCtx context.Context) {
 // 現在は特別な処理なし（次のリーダー選出ループでフォロワーに戻る）。
 func (sub *Subscription) onLoseLeader() {
 	// リーダー処理の停止は leaderCtx のキャンセルで行われるため、ここでは何もしない
+}
+
+// FetchHistory は指定した callback に対して、sinceTime から現在までの履歴ログを取得して送信します。
+// 既存の購読に途中から参加したユーザー向けです。
+func (sub *Subscription) FetchHistory(ctx context.Context, sinceTime time.Time, callback LogCallback) {
+	// 履歴取得用のテンポラリな streamer
+	historyStreamer := newLogStreamer(sub.k8sClient, sub.namespace, sub.deploymentName)
+	
+	// 履歴ログを受け取るチャンネル
+	logChan := make(chan LogEntry, 100)
+	
+	// ストリーミングではなく、取得のみを行うモードが必要だが、
+	// 現在の streamAll は Follow: true 固定なので、context を途中でキャンセルするか、
+	// PodLogOptions を調整する必要がある。
+	// ここでは、現在時刻までのログを一度だけ取得する簡易実装とする。
+	
+	go func() {
+		// streamAll は内部で goroutine を回すので注意
+		// 実際には history 取得用の別のメソッドを streamer に作るのが正解
+		// 今は簡易的に streamAll を使い、少し待ってからキャンセルする
+		fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		
+		go historyStreamer.streamAll(fetchCtx, sinceTime, logChan)
+		
+		for {
+			select {
+			case <-fetchCtx.Done():
+				return
+			case entry, ok := <-logChan:
+				if !ok {
+					return
+				}
+				callback(entry)
+			}
+		}
+	}()
 }
 
 // subscriptionPool は Deployment ごとの Subscription を管理するプールです。

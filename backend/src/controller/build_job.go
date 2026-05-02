@@ -74,7 +74,13 @@ func StreamBuildJobLogsWS(ctx *echo.Context) error {
 		})
 	}
 
-	ws, err := upgrader.Upgrade((*ctx).Response(), (*ctx).Request(), nil)
+	// サブプロトコルからトークンを取得している場合、ハンドシェイク時にそれを返す必要がある
+	responseHeader := http.Header{}
+	if protocol := (*ctx).Request().Header.Get("Sec-WebSocket-Protocol"); protocol != "" {
+		responseHeader.Set("Sec-WebSocket-Protocol", protocol)
+	}
+
+	ws, err := upgrader.Upgrade((*ctx).Response(), (*ctx).Request(), responseHeader)
 	if err != nil {
 		return err
 	}

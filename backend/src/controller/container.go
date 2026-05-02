@@ -2,6 +2,7 @@ package controller
 
 import (
 	"backend/service"
+	"backend/k8slogwatcher"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -249,4 +250,55 @@ func RedeployContainer(ctx *echo.Context) error {
 	}
 
 	return (*ctx).JSON(http.StatusOK, res)
+}
+
+// StreamContainerLogsWS はコンテナの実行ログをWebSocketでストリーミングするハンドラーです
+func StreamContainerLogsWS(ctx *echo.Context) error {
+	// パスパラメータからコンテナIDを取得
+	containerID := (*ctx).Param("id")
+	// JWTからユーザーIDを取得
+	userID, ok := (*ctx).Get("UserID").(string)
+	if !ok {
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "認証に失敗しました",
+		})
+	}
+
+	// サブプロトコルからトークンを取得している場合、ハンドシェイク時にそれを返す必要がある
+	responseHeader := http.Header{}
+	if protocol := (*ctx).Request().Header.Get("Sec-WebSocket-Protocol"); protocol != "" {
+		responseHeader.Set("Sec-WebSocket-Protocol", protocol)
+	}
+
+	ws, err := upgrader.Upgrade((*ctx).Response(), (*ctx).Request(), responseHeader)
+	if err != nil {
+		return err
+	}
+	// ハンドラー終了時にWebSocketを閉じる
+	defer ws.Close()
+
+	// ログのストリーミングを開始
+	err = service.StreamContainerLogs(
+		(*ctx).Request().Context(),
+		containerID,
+		userID,
+		func(entry k8slogwatcher.LogEntry) {
+			// ログエントリをクライアントに送信
+			_ = ws.WriteJSON(map[string]interface{}{
+				"event":     "log",
+				"log":       entry.Message,
+				"pod":       entry.PodName,
+				"container": entry.Container,
+				"timestamp": entry.Timestamp,
+			})
+		},
+	)
+
+	if err != nil {
+		// エラーが発生した場合はクライアントに通知
+		_ = ws.WriteJSON(map[string]string{"error": err.Error()})
+	}
+
+	return nil
 }

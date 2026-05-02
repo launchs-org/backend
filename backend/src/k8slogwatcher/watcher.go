@@ -13,12 +13,12 @@ import (
 
 // LogEntry は購読者に渡されるログの1行分のデータです。
 type LogEntry struct {
-	Namespace  string    // ログが属するNamespace
-	Deployment string    // ログが属するDeployment名
-	PodName    string    // ログが属するPod名
-	Container  string    // ログが属するContainer名
-	Message    string    // ログ本文
-	Timestamp  time.Time // ログのタイムスタンプ（SinceTimeとして利用）
+	Namespace  string    `json:"namespace"`  // ログが属するNamespace
+	Deployment string    `json:"deployment"` // ログが属するDeployment名
+	PodName    string    `json:"pod_name"`   // ログが属するPod名
+	Container  string    `json:"container"`  // ログが属するContainer名
+	Message    string    `json:"message"`    // ログ本文
+	Timestamp  time.Time `json:"timestamp"`  // ログのタイムスタンプ（SinceTimeとして利用）
 }
 
 // LogCallback はログ受信時に呼び出されるコールバック関数の型です。
@@ -63,8 +63,10 @@ func (watcher *Watcher) Subscribe(
 	// Pool から既存の購読を検索
 	existing := watcher.pool.get(namespace, deploymentName)
 	if existing != nil {
-		// 既存購読にコールバックを追加して返す
+		// 既存購読にコールバックを追加
 		existing.addCallback(callback)
+		// 新規参加者向けに履歴を取得して送信
+		existing.FetchHistory(ctx, sinceTime, callback)
 		return existing, nil
 	}
 
