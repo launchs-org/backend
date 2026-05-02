@@ -4,23 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"time"
 
 	"backend/database"
 	"backend/model"
-	"backend/railpack"
-	"backend/utils"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"k8s.io/client-go/kubernetes"
 )
 
 var (
 	ErrContainerAlreadyExists = errors.New("container already exists")
+	ErrContainerNotFound      = errors.New("container not found")
 )
 
 type CreateContainerInput struct {
@@ -159,120 +154,178 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 	}, nil
 }
 
-// startRailpackBuild は非同期でビルドを実行します
-func startRailpackBuild(project model.Project, container model.Container, buildJob model.BuildJob) {
-	ctx := context.Background()
-
-	// 状態を Building に更新
-	model.UpdateContainerStatus(container.ID, "Building")
-	model.UpdateBuildJobStatus(buildJob.ID, map[string]interface{}{
-		"status":     "Running",
-		"started_at": time.Now(),
-	})
-
-	uploadEndpoint := os.Getenv("UPLOAD_ENDPOINT")
-	if uploadEndpoint == "" {
-		uploadEndpoint = "https://10.10.11.8:8090/app/internal/upload"
-	}
-	uploadToken, err := utils.GenerateJobToken(utils.JobTokenClaim{
-		JobID:     buildJob.ID,
-		ImageName: container.Name,
-		ImageTag:  buildJob.ID,
-	})
-	if err != nil {
-		handleBuildError(buildJob.ID, container.ID, fmt.Errorf("failed to generate upload token: %w", err))
-		return
-	}
-
-	client, err := railpack.New(database.K8sClientset.(*kubernetes.Clientset), railpack.BuildConfig{
-		GitRepo:        container.RepositoryURL,
-		GitBranch:      container.Branch,
-		Subdir:         container.Directory,
-		ImageName:      container.Name,
-		ImageTag:       buildJob.ID,
-		UploadEndpoint: uploadEndpoint,
-		UploadToken:    uploadToken,
-		Namespace:      os.Getenv("BUILD_NAMESPACE"), // fallback is default in railpack
-		Timeout:        10 * time.Minute,
-	})
-
-	if err != nil {
-		handleBuildError(buildJob.ID, container.ID, fmt.Errorf("failed to init railpack: %w", err))
-		return
-	}
-
-	railpackJobID, err := client.Build(ctx)
-	if err != nil {
-		handleBuildError(buildJob.ID, container.ID, fmt.Errorf("failed to start railpack build: %w", err))
-		return
-	}
-
-	// ログ取得 (ここでは簡単にコンソールに出すだけかDB保存するか)
-	logCh, errCh := client.StreamLogs(ctx, railpackJobID)
-	go func() {
-		for line := range logCh {
-			// 将来的にはここで BuildJob.BuildLog に追記するなどの処理を入れる
-			fmt.Println("[build]", buildJob.ID, line)
-		}
-		if err := <-errCh; err != nil {
-			fmt.Println("[build error]", buildJob.ID, err)
-		}
-	}()
-
-	status, err := client.Wait(ctx, railpackJobID)
-	if err != nil {
-		handleBuildError(buildJob.ID, container.ID, fmt.Errorf("build failed while waiting: %w", err))
-		return
-	}
-
-	if status == railpack.StatusComplete {
-		now := time.Now()
-		model.UpdateBuildJobStatus(buildJob.ID, map[string]interface{}{
-			"status":      "Success",
-			"finished_at": now,
-		})
-		// 本来はここでデプロイに進む
-		// database.DB.Model(&model.Container{}).Where("id = ?", container.ID).Update("status", "Running")
-	} else {
-		handleBuildError(buildJob.ID, container.ID, fmt.Errorf("build failed with status: %s", status))
-	}
+type UpdateContainerInput struct {
+	ContainerID   string
+	OwnerID       string
+	RepositoryURL *string
+	Branch        *string
+	Directory     *string
+	EnvVars       *string
+	Replicas      *int
+	Resources     *string
 }
 
-func handleBuildError(buildJobID, containerID string, err error) {
-	fmt.Println("Build Error:", err)
-	now := time.Now()
-	model.UpdateBuildJobStatus(buildJobID, map[string]interface{}{
-		"status":      "Failed",
-		"finished_at": now,
-	})
-	model.UpdateContainerStatus(containerID, "Failed")
+// UpdateContainer はコンテナの設定を更新し、再ビルドを開始します
+func UpdateContainer(ctx context.Context, input UpdateContainerInput) (map[string]interface{}, error) {
+	// 1. コンテナを取得
+	container, err := model.GetContainerByID(input.ContainerID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrContainerNotFound
+		}
+		return nil, err
+	}
+
+	// 2. プロジェクトを取得して権限チェック
+	project, err := model.GetProjectByID(container.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if project.OwnerID != input.OwnerID {
+		return nil, ErrForbidden
+	}
+
+	// 3. フィールドの更新
+	updates := make(map[string]interface{})
+	if input.RepositoryURL != nil {
+		container.RepositoryURL = *input.RepositoryURL
+		updates["repository_url"] = *input.RepositoryURL
+	}
+	if input.Branch != nil {
+		container.Branch = *input.Branch
+		updates["branch"] = *input.Branch
+	}
+	if input.Directory != nil {
+		container.Directory = *input.Directory
+		updates["directory"] = *input.Directory
+	}
+	if input.EnvVars != nil {
+		container.EnvVars = *input.EnvVars
+		updates["env_vars"] = *input.EnvVars
+	}
+	if input.Replicas != nil {
+		container.Replicas = *input.Replicas
+		updates["replicas"] = *input.Replicas
+	}
+	if input.Resources != nil {
+		container.Resources = *input.Resources
+		updates["resources"] = *input.Resources
+	}
+
+	// 再ビルドのために新しいイメージIDを生成
+	newImageID := "img_" + uuid.New().String()
+	container.ImageID = newImageID
+	updates["image_id"] = newImageID
+	updates["updated_at"] = time.Now()
+
+	// 4. 更新を保存
+	if err := database.DB.Model(container).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+
+	// 5. 新しい Image レコードを作成
+	newImage := model.Image{
+		ID:          newImageID,
+		ContainerID: container.ID,
+		Type:        "user",
+		Name:        fmt.Sprintf("%s-%s", project.Name, container.Name),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	if err := database.DB.Create(&newImage).Error; err != nil {
+		return nil, err
+	}
+
+	// 6. BuildJob を作成
+	buildJob := model.BuildJob{
+		ID:            "bj_" + uuid.New().String(),
+		ProjectID:     project.ID,
+		ContainerID:   container.ID,
+		RepositoryURL: container.RepositoryURL,
+		Branch:        container.Branch,
+		Directory:     container.Directory,
+		Status:        "Queued",
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+	if err := database.DB.Create(&buildJob).Error; err != nil {
+		return nil, err
+	}
+
+	// 7. ビルドを開始
+	go startRailpackBuild(*project, *container, buildJob)
+
+	return map[string]interface{}{
+		"data": map[string]interface{}{
+			"container": container,
+			"build_job": buildJob,
+		},
+	}, nil
 }
 
-// HandleUploadTar は受け取ったtarを保存します
-func HandleUploadTar(body io.Reader, jobID, imageName, imageTag string) error {
-	// saveDir := os.Getenv("TAR_SAVE_DIR")
-	// if saveDir == "" {
-	// 	saveDir = "/tmp/launchs-tar"
-	// }
-	saveDir := "./launchs-tar"
+// RedeployContainer はコンテナを再デプロイします
+func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[string]interface{}, error) {
+	return UpdateContainer(ctx, UpdateContainerInput{
+		ContainerID: containerID,
+		OwnerID:     ownerID,
+	})
+}
 
-	if err := os.MkdirAll(saveDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create dir: %w", err)
-	}
+type ListBuildJobsInput struct {
+	ContainerID string
+	OwnerID     string
+}
 
-	savePath := filepath.Join(saveDir, fmt.Sprintf("%s.tar", jobID))
-	file, err := os.Create(savePath)
+// ListBuildJobs はコンテナのビルド履歴一覧を取得します
+func ListBuildJobs(ctx context.Context, input ListBuildJobsInput) (map[string]interface{}, error) {
+	container, err := model.GetContainerByID(input.ContainerID)
 	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer file.Close()
-
-	if _, err := io.Copy(file, body); err != nil {
-		return fmt.Errorf("failed to write tar: %w", err)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrContainerNotFound
+		}
+		return nil, err
 	}
 
-	fmt.Printf("Tar saved successfully: %s\n", savePath)
-	// TODO: crane.Pushなどでイメージをレジストリにプッシュする処理をここに追加する
+	project, err := model.GetProjectByID(container.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if project.OwnerID != input.OwnerID {
+		return nil, ErrForbidden
+	}
 
-	return nil
+	jobs, err := model.GetBuildJobsByContainerID(input.ContainerID)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"data": map[string]interface{}{
+			"items": jobs,
+			"total": len(jobs),
+		},
+	}, nil
+}
+
+// GetContainer はコンテナの詳細を取得します
+func GetContainer(ctx context.Context, containerID string, ownerID string) (map[string]interface{}, error) {
+	container, err := model.GetContainerByID(containerID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrContainerNotFound
+		}
+		return nil, err
+	}
+
+	project, err := model.GetProjectByID(container.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if project.OwnerID != ownerID {
+		return nil, ErrForbidden
+	}
+
+	return map[string]interface{}{
+		"data": container,
+	}, nil
 }
