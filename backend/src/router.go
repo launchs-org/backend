@@ -120,14 +120,20 @@ func InitRouter(router *echo.Echo) {
 				// モックレスポンス
 				return c.String(http.StatusOK, "Hello, World!")
 			})
+
+			// GET /v1/build-jobs/:id/logs - ビルドログの取得
+			buildJobsGroup.GET("/:id/logs", controller.GetBuildJobLogs)
 		}
 
-		// // stream関連のリソースグループを作成する
-		// streamGroup := v1Group.Group("/stream")
-		// {
-		// 	// GET /v1/stream/build-jobs/:id - ビルドログのリアルタイムストリーミング
-		// 	streamGroup.GET("/build-jobs/:id", controller.StreamBuildJobLogs)
-		// }
+		// stream関連のリソースグループを作成する
+		streamGroup := v1Group.Group("/stream")
+		{
+			// GET /v1/stream/build-jobs/:id - ビルドログの取得 (ポーリング用)
+			streamGroup.GET("/build-jobs/:id", controller.GetBuildJobLogs)
+		}
+
+		// WebSocket関連
+		v1Group.GET("/ws/build-jobs/:id", controller.StreamBuildJobLogsWS)
 	}
 
 }
