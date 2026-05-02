@@ -63,6 +63,9 @@ async function Init() {
         } catch (error) {
             console.error(error);
         }
+
+        // 本来の画面にリダイレクト
+        window.location.href = '/ui/';
     } catch (error) {
         console.error(error);
         // ログインにリダイレクト
