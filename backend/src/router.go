@@ -40,7 +40,23 @@ func InitRouter(router *echo.Echo) {
 			// GET /v1/projects/:id/histories - プロジェクトのスナップショット一覧 (未実装)
 			projectsGroup.GET("/:id/histories", func(c *echo.Context) error {
 				// モックレスポンス
-				return c.String(http.StatusOK, "Hello, World!")
+				return c.JSON(http.StatusOK, map[string]interface{}{
+					"data": map[string]interface{}{
+						"items": []map[string]interface{}{
+							{
+								"id":           "hist_dummy1",
+								"version_name": "v1.0.0",
+								"created_at":   "2026-05-01T10:00:00Z",
+							},
+							{
+								"id":           "hist_dummy2",
+								"version_name": "v0.9.0",
+								"created_at":   "2026-04-20T08:30:00Z",
+							},
+						},
+						"total": 2,
+					},
+				})
 			})
 
 			// POST /v1/projects/:id/rollback/:phid - ロールバック実行 (未実装)
@@ -53,11 +69,14 @@ func InitRouter(router *echo.Echo) {
 		// コンテナ関連のグループ
 		containersGroup := v1Group.Group("/containers")
 		{
-			// PATCH /v1/containers/:id - コンテナ設定更新 (未実装)
-			containersGroup.PATCH("/:id", func(c *echo.Context) error {
-				// モックレスポンス
-				return c.String(http.StatusOK, "Hello, World!")
-			})
+			// GET /v1/containers/:id - コンテナの詳細取得
+			containersGroup.GET("/:id", controller.GetContainer)
+
+			// PATCH /v1/containers/:id - コンテナ設定更新
+			containersGroup.PATCH("/:id", controller.UpdateContainer)
+
+			// POST /v1/containers/:id/redeploy - 再デプロイ
+			containersGroup.POST("/:id/redeploy", controller.RedeployContainer)
 
 			// DELETE /v1/containers/:id - コンテナの削除 (未実装)
 			containersGroup.DELETE("/:id", func(c *echo.Context) error {
@@ -65,11 +84,8 @@ func InitRouter(router *echo.Echo) {
 				return c.String(http.StatusOK, "Hello, World!")
 			})
 
-			// GET /v1/containers/:id/build-jobs - ビルド履歴一覧 (未実装)
-			containersGroup.GET("/:id/build-jobs", func(c *echo.Context) error {
-				// モックレスポンス
-				return c.String(http.StatusOK, "Hello, World!")
-			})
+			// GET /v1/containers/:id/build-jobs - ビルド履歴一覧
+			containersGroup.GET("/:id/build-jobs", controller.ListBuildJobs)
 
 			// GET /v1/containers/:id/logs - 実行ログ取得 (未実装)
 			containersGroup.GET("/:id/logs", func(c *echo.Context) error {
@@ -105,6 +121,13 @@ func InitRouter(router *echo.Echo) {
 				return c.String(http.StatusOK, "Hello, World!")
 			})
 		}
+
+		// // stream関連のリソースグループを作成する
+		// streamGroup := v1Group.Group("/stream")
+		// {
+		// 	// GET /v1/stream/build-jobs/:id - ビルドログのリアルタイムストリーミング
+		// 	streamGroup.GET("/build-jobs/:id", controller.StreamBuildJobLogs)
+		// }
 	}
 
 }

@@ -76,3 +76,177 @@ func CreateContainer(ctx *echo.Context) error {
 
 	return (*ctx).JSON(http.StatusCreated, res)
 }
+
+// ListBuildJobs はコンテナのビルド履歴一覧を取得するハンドラーです
+func ListBuildJobs(ctx *echo.Context) error {
+	containerID := (*ctx).Param("id") // note: router specifies /containers/:id/build-jobs
+	userID, ok := (*ctx).Get("UserID").(string)
+	if !ok {
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "認証に失敗しました",
+		})
+	}
+
+	res, err := service.ListBuildJobs((*ctx).Request().Context(), service.ListBuildJobsInput{
+		ContainerID: containerID,
+		OwnerID:     userID,
+	})
+
+	if err != nil {
+		switch err {
+		case service.ErrContainerNotFound:
+			return (*ctx).JSON(http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": "コンテナが見つかりません",
+			})
+		case service.ErrForbidden:
+			return (*ctx).JSON(http.StatusForbidden, map[string]string{
+				"code":    "FORBIDDEN",
+				"message": "アクセス権限がありません",
+			})
+		default:
+			return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR",
+				"message": err.Error(),
+			})
+		}
+	}
+
+	return (*ctx).JSON(http.StatusOK, res)
+}
+
+// GetContainer はコンテナの詳細を取得するハンドラーです
+func GetContainer(ctx *echo.Context) error {
+	containerID := (*ctx).Param("id")
+	userID, ok := (*ctx).Get("UserID").(string)
+	if !ok {
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "認証に失敗しました",
+		})
+	}
+
+	res, err := service.GetContainer((*ctx).Request().Context(), containerID, userID)
+
+	if err != nil {
+		switch err {
+		case service.ErrContainerNotFound:
+			return (*ctx).JSON(http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": "コンテナが見つかりません",
+			})
+		case service.ErrForbidden:
+			return (*ctx).JSON(http.StatusForbidden, map[string]string{
+				"code":    "FORBIDDEN",
+				"message": "アクセス権限がありません",
+			})
+		default:
+			return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR",
+				"message": err.Error(),
+			})
+		}
+	}
+
+	return (*ctx).JSON(http.StatusOK, res)
+}
+
+// UpdateContainerRequest はコンテナ更新のリクエストボディです
+type UpdateContainerRequest struct {
+	RepositoryURL *string `json:"repository_url"`
+	Branch        *string `json:"branch"`
+	Directory     *string `json:"directory"`
+	EnvVars       *string `json:"env_vars"`
+	Replicas      *int    `json:"replicas"`
+	Resources     *string `json:"resources"`
+}
+
+// UpdateContainer はコンテナの設定を更新し、再ビルドを開始するハンドラーです
+func UpdateContainer(ctx *echo.Context) error {
+	var req UpdateContainerRequest
+	if err := (*ctx).Bind(&req); err != nil {
+		return (*ctx).JSON(http.StatusBadRequest, map[string]string{
+			"code":    "BAD_REQUEST",
+			"message": "リクエストパラメータが不正です",
+		})
+	}
+
+	containerID := (*ctx).Param("id")
+	userID, ok := (*ctx).Get("UserID").(string)
+	if !ok {
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "認証に失敗しました",
+		})
+	}
+
+	res, err := service.UpdateContainer((*ctx).Request().Context(), service.UpdateContainerInput{
+		ContainerID:   containerID,
+		OwnerID:       userID,
+		RepositoryURL: req.RepositoryURL,
+		Branch:        req.Branch,
+		Directory:     req.Directory,
+		EnvVars:       req.EnvVars,
+		Replicas:      req.Replicas,
+		Resources:     req.Resources,
+	})
+
+	if err != nil {
+		switch err {
+		case service.ErrContainerNotFound:
+			return (*ctx).JSON(http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": "コンテナが見つかりません",
+			})
+		case service.ErrForbidden:
+			return (*ctx).JSON(http.StatusForbidden, map[string]string{
+				"code":    "FORBIDDEN",
+				"message": "アクセス権限がありません",
+			})
+		default:
+			return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR",
+				"message": err.Error(),
+			})
+		}
+	}
+
+	return (*ctx).JSON(http.StatusOK, res)
+}
+
+// RedeployContainer はコンテナを再デプロイするハンドラーです
+func RedeployContainer(ctx *echo.Context) error {
+	containerID := (*ctx).Param("id")
+	userID, ok := (*ctx).Get("UserID").(string)
+	if !ok {
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "認証に失敗しました",
+		})
+	}
+
+	res, err := service.RedeployContainer((*ctx).Request().Context(), containerID, userID)
+
+	if err != nil {
+		switch err {
+		case service.ErrContainerNotFound:
+			return (*ctx).JSON(http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": "コンテナが見つかりません",
+			})
+		case service.ErrForbidden:
+			return (*ctx).JSON(http.StatusForbidden, map[string]string{
+				"code":    "FORBIDDEN",
+				"message": "アクセス権限がありません",
+			})
+		default:
+			return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR",
+				"message": err.Error(),
+			})
+		}
+	}
+
+	return (*ctx).JSON(http.StatusOK, res)
+}
