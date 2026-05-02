@@ -81,7 +81,7 @@ func PushToRegistry(tarPath, imageName, imageTag string) error {
 		registryProject = "buildkit"
 	}
 	username := "robot$buildkit+buildkit"
-	password := "6vgO9jcQsfjy9XEfHBLEFyDmriaHXUQD"
+	password := "9NDa1mvtiF1PjiCLPRJuybY70hdjJjq8"
 	insecure := os.Getenv("REGISTRY_INSECURE") == "true"
 
 	opts := []crane.Option{

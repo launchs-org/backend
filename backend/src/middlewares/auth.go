@@ -10,8 +10,11 @@ import (
 // 認証ミドルウェア
 func RequireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(ctx *echo.Context) error {
-		// ヘッダからトークンを取得、なければクエリパラメータから取得
+		// ヘッダからトークンを取得、なければ Sec-WebSocket-Protocol から取得、なければクエリパラメータから取得
 		token := ctx.Request().Header.Get("Authorization")
+		if token == "" {
+			token = ctx.Request().Header.Get("Sec-WebSocket-Protocol")
+		}
 		if token == "" {
 			token = ctx.QueryParam("token")
 		}
