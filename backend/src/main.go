@@ -4,6 +4,7 @@ import (
 	"backend/database"    // データベース
 	"backend/middlewares" // ミドルウェア
 	"backend/model"       // モデル
+	"backend/k8slogwatcher" // Kubernetes ログウォッチャー
 	"net/http" // HTTP
 
 	"github.com/labstack/echo/v5"            // Echo
@@ -16,6 +17,10 @@ func main() {
 	database.Init()
 	// Kubernetes クライアントの初期化
 	database.InitK8s()
+	// Redis の初期化
+	database.InitRedis()
+	// Kubernetes ログウォッチャーの初期化
+	k8slogwatcher.Init()
 
 	// データベースの自動マイグレーションを実行 (各種テーブルの作成・更新)
 	if err := database.DB.AutoMigrate(

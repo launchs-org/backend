@@ -55,6 +55,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      redis:
+        condition: service_started
 
   auth:
     hostname: auth
@@ -93,6 +95,12 @@ services:
       interval: 5s
       timeout: 10s
       retries: 5
+
+  redis:
+    image: redis:alpine
+    restart: always
+    ports:
+      - 6379:6379
 
 volumes:
   dbdata:
