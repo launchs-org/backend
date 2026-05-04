@@ -65,7 +65,7 @@ func HandleUploadTar(body io.Reader, jobID, imageName, imageTag string) error {
 	}
 	imageRef := fmt.Sprintf("%s/%s/%s:%s", registryHost, registryProject, imageName, imageTag)
 
-	go deployToKubernetes(job.ContainerID, imageRef)
+	go DeployToKubernetes(job.ContainerID, imageRef)
 
 	return nil
 }

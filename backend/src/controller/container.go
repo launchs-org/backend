@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"backend/k8slogwatcher"
 	"backend/service"
 	"log"
@@ -232,6 +233,42 @@ func UpdateContainer(ctx *echo.Context) error {
 		Replicas:      req.Replicas,
 		Resources:     req.Resources,
 	})
+
+	if err != nil {
+		switch err {
+		case service.ErrContainerNotFound:
+			return (*ctx).JSON(http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": "コンテナが見つかりません",
+			})
+		case service.ErrForbidden:
+			return (*ctx).JSON(http.StatusForbidden, map[string]string{
+				"code":    "FORBIDDEN",
+				"message": "アクセス権限がありません",
+			})
+		default:
+			return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR",
+				"message": err.Error(),
+			})
+		}
+	}
+
+	return (*ctx).JSON(http.StatusOK, res)
+}
+
+// RebuildContainer はコンテナを再ビルドするハンドラーです
+func RebuildContainer(ctx *echo.Context) error {
+	containerID := (*ctx).Param("id")
+	userID, ok := (*ctx).Get("UserID").(string)
+	if !ok {
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "認証に失敗しました",
+		})
+	}
+
+	res, err := service.RebuildContainer((*ctx).Request().Context(), containerID, userID)
 
 	if err != nil {
 		switch err {

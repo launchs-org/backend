@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"backend/database"
@@ -324,12 +325,57 @@ func UpdateContainer(ctx context.Context, input UpdateContainerInput) (map[strin
 	}, nil
 }
 
-// RedeployContainer はコンテナを再デプロイします
-func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[string]interface{}, error) {
+// RebuildContainer はコンテナを再ビルドしてデプロイします
+func RebuildContainer(ctx context.Context, containerID, ownerID string) (map[string]interface{}, error) {
+	// UpdateContainer は内部で新しい ImageID を生成し、ビルドを開始する
 	return UpdateContainer(ctx, UpdateContainerInput{
 		ContainerID: containerID,
 		OwnerID:     ownerID,
 	})
+}
+
+// RedeployContainer はコンテナを再デプロイします (ビルドなし)
+func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[string]interface{}, error) {
+	// 1. コンテナを取得
+	container, err := model.GetContainerByID(containerID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrContainerNotFound
+		}
+		return nil, err
+	}
+
+	// 2. プロジェクトを取得して権限チェック
+	project, err := model.GetProjectByID(container.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if project.OwnerID != ownerID {
+		return nil, ErrForbidden
+	}
+
+	// 3. ステータスをデプロイ中に変更
+	model.UpdateContainerStatus(container.ID, "Deploying")
+
+	// 4. imageRef を構築 (image.go のロジックに合わせる)
+	registryHost := os.Getenv("REGISTRY_HOST")
+	if registryHost == "" {
+		registryHost = "172.33.0.1"
+	}
+	registryProject := os.Getenv("REGISTRY_PROJECT")
+	if registryProject == "" {
+		registryProject = "launchs"
+	}
+	imageName := container.ID
+	imageTag := container.ImageID
+	imageRef := fmt.Sprintf("%s/%s/%s:%s", registryHost, registryProject, imageName, imageTag)
+
+	// 5. デプロイ実行 (非同期)
+	go DeployToKubernetes(container.ID, imageRef)
+
+	return map[string]interface{}{
+		"data": container,
+	}, nil
 }
 
 type ListBuildJobsInput struct {
