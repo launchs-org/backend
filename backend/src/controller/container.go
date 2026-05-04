@@ -1,8 +1,9 @@
 package controller
 
 import (
-	"backend/service"
 	"backend/k8slogwatcher"
+	"backend/service"
+	"log"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -285,13 +286,19 @@ func StreamContainerLogsWS(ctx *echo.Context) error {
 		userID,
 		func(entry k8slogwatcher.LogEntry) {
 			// ログエントリをクライアントに送信
-			_ = ws.WriteJSON(map[string]interface{}{
+			err := ws.WriteJSON(map[string]interface{}{
 				"event":     "log",
 				"log":       entry.Message,
 				"pod":       entry.PodName,
 				"container": entry.Container,
 				"timestamp": entry.Timestamp,
 			})
+
+			// エラー処理
+			if err != nil {
+				log.Println(err)
+				return 
+			}
 		},
 	)
 

@@ -332,7 +332,7 @@ func GetContainer(ctx context.Context, containerID string, ownerID string) (map[
 }
 
 // StreamContainerLogs はコンテナの実行ログをストリーミングします
-func StreamContainerLogs(ctx context.Context, containerID string, ownerID string, logCallback func(k8slogwatcher.LogEntry)) error {
+func StreamContainerLogs(ctx context.Context, containerID string, ownerID string, baselogCallback func(k8slogwatcher.LogEntry)) error {
 	// 1. コンテナを取得
 	container, err := model.GetContainerByID(containerID)
 	if err != nil {
@@ -353,6 +353,13 @@ func StreamContainerLogs(ctx context.Context, containerID string, ownerID string
 
 	// 3. 購読を開始 (1時間前からのログを取得)
 	sinceTime := time.Now().Add(-1 * time.Hour)
+
+	// callback を生成
+	logCallback := func(entry k8slogwatcher.LogEntry) {
+		// データベースに保存する
+
+		baselogCallback(entry)
+	}
 	
 	// GlobalWatcher を使用して Deployment (コンテナ名と一致) を監視
 	sub, err := k8slogwatcher.GlobalWatcher.Subscribe(ctx, project.Namespace, container.Name, sinceTime, logCallback)
