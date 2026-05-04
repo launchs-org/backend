@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var (
@@ -153,6 +154,65 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 			"build_job": buildJob,
 		},
 	}, nil
+}
+
+// DeleteContainer はコンテナと関連するリソースを削除します
+func DeleteContainer(ctx context.Context, containerID string, ownerID string) error {
+	// 1. コンテナを取得
+	container, err := model.GetContainerByID(containerID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrContainerNotFound
+		}
+		return err
+	}
+
+	// 2. 権限チェック
+	project, err := model.GetProjectByID(container.ProjectID)
+	if err != nil {
+		return err
+	}
+	if project.OwnerID != ownerID {
+		return ErrForbidden
+	}
+
+	// 3. 削除処理 (トランザクション内)
+	err = database.DB.Transaction(func(tx *gorm.DB) error {
+		// イメージの削除
+		if err := model.DeleteImagesByContainerID(containerID); err != nil {
+			return err
+		}
+		// サービス設定の削除
+		if err := model.DeleteServiceByContainerID(containerID); err != nil {
+			return err
+		}
+		// Ingress設定の削除
+		if err := model.DeleteIngress(containerID); err != nil {
+			return err
+		}
+		// ビルドジョブの削除
+		if err := model.DeleteBuildJobsByContainerID(containerID); err != nil {
+			return err
+		}
+		// コンテナ自身の削除
+		if err := model.DeleteContainer(containerID); err != nil {
+			return err
+		}
+
+		// Kubernetes リソースの削除
+		// Deployment の削除
+		_ = database.K8sClientset.AppsV1().Deployments(project.Namespace).Delete(ctx, container.Name, metav1.DeleteOptions{})
+
+		// Service の削除
+		_ = database.K8sClientset.CoreV1().Services(project.Namespace).Delete(ctx, container.Name, metav1.DeleteOptions{})
+
+		// Ingress の削除 (Ingress名がコンテナ名と一致していると仮定)
+		_ = database.K8sClientset.NetworkingV1().Ingresses(project.Namespace).Delete(ctx, container.Name, metav1.DeleteOptions{})
+
+		return nil
+	})
+
+	return err
 }
 
 type UpdateContainerInput struct {

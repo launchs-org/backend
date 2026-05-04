@@ -31,7 +31,7 @@ func InitRouter(router *echo.Echo) {
 			// GET /v1/projects/:id - プロジェクトの詳細取得
 			projectsGroup.GET("/:id", controller.GetProject)
 
-			// DELETE /v1/projects/:id - プロジェクトの削除 (未実装)
+			// DELETE /v1/projects/:id - プロジェクトの削除
 			projectsGroup.DELETE("/:id", controller.DeleteProject)
 
 			// POST /v1/projects/:id/containers - コンテナの作成とビルド
@@ -78,11 +78,8 @@ func InitRouter(router *echo.Echo) {
 			// POST /v1/containers/:id/redeploy - 再デプロイ
 			containersGroup.POST("/:id/redeploy", controller.RedeployContainer)
 
-			// DELETE /v1/containers/:id - コンテナの削除 (未実装)
-			containersGroup.DELETE("/:id", func(c *echo.Context) error {
-				// モックレスポンス
-				return c.String(http.StatusOK, "Hello, World!")
-			})
+			// DELETE /v1/containers/:id - コンテナの削除
+			containersGroup.DELETE("/:id", controller.DeleteContainer)
 
 			// GET /v1/containers/:id/build-jobs - ビルド履歴一覧
 			containersGroup.GET("/:id/build-jobs", controller.ListBuildJobs)

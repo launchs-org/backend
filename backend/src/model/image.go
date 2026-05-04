@@ -2,6 +2,7 @@ package model
 
 import (
 	"time"
+	"backend/database"
 )
 
 // Image はコンテナイメージを表すモデルです
@@ -13,4 +14,9 @@ type Image struct {
 	Registry    string    `json:"registry"`                                    // レジストリURL
 	CreatedAt   time.Time `json:"created_at"`                                  // 作成日時
 	UpdatedAt   time.Time `json:"updated_at"`                                  // 更新日時
+}
+
+// DeleteImagesByContainerID はコンテナIDに紐づくイメージを削除します
+func DeleteImagesByContainerID(containerID string) error {
+	return database.DB.Where("container_id = ?", containerID).Delete(&Image{}).Error
 }

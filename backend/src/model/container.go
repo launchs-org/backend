@@ -58,6 +58,11 @@ func UpdateContainerStatus(id, status string) error {
 	return database.DB.Model(&Container{}).Where("id = ?", id).Update("status", status).Error
 }
 
+// DeleteContainer はコンテナを削除します
+func DeleteContainer(id string) error {
+	return database.DB.Where("id = ?", id).Delete(&Container{}).Error
+}
+
 // GetContainerByID はIDからコンテナを取得します
 func GetContainerByID(id string) (*Container, error) {
 	var container Container

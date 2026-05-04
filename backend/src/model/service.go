@@ -33,6 +33,11 @@ func GetServiceByContainerID(containerID string) (*Service, error) {
 	return &service, nil
 }
 
+// DeleteServiceByContainerID はコンテナIDに紐づくサービス設定を削除します
+func DeleteServiceByContainerID(containerID string) error {
+	return database.DB.Where("container_id = ?", containerID).Delete(&Service{}).Error
+}
+
 // UpdateService はサービス設定を更新します
 func UpdateService(service *Service) error {
 	// 更新日時をセット

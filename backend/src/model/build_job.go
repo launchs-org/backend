@@ -60,6 +60,11 @@ func AppendBuildLog(id string, log []byte) error {
 	return err
 }
 
+// DeleteBuildJobsByContainerID はコンテナIDに紐づくビルドジョブを削除します
+func DeleteBuildJobsByContainerID(containerID string) error {
+	return database.DB.Where("container_id = ?", containerID).Delete(&BuildJob{}).Error
+}
+
 // GetBuildJobLog はビルドログを取得します
 func GetBuildJobLog(id string) ([]byte, error) {
 	var job BuildJob
