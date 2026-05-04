@@ -3,6 +3,7 @@ package controller
 import (
 	"backend/model"
 	"backend/service"
+	"context"
 	"fmt"
 	"net/http"
 
@@ -99,19 +100,25 @@ func StreamBuildJobLogsWS(ctx *echo.Context) error {
 		return ws.WriteJSON(map[string]string{"error": "forbidden"})
 	}
 
+	// コンテキストを作成し、書き込みエラー時にキャンセルできるようにする
+	streamCtx, cancel := context.WithCancel((*ctx).Request().Context())
+	defer cancel()
+
 	// ログのストリーミングを開始
 	err = service.StreamBuildJobLogs(
-		(*ctx).Request().Context(),
+		streamCtx,
 		buildJobID,
 		userID,
-		func(log string) {
-			fmt.Printf("build log: %s\n", log)
-			
+		func(logStr string) {
 			// ログを送信
-			_ = ws.WriteJSON(map[string]interface{}{
+			err := ws.WriteJSON(map[string]interface{}{
 				"event": "log",
-				"log":   log,
+				"log":   logStr,
 			})
+			if err != nil {
+				cancel()
+				return
+			}
 		},
 		func(status string) {
 			// ステータスを送信

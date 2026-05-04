@@ -318,9 +318,13 @@ func StreamContainerLogsWS(ctx *echo.Context) error {
 	// ハンドラー終了時にWebSocketを閉じる
 	defer ws.Close()
 
+	// コンテキストを作成し、書き込みエラー時にキャンセルできるようにする
+	streamCtx, cancel := context.WithCancel((*ctx).Request().Context())
+	defer cancel()
+
 	// ログのストリーミングを開始
 	err = service.StreamContainerLogs(
-		(*ctx).Request().Context(),
+		streamCtx,
 		containerID,
 		userID,
 		func(entry k8slogwatcher.LogEntry) {
@@ -333,9 +337,11 @@ func StreamContainerLogsWS(ctx *echo.Context) error {
 				"timestamp": entry.Timestamp,
 			})
 
-			// エラー処理
+			// エラー処理 (broken pipeなど)
 			if err != nil {
-				log.Println(err)
+				log.Printf("[WS Write Error] %v", err)
+				// エラーが発生した場合はストリーミングを停止する
+				cancel()
 				return 
 			}
 		},
