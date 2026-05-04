@@ -3,5 +3,12 @@ config/app.env
 nginx/keys/
 openssl/jwtKeys/
 auth/icons/
-
 backend/src/tmp/
+backend/launchs-tar/
+node_modules/
+dist/
+.next/
+.vite/
+.env
+.env.local
+*.log

@@ -15,7 +15,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-func deployToKubernetes(containerID string, imageRef string) {
+func DeployToKubernetes(containerID string, imageRef string) {
 	ctx := context.Background()
 
 	container, err := model.GetContainerByID(containerID)
@@ -48,6 +48,35 @@ func deployToKubernetes(containerID string, imageRef string) {
 
 	replicas := int32(container.Replicas)
 
+	// ボリューム情報を取得
+	volumes, _ := model.GetVolumesByContainerID(containerID)
+	var k8sVolumeMounts []corev1.VolumeMount
+	var k8sVolumes []corev1.Volume
+
+	// ボリューム一覧をK8sの形式に変換
+	for _, vol := range volumes {
+		// 削除中または利用不可のボリュームはスキップ
+		if vol.Status != "Available" {
+			continue
+		}
+		// ボリューム名 (一意にする)
+		mountName := fmt.Sprintf("vol-%s", vol.ID)
+		// マウント設定を追加
+		k8sVolumeMounts = append(k8sVolumeMounts, corev1.VolumeMount{
+			Name:      mountName,
+			MountPath: vol.MountPath, // 指定されたパスにマウント
+		})
+		// 実体 (PVC) の設定を追加
+		k8sVolumes = append(k8sVolumes, corev1.Volume{
+			Name: mountName,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+					ClaimName: fmt.Sprintf("pvc-%s", vol.ID), // 作成済みのPVCを指定
+				},
+			},
+		})
+	}
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      container.Name,
@@ -69,11 +98,13 @@ func deployToKubernetes(containerID string, imageRef string) {
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:  container.Name,
-							Image: imageRef,
-							Env:   k8sEnvVars,
+							Name:         container.Name,
+							Image:        imageRef,
+							Env:          k8sEnvVars,
+							VolumeMounts: k8sVolumeMounts, // マウント設定を反映
 						},
 					},
+					Volumes: k8sVolumes, // ボリューム実体を反映
 				},
 			},
 		},

@@ -5,6 +5,7 @@ import (
 	"backend/middlewares" // ミドルウェア
 	"backend/model"       // モデル
 	"backend/k8slogwatcher" // Kubernetes ログウォッチャー
+	"backend/service"
 	"net/http" // HTTP
 
 	"github.com/labstack/echo/v5"            // Echo
@@ -21,6 +22,8 @@ func main() {
 	database.InitRedis()
 	// Kubernetes ログウォッチャーの初期化
 	k8slogwatcher.Init()
+	// ボリューム同期プロセスの開始
+	service.StartVolumeSync()
 
 	// データベースの自動マイグレーションを実行 (各種テーブルの作成・更新)
 	if err := database.DB.AutoMigrate(
@@ -30,6 +33,7 @@ func main() {
 		&model.Image{},
 		&model.Service{},
 		&model.Ingress{},
+		&model.Volume{},
 	); err != nil {
 		// マイグレーション失敗時はパニック
 		panic("failed to migrate database: " + err.Error())
