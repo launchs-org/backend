@@ -12,13 +12,15 @@
 4. [Containers API](#4-containers-api)
 5. [Build Jobs API](#5-build-jobs-api)
 6. [Networking API](#6-networking-api)
-7. [History / Rollback API](#7-history--rollback-api)
-8. [SSE ストリーミング仕様](#8-sse-ストリーミング仕様)
-9. [ビルドキューシステム詳細](#9-ビルドキューシステム詳細)
-10. [railpack 統合仕様](#10-railpack-統合仕様)
-11. [K8s 状態同期仕様](#11-k8s-状態同期仕様)
-12. [tar 受取・レジストリプッシュ仕様](#12-tar-受取レジストリプッシュ仕様)
-13. [ログローテートバッチ](#13-ログローテートバッチ)
+7. [Volume API](#14-volume-api)
+8. [History / Rollback API](#7-history--rollback-api)
+9. [SSE ストリーミング仕様](#8-sse-ストリーミング仕様)
+10. [ビルドキューシステム詳細](#9-ビルドキューシステム詳細)
+11. [railpack 統合仕様](#10-railpack-統合仕様)
+12. [K8s 状態同期仕様](#11-k8s-状態同期仕様)
+13. [tar 受取・レジストリプッシュ仕様](#12-tar-受取レジストリプッシュ仕様)
+14. [ログローテートバッチ](#13-ログローテートバッチ)
+15. [永続化ボリューム（Volume）詳細仕様](#15-永続化ボリュームvolume詳細仕様)
 
 ---
 
@@ -454,6 +456,67 @@ Body: なし
    - 更新後の repository_url / branch / directory をスナップショット保存
 7. Container + BuildJob をレスポンスとして返す
 ```
+
+---
+
+### POST /v1/containers/:id/rebuild
+
+ソースコードから最新のイメージをビルドし直し、デプロイを実行する。
+
+**Request**
+
+```
+Body: なし
+```
+
+**Response 200**
+
+```json
+{
+  "data": {
+    "container": { ... },
+    "build_job": { ... }
+  }
+}
+```
+
+**フロー**
+
+1. JWT から owner_id を取得
+2. Container を取得 → なし: 404 / owner 不一致: 403
+3. 新しい `ImageID` を生成し Container レコードを更新
+4. `BuildJob` レコードを `Queued` で作成
+5. ビルドワーカーをキック
+6. Container + BuildJob を返す
+
+---
+
+### POST /v1/containers/:id/redeploy
+
+ビルド（イメージ作成）は行わず、**現在のイメージを使用して** Kubernetes へのデプロイのみをやり直す。
+
+**Request**
+
+```
+Body: なし
+```
+
+**Response 200**
+
+```json
+{
+  "data": { "container": { ... } }
+}
+```
+
+**フロー**
+
+1. JWT から owner_id を取得
+2. Container を取得 → なし: 404 / owner 不一致: 403
+3. `Container.Status` を `Deploying` に更新
+4. 現在の `ImageID` を元に `imageRef` を構築
+5. `DeployToKubernetes` を非同期で実行
+6. Container を返す
 
 ---
 
@@ -1347,3 +1410,124 @@ CONTAINER_LOG_RETENTION_DAYS=7     # コンテナログ保持日数
    DELETE FROM container_logs
    WHERE collected_at < NOW() - INTERVAL '{CONTAINER_LOG_RETENTION_DAYS} days';
 ```
+
+---
+
+## 14. Volume API
+
+### POST /v1/containers/:id/volumes
+
+コンテナに紐づく永続化ボリューム（PVC）を作成する。
+
+> [!IMPORTANT]
+> ボリュームの作成・削除を実際のマウント状態に反映させるには、コンテナの **「再デプロイ」** または **「再ビルド」** が必要です。作成しただけではコンテナ内からは見えません。
+
+**Request**
+
+```json
+{
+  "name": "uploads-storage",
+  "size_mb": 1024,
+  "mount_path": "/uploads"
+}
+```
+
+| フィールド | 必須 | デフォルト | 説明 |
+|-----------|------|-----------|------|
+| name | ✅ | - | ボリューム識別名（英数字・ハイフン） |
+| size_mb | ✅ | - | サイズ（MB単位）。最大 5120 (5GB) |
+| mount_path | ✅ | - | コンテナ内の絶対パス |
+
+**Response 201**
+
+```json
+{
+  "data": {
+    "id": "vol-abc123",
+    "project_id": "proj_xyz",
+    "container_id": "cont_123",
+    "name": "uploads-storage",
+    "size_mb": 1024,
+    "mount_path": "/uploads",
+    "created_at": "2025-01-01T00:00:00Z"
+  }
+}
+```
+
+**フロー**
+
+1. JWT から owner_id を取得
+2. Container/Project を取得し権限チェック
+3. `size_mb` が 5120 以下であることを確認
+4. `volumeID`（`vol-{uuid}`）を生成
+5. client-go で `PersistentVolumeClaim` (PVC) を作成
+   - 名前: `pvc-{volumeID}`
+   - 属性: ReadWriteOnce
+6. DB に Volume レコードを作成
+7. 成功レスポンスを返す
+   ※ 実際にコンテナにマウントされるのは次回のデプロイ（Rebuild/Redeploy）時。
+
+---
+
+### GET /v1/containers/:id/volumes
+
+コンテナに紐づくボリューム一覧を取得する。
+
+**Response 200**
+
+```json
+{
+  "data": {
+    "items": [...],
+    "total": 1
+  }
+}
+```
+
+---
+
+### DELETE /v1/volumes/:id
+
+ボリュームを削除する（非同期処理）。
+
+**Response 200**
+
+```json
+{ "data": { "id": "vol-abc123" } }
+```
+
+**フロー**
+
+1. ボリュームとプロジェクトを取得し権限チェック
+2. DB のボリュームステータスを `Deleting` に更新
+3. client-go で `pvc-{volumeID}` を削除
+4. レスポンスを即座に返す
+5. バックグラウンドの同期プロセスが、K8s上から実際にPVCが消えたことを確認した後、DBレコードを物理削除する
+
+---
+
+## 15. 永続化ボリューム（Volume）詳細仕様
+
+### K8s 連携
+
+デプロイ時（`DeployToKubernetes`）に以下の処理を動的に行う：
+
+1. `GetVolumesByContainerID(id)` でマウント対象を取得
+   - ※ `Status = 'Available'` のもののみを対象とする
+2. Deployment の `spec.template.spec.containers[0].volumeMounts` に追加：
+   ```yaml
+   - name: vol-{volumeID}
+     mountPath: {volume.mount_path}
+   ```
+3. Deployment の `spec.template.spec.volumes` に追加：
+   ```yaml
+   - name: vol-{volumeID}
+     persistentVolumeClaim:
+       claimName: pvc-{volumeID}
+   ```
+
+### 制限事項
+
+*   **単一ノード限定**: `AccessMode: ReadWriteOnce` のため、マルチノードでの共有は考慮しない（今回のユースケースに準拠）。
+*   **クォータ**: プロジェクト全体ではなく、ボリューム単位で最大 5GB の制限を設ける。
+*   **反映タイミング**: ボリュームの作成・削除は、コンテナの再起動（デプロイ）を伴うまでファイルシステムには反映されない。

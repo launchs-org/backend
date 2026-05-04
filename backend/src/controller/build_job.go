@@ -4,7 +4,6 @@ import (
 	"backend/model"
 	"backend/service"
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/gorilla/websocket"

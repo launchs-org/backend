@@ -75,6 +75,9 @@ func InitRouter(router *echo.Echo) {
 			// PATCH /v1/containers/:id - コンテナ設定更新
 			containersGroup.PATCH("/:id", controller.UpdateContainer)
 
+			// POST /v1/containers/:id/rebuild - 再ビルド
+			containersGroup.POST("/:id/rebuild", controller.RebuildContainer)
+
 			// POST /v1/containers/:id/redeploy - 再デプロイ
 			containersGroup.POST("/:id/redeploy", controller.RedeployContainer)
 
@@ -101,6 +104,11 @@ func InitRouter(router *echo.Echo) {
 
 			// DELETE /v1/containers/:id/ingress - Ingress削除
 			containersGroup.DELETE("/:id/ingress", controller.DeleteIngress)
+
+			// POST /v1/containers/:id/volumes - ボリューム作成
+			containersGroup.POST("/:id/volumes", controller.CreateContainerVolume)
+			// GET /v1/containers/:id/volumes - ボリューム一覧
+			containersGroup.GET("/:id/volumes", controller.ListContainerVolumes)
 		}
 
 		// ビルドジョブ関連のグループ
@@ -114,6 +122,13 @@ func InitRouter(router *echo.Echo) {
 
 			// GET /v1/build-jobs/:id/logs - ビルドログの取得
 			buildJobsGroup.GET("/:id/logs", controller.GetBuildJobLogs)
+		}
+
+		// ボリューム関連のグループ
+		volumesGroup := v1Group.Group("/volumes")
+		{
+			// DELETE /v1/volumes/:id - ボリューム削除
+			volumesGroup.DELETE("/:id", controller.DeleteVolume)
 		}
 
 		// stream関連のリソースグループを作成する
