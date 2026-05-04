@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"backend/database"
@@ -188,7 +189,7 @@ func syncK8sService(ctx context.Context, namespace, name, svcType string, ports 
 }
 
 // CreateIngress はIngressを作成し、Kubernetesリソースを同期します
-func CreateIngress(ctx context.Context, containerID, ownerID string, httpPort int) (map[string]interface{}, error) {
+func CreateIngress(ctx context.Context, containerID, ownerID, customDomain string, customDomainEnabled bool, httpPort int) (map[string]interface{}, error) {
 	// 1. コンテナを取得
 	container, err := model.GetContainerByID(containerID)
 	// エラーがある場合
@@ -224,18 +225,19 @@ func CreateIngress(ctx context.Context, containerID, ownerID string, httpPort in
 	encoded := base58.Encode(hasher[:])
 
 	// 4. サブドメインを生成 (例: {project}-{container}.launchs.org)
-	// subdomain := fmt.Sprintf("%s-%s.launchs.org", project.Name, container.Name)
 	subdomain := fmt.Sprintf("%s.launchs.org", encoded)
 
 	// 5. DBにレコードを作成
 	ing := &model.Ingress{
-		ID:          "ing_" + uuid.New().String(),
-		ContainerID: containerID,
-		Subdomain:   subdomain,
-		HttpPort:    httpPort,
-		TlsEnabled:  false, // 固定
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:                  "ing_" + uuid.New().String(),
+		ContainerID:         containerID,
+		Subdomain:           subdomain,
+		CustomDomain:        customDomain,
+		CustomDomainEnabled: customDomainEnabled,
+		HttpPort:            httpPort,
+		TlsEnabled:          false, // 固定
+		CreatedAt:           time.Now(),
+		UpdatedAt:           time.Now(),
 	}
 	// モデルの作成関数を呼び出す
 	if err := model.CreateIngress(ing); err != nil {
@@ -244,7 +246,11 @@ func CreateIngress(ctx context.Context, containerID, ownerID string, httpPort in
 	}
 
 	// 6. Kubernetes Ingressを同期
-	if err := syncK8sIngressRoute(ctx, project.Namespace, container.Name, subdomain, "/", httpPort); err != nil {
+	hosts := []string{subdomain}
+	if customDomain != "" && customDomainEnabled {
+		hosts = append(hosts, customDomain)
+	}
+	if err := syncK8sIngressRoute(ctx, project.Namespace, container.Name, hosts, "/", httpPort); err != nil {
 		// エラーを返す
 		return nil, fmt.Errorf("failed to sync k8s ingress: %w", err)
 	}
@@ -255,7 +261,59 @@ func CreateIngress(ctx context.Context, containerID, ownerID string, httpPort in
 	}, nil
 }
 
-func syncK8sIngressRoute(ctx context.Context, namespace, name, host, path string, port int) error {
+// UpdateIngress はIngress設定を更新し、Kubernetesリソースを同期します
+func UpdateIngress(ctx context.Context, containerID, ownerID, customDomain string, customDomainEnabled bool, httpPort int) (map[string]interface{}, error) {
+	// 1. コンテナを取得
+	container, err := model.GetContainerByID(containerID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. プロジェクトを取得して権限チェック
+	project, err := model.GetProjectByID(container.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if project.OwnerID != ownerID {
+		return nil, ErrForbidden
+	}
+
+	// 3. DBから既存のIngressを取得
+	ing, err := model.GetIngressByContainerID(containerID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("ingress not found")
+		}
+		return nil, err
+	}
+
+	// 4. フィールドを更新
+	ing.CustomDomain = customDomain
+	ing.CustomDomainEnabled = customDomainEnabled
+	ing.HttpPort = httpPort
+	ing.UpdatedAt = time.Now()
+
+	// 5. DBを更新
+	if err := model.UpdateIngress(ing); err != nil {
+		return nil, err
+	}
+
+	// 6. Kubernetes Ingressを同期
+	hosts := []string{ing.Subdomain}
+	if ing.CustomDomain != "" && ing.CustomDomainEnabled {
+		hosts = append(hosts, ing.CustomDomain)
+	}
+	if err := syncK8sIngressRoute(ctx, project.Namespace, container.Name, hosts, "/", ing.HttpPort); err != nil {
+		return nil, fmt.Errorf("failed to sync k8s ingress: %w", err)
+	}
+
+	// 7. 更新した情報を返す
+	return map[string]interface{}{
+		"data": ing,
+	}, nil
+}
+
+func syncK8sIngressRoute(ctx context.Context, namespace, name string, hosts []string, path string, port int) error {
 	// Dynamic Clientを取得 (事前に database.DynamicClient として初期化しておく)
 	client := database.K8sDynamicClient // dynamic.Interface
 
@@ -264,6 +322,19 @@ func syncK8sIngressRoute(ctx context.Context, namespace, name, host, path string
 		Group:    "traefik.io",
 		Version:  "v1alpha1",
 		Resource: "ingressroutes",
+	}
+
+	// ホストのマッチルールを組み立て
+	var hostMatches []string
+	for _, host := range hosts {
+		hostMatches = append(hostMatches, fmt.Sprintf("Host(`%s`)", host))
+	}
+	// ホストが複数ある場合は OR (||) で繋ぐ
+	matchRule := ""
+	if len(hostMatches) > 1 {
+		matchRule = fmt.Sprintf("(%s) && PathPrefix(`%s`)", strings.Join(hostMatches, " || "), path)
+	} else if len(hostMatches) == 1 {
+		matchRule = fmt.Sprintf("%s && PathPrefix(`%s`)", hostMatches[0], path)
 	}
 
 	// Unstructured (汎用構造体) で IngressRoute を組み立て
@@ -279,7 +350,7 @@ func syncK8sIngressRoute(ctx context.Context, namespace, name, host, path string
 				"entryPoints": []interface{}{"web", "websecure"},
 				"routes": []interface{}{
 					map[string]interface{}{
-						"match": fmt.Sprintf("Host(`%s`) && PathPrefix(`%s`)", host, path),
+						"match": matchRule,
 						"kind":  "Rule",
 						"services": []interface{}{
 							map[string]interface{}{

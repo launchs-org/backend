@@ -99,6 +99,9 @@ func InitRouter(router *echo.Echo) {
 			// POST /v1/containers/:id/ingress - Ingress作成
 			containersGroup.POST("/:id/ingress", controller.CreateIngress)
 
+			// PATCH /v1/containers/:id/ingress - Ingress更新
+			containersGroup.PATCH("/:id/ingress", controller.UpdateIngress)
+
 			// DELETE /v1/containers/:id/ingress - Ingress削除
 			containersGroup.DELETE("/:id/ingress", controller.DeleteIngress)
 		}

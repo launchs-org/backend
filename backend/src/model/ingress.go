@@ -12,8 +12,10 @@ type Ingress struct {
 	Subdomain   string    `json:"subdomain"`                                   // サブドメイン
 	HttpPort    int       `json:"http_port"`                                   // HTTPポート
 	TlsEnabled  bool      `json:"tls_enabled"`                                 // TLS有効フラグ
-	CreatedAt   time.Time `json:"created_at"`                                  // 作成日時
-	UpdatedAt   time.Time `json:"updated_at"`                                  // 更新日時
+	CustomDomain        string    `json:"custom_domain"`                                // カスタムドメイン
+	CustomDomainEnabled bool      `json:"custom_domain_enabled"`                        // カスタムドメイン有効フラグ
+	CreatedAt           time.Time `json:"created_at"`                                   // 作成日時
+	UpdatedAt    time.Time `json:"updated_at"`                                   // 更新日時
 }
 
 // GetIngressByContainerID はコンテナIDからIngress設定を取得します
@@ -35,6 +37,12 @@ func GetIngressByContainerID(containerID string) (*Ingress, error) {
 func CreateIngress(ingress *Ingress) error {
 	// データベースに作成
 	return database.DB.Create(ingress).Error
+}
+
+// UpdateIngress はIngress設定を更新します
+func UpdateIngress(ingress *Ingress) error {
+	// データベースのレコードを更新
+	return database.DB.Save(ingress).Error
 }
 
 // DeleteIngress はIngress設定を削除します

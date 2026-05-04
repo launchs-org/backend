@@ -76,7 +76,9 @@ func UpdateService(ctx *echo.Context) error {
 
 // CreateIngressRequest はIngress作成のリクエストボディです
 type CreateIngressRequest struct {
-	HttpPort int `json:"http_port"` // 公開するポート
+	HttpPort            int    `json:"http_port"`              // 公開するポート
+	CustomDomain        string `json:"custom_domain"`         // カスタムドメイン
+	CustomDomainEnabled bool   `json:"custom_domain_enabled"` // カスタムドメイン有効フラグ
 }
 
 // CreateIngress はIngressを作成するハンドラーです
@@ -104,7 +106,7 @@ func CreateIngress(ctx *echo.Context) error {
 	}
 
 	// サービス層の作成関数を呼び出す
-	res, err := service.CreateIngress((*ctx).Request().Context(), containerID, userID, req.HttpPort)
+	res, err := service.CreateIngress((*ctx).Request().Context(), containerID, userID, req.CustomDomain, req.CustomDomainEnabled, req.HttpPort)
 	if err != nil {
 		// すでに存在する場合のエラーハンドリング
 		if strings.Contains(err.Error(), "already exists") {
@@ -129,6 +131,60 @@ func CreateIngress(ctx *echo.Context) error {
 
 	// 成功時は201 Created
 	return (*ctx).JSON(http.StatusCreated, res)
+}
+
+// UpdateIngressRequest はIngress更新のリクエストボディです
+type UpdateIngressRequest struct {
+	HttpPort            int    `json:"http_port"`              // 公開するポート
+	CustomDomain        string `json:"custom_domain"`         // カスタムドメイン
+	CustomDomainEnabled bool   `json:"custom_domain_enabled"` // カスタムドメイン有効フラグ
+}
+
+// UpdateIngress はIngressを更新するハンドラーです
+func UpdateIngress(ctx *echo.Context) error {
+	// リクエストボディをバインド
+	var req UpdateIngressRequest
+	if err := (*ctx).Bind(&req); err != nil {
+		return (*ctx).JSON(http.StatusBadRequest, map[string]string{
+			"code":    "BAD_REQUEST",
+			"message": "リクエストパラメータが不正です",
+		})
+	}
+
+	// パスパラメータからコンテナIDを取得
+	containerID := (*ctx).Param("id")
+	// ユーザーIDを取得
+	userID, ok := (*ctx).Get("UserID").(string)
+	if !ok {
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "認証に失敗しました",
+		})
+	}
+
+	// サービス層の更新関数を呼び出す
+	res, err := service.UpdateIngress((*ctx).Request().Context(), containerID, userID, req.CustomDomain, req.CustomDomainEnabled, req.HttpPort)
+	if err != nil {
+		if err == service.ErrForbidden {
+			return (*ctx).JSON(http.StatusForbidden, map[string]string{
+				"code":    "FORBIDDEN",
+				"message": "アクセス権限がありません",
+			})
+		}
+		if strings.Contains(err.Error(), "not found") {
+			return (*ctx).JSON(http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": "Ingressが見つかりません",
+			})
+		}
+		return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": err.Error(),
+		})
+	}
+
+	// 成功時は200 OK
+	return (*ctx).JSON(http.StatusOK, res)
 }
 
 // DeleteIngress はIngressを削除するハンドラーです
