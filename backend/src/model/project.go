@@ -44,7 +44,11 @@ func GetProjectByID(id string) (*Project, error) {
 	// 取得結果を格納する変数
 	var project Project
 	// IDが一致するプロジェクトを1件取得する
-	err := database.DB.Preload("Containers").Where("id = ?", id).First(&project).Error
+	// 関連するコンテナ、さらにそのコンテナに紐づくサービス、Ingress、ボリュームをプリロードする
+	err := database.DB.Preload("Containers.Service").
+		Preload("Containers.Ingress").
+		Preload("Containers.Volumes").
+		Where("id = ?", id).First(&project).Error
 	// エラーがある場合 (見つからない場合を含む)
 	if err != nil {
 		// nilとエラーを返す

@@ -155,7 +155,7 @@ func startRailpackBuild(project model.Project, container model.Container, buildJ
 					"status":      "Success",
 					"finished_at": time.Now(),
 				})
-				model.UpdateContainerStatus(container.ID, "Success")
+				// model.UpdateContainerStatus(container.ID, "Success")
 			} else if entry.Status == k8slogwatcher.JobStatusFailed {
 				handleBuildError(buildJob.ID, container.ID, fmt.Errorf("job failed: %s", entry.Message))
 			}
