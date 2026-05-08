@@ -1,0 +1,11 @@
+FROM golang:1.26-bookworm as develop
+
+RUN apt update && apt install curl wget git iproute2 -y
+
+WORKDIR /app
+
+COPY ./src/go.mod .
+
+RUN go get -tool github.com/air-verse/air@latest
+
+ENTRYPOINT ["go", "tool", "air", "-c", "./.air.toml"]
