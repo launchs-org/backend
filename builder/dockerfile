@@ -1,0 +1,36 @@
+FROM golang:1.26-bookworm as develop
+
+# git とかの依存関係をインストールする
+RUN apt update && \
+    apt install curl wget git iproute2 -y
+
+# 作業ディレクトリを設定
+WORKDIR /app
+
+COPY ./src/go.mod .
+
+# 開発用にAIR をインストール
+RUN go get -tool github.com/air-verse/air@latest
+
+# コンテナを止めないための設定
+ENTRYPOINT [ "go","tool","air","-c","./.air.toml" ]
+
+# ビルド用のコンテナ
+FROM golang:1.26 as builder
+
+# 作業ディレクトリを設定    
+WORKDIR /go/src/app
+
+# 依存関係をコピーする
+COPY ./src .
+
+# 依存関係をインストールする
+RUN go mod download
+
+# プロジェクトをビルドする
+RUN RUN CGO_ENABLED=0 go build -o /go/bin/app
+
+# 実行用のコンテナ
+FROM gcr.io/distroless/static-debian12
+COPY --from=build /go/bin/app /
+CMD ["/app"]
