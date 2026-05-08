@@ -55,7 +55,7 @@ services:
       - "ip route add 172.33.0.0/16 via 172.20.0.1 && go install github.com/air-verse/air@latest && exec go tool air -c ./.air.toml"
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_started
   builder:
@@ -87,7 +87,7 @@ services:
       - "ip route add 172.33.0.0/16 via 172.20.0.1 && go install github.com/air-verse/air@latest && exec go tool air -c ./.air.toml"
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_started
 
@@ -117,7 +117,7 @@ services:
       - "ip route add 172.33.0.0/16 via 172.20.0.1 && go install github.com/air-verse/air@latest && exec go tool air -c ./.air.toml"
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_started
 
