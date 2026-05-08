@@ -2,7 +2,7 @@ package controller
 
 import (
 	"backend/service"
-	"backend/utils"
+	"launchs/shared/utils"
 	"net/http"
 
 	"github.com/labstack/echo/v5"

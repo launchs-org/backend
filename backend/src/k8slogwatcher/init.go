@@ -1,7 +1,7 @@
 package k8slogwatcher
 
 import (
-	"backend/database"
+	"launchs/shared/database"
 	"fmt"
 
 	"k8s.io/client-go/kubernetes"

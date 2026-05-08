@@ -1,7 +1,7 @@
 package middlewares
 
 import (
-	"backend/logger"
+	"launchs/shared/logger"
 	"net/http"
 
 	"github.com/labstack/echo/v5"

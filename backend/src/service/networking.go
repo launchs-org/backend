@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"backend/database"
-	"backend/model"
+	"launchs/shared/database"
+	"launchs/shared/model"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"

@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"backend/model"
+	"launchs/shared/model"
 	"backend/service"
 	"context"
 	"net/http"

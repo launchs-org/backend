@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"backend/model"
+	"launchs/shared/model"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/crane"

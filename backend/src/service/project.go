@@ -1,8 +1,8 @@
 package service
 
 import (
-	"backend/database" // データベースパッケージ
-	"backend/model"    // モデルパッケージ
+	"launchs/shared/database" // データベースパッケージ
+	"launchs/shared/model"   // モデルパッケージ
 	"context"         // コンテキスト
 	"errors"          // エラー処理
 	"fmt"             // 文字列フォーマット

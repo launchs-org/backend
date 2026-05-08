@@ -1,10 +1,10 @@
 package main
 
 import (
-	"backend/database"    // データベース
-	"backend/middlewares" // ミドルウェア
-	"backend/model"       // モデル
-	"backend/k8slogwatcher" // Kubernetes ログウォッチャー
+	"launchs/shared/database" // データベース
+	"backend/middlewares"     // ミドルウェア
+	"launchs/shared/model"   // モデル
+	"backend/k8slogwatcher"  // Kubernetes ログウォッチャー
 	"backend/service"
 	"net/http" // HTTP
 

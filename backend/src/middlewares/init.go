@@ -1,7 +1,7 @@
 package middlewares
 
 import (
-	"backend/logger"
+	"launchs/shared/logger"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/pem"

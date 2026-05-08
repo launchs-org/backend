@@ -6,8 +6,8 @@ import (
 	"fmt"             // 文字列フォーマット
 	"time"            // 時間
 
-	"backend/database" // データベースパッケージ
-	"backend/model"    // モデルパッケージ
+	"launchs/shared/database" // データベースパッケージ
+	"launchs/shared/model"   // モデルパッケージ
 
 	"github.com/google/uuid"        // UUID生成
 	corev1 "k8s.io/api/core/v1"    // K8s API

@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"backend/model"   // モデルパッケージ
+	"launchs/shared/model" // モデルパッケージ
 	"backend/service" // サービスパッケージ
 	"net/http"        // HTTPステータス
 	"github.com/labstack/echo/v5" // Echoフレームワーク

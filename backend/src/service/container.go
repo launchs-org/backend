@@ -7,9 +7,9 @@ import (
 	"os"
 	"time"
 
-	"backend/database"
+	"launchs/shared/database"
 	"backend/k8slogwatcher"
-	"backend/model"
+	"launchs/shared/model"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
