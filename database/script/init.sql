@@ -68,3 +68,9 @@ CREATE TRIGGER trigger_notify_task_created
     AFTER INSERT ON tasks
     FOR EACH ROW
     EXECUTE FUNCTION notify_task_created();
+
+-- main ユーザーに tasks テーブルへの権限を付与
+GRANT ALL PRIVILEGES ON TABLE tasks TO main;
+GRANT ALL PRIVILEGES ON SEQUENCE tasks_id_seq TO main;
+GRANT EXECUTE ON FUNCTION notify_task_created() TO main;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO main;
