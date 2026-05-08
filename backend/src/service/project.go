@@ -4,9 +4,11 @@ import (
 	"launchs/shared/database" // データベースパッケージ
 	"launchs/shared/model"   // モデルパッケージ
 	"context"         // コンテキスト
+	"encoding/json"
 	"errors"          // エラー処理
 	"fmt"             // 文字列フォーマット
 	"regexp"          // 正規表現
+	"time"
 
 	"github.com/google/uuid" // UUID生成
 	corev1 "k8s.io/api/core/v1" // K8s API
@@ -190,14 +192,18 @@ func DeleteProject(ctx context.Context, id string, userID string) error {
 		return ErrForbidden
 	}
 
-	// Kubernetes API を呼び出して Namespace を実際に削除
-	err = database.K8sClientset.CoreV1().Namespaces().Delete(ctx, project.Namespace, metav1.DeleteOptions{})
-	// K8sリソース作成に失敗した場合
-	if err != nil {
-		// エラーをラップして返す
-		return fmt.Errorf("Kubernetes Namespace の削除に失敗しました: %w", err)
+	// delete_project タスクをキューに投入
+	payload := map[string]string{
+		"project_id": id,
+		"namespace":  project.Namespace,
 	}
-
-	// プロジェクトを削除
-	return model.DeleteProject(id)
+	payloadJSON, _ := json.Marshal(payload)
+	deleteTask := &model.Task{
+		ID:        "task_delproj_" + id[:8] + "_" + fmt.Sprintf("%d", time.Now().UnixNano()),
+		TaskType:  "delete_project",
+		Status:    "pending",
+		Payload:   string(payloadJSON),
+		TimeoutAt: time.Now().Add(10 * time.Minute),
+	}
+	return model.CreateTask(deleteTask)
 }

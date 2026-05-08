@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var (
@@ -33,9 +33,8 @@ type CreateContainerInput struct {
 	Resources     string
 }
 
-// CreateContainer はコンテナを作成し、ビルドジョブを発行します
+// CreateContainer はコンテナを作成し、build タスクをキューに投入します
 func CreateContainer(ctx context.Context, input CreateContainerInput) (map[string]interface{}, error) {
-	// プロジェクトを取得
 	project, err := model.GetProjectByID(input.ProjectID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -44,12 +43,10 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 		return nil, err
 	}
 
-	// 権限チェック
 	if project.OwnerID != input.OwnerID {
 		return nil, ErrForbidden
 	}
 
-	// 重複チェック
 	existing, err := model.GetContainerCountByProjectIDAndName(input.ProjectID, input.Name)
 	if err != nil {
 		return nil, err
@@ -58,13 +55,11 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 		return nil, ErrContainerAlreadyExists
 	}
 
-	// 各種IDを生成
 	containerID := "cont_" + uuid.New().String()
 	imageID := "img_" + uuid.New().String()
 	serviceID := "svc_" + uuid.New().String()
 	buildJobID := "bj_" + uuid.New().String()
 
-	// デフォルト値の設定
 	branch := input.Branch
 	if branch == "" {
 		branch = "main"
@@ -77,18 +72,15 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 	if replicas == 0 {
 		replicas = 1
 	}
-
 	envVarsStr := input.EnvVars
 	if envVarsStr == "" {
 		envVarsStr = "{}"
 	}
-
 	resourcesStr := input.Resources
 	if resourcesStr == "" {
 		resourcesStr = "{}"
 	}
 
-	// Image作成
 	image := model.Image{
 		ID:          imageID,
 		ContainerID: containerID,
@@ -97,8 +89,6 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-
-	// Container作成
 	container := model.Container{
 		ID:            containerID,
 		ProjectID:     project.ID,
@@ -110,12 +100,10 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 		Replicas:      replicas,
 		EnvVars:       envVarsStr,
 		Resources:     resourcesStr,
-		Status:        "Stopped",
+		Status:        "Queued",
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}
-
-	// Service作成
 	k8sService := model.Service{
 		ID:          serviceID,
 		ContainerID: containerID,
@@ -124,8 +112,6 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
-
-	// BuildJob作成
 	buildJob := model.BuildJob{
 		ID:            buildJobID,
 		ProjectID:     project.ID,
@@ -138,17 +124,15 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 		UpdatedAt:     time.Now(),
 	}
 
-	// トランザクションで保存
-	err = model.CreateContainerWithRelatedRecords(&image, &container, &k8sService, &buildJob)
-
-	if err != nil {
+	if err := model.CreateContainerWithRelatedRecords(&image, &container, &k8sService, &buildJob); err != nil {
 		return nil, err
 	}
 
-	// railpackのビルドを発行する (非同期処理)
-	go startRailpackBuild(*project, container, buildJob)
+	// build タスクをキューに投入
+	if err := enqueueBuildTask(project, &container, buildJob); err != nil {
+		fmt.Printf("[service] failed to enqueue build task: %v\n", err)
+	}
 
-	// レスポンスを作成
 	return map[string]interface{}{
 		"data": map[string]interface{}{
 			"container": container,
@@ -157,9 +141,8 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 	}, nil
 }
 
-// DeleteContainer はコンテナと関連するリソースを削除します
+// DeleteContainer はコンテナ削除タスクをキューに投入します
 func DeleteContainer(ctx context.Context, containerID string, ownerID string) error {
-	// 1. コンテナを取得
 	container, err := model.GetContainerByID(containerID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -168,7 +151,6 @@ func DeleteContainer(ctx context.Context, containerID string, ownerID string) er
 		return err
 	}
 
-	// 2. 権限チェック
 	project, err := model.GetProjectByID(container.ProjectID)
 	if err != nil {
 		return err
@@ -177,43 +159,22 @@ func DeleteContainer(ctx context.Context, containerID string, ownerID string) er
 		return ErrForbidden
 	}
 
-	// 3. 削除処理 (トランザクション内)
-	err = database.DB.Transaction(func(tx *gorm.DB) error {
-		// イメージの削除
-		if err := model.DeleteImagesByContainerID(containerID); err != nil {
-			return err
-		}
-		// サービス設定の削除
-		if err := model.DeleteServiceByContainerID(containerID); err != nil {
-			return err
-		}
-		// Ingress設定の削除
-		if err := model.DeleteIngress(containerID); err != nil {
-			return err
-		}
-		// ビルドジョブの削除
-		if err := model.DeleteBuildJobsByContainerID(containerID); err != nil {
-			return err
-		}
-		// コンテナ自身の削除
-		if err := model.DeleteContainer(containerID); err != nil {
-			return err
-		}
+	// delete_container タスクを投入
+	payload := map[string]string{
+		"container_id": containerID,
+		"namespace":    project.Namespace,
+		"image_name":   container.ID,
+	}
+	payloadJSON, _ := json.Marshal(payload)
 
-		// Kubernetes リソースの削除
-		// Deployment の削除
-		_ = database.K8sClientset.AppsV1().Deployments(project.Namespace).Delete(ctx, container.Name, metav1.DeleteOptions{})
-
-		// Service の削除
-		_ = database.K8sClientset.CoreV1().Services(project.Namespace).Delete(ctx, container.Name, metav1.DeleteOptions{})
-
-		// Ingress の削除 (Ingress名がコンテナ名と一致していると仮定)
-		_ = database.K8sClientset.NetworkingV1().Ingresses(project.Namespace).Delete(ctx, container.Name, metav1.DeleteOptions{})
-
-		return nil
-	})
-
-	return err
+	deleteTask := &model.Task{
+		ID:        "task_del_" + containerID[:8] + "_" + fmt.Sprintf("%d", time.Now().UnixNano()),
+		TaskType:  "delete_container",
+		Status:    "pending",
+		Payload:   string(payloadJSON),
+		TimeoutAt: time.Now().Add(5 * time.Minute),
+	}
+	return model.CreateTask(deleteTask)
 }
 
 type UpdateContainerInput struct {
@@ -227,9 +188,8 @@ type UpdateContainerInput struct {
 	Resources     *string
 }
 
-// UpdateContainer はコンテナの設定を更新し、再ビルドを開始します
+// UpdateContainer はコンテナの設定を更新し、build タスクを投入します
 func UpdateContainer(ctx context.Context, input UpdateContainerInput) (map[string]interface{}, error) {
-	// 1. コンテナを取得
 	container, err := model.GetContainerByID(input.ContainerID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -238,7 +198,6 @@ func UpdateContainer(ctx context.Context, input UpdateContainerInput) (map[strin
 		return nil, err
 	}
 
-	// 2. プロジェクトを取得して権限チェック
 	project, err := model.GetProjectByID(container.ProjectID)
 	if err != nil {
 		return nil, err
@@ -247,7 +206,6 @@ func UpdateContainer(ctx context.Context, input UpdateContainerInput) (map[strin
 		return nil, ErrForbidden
 	}
 
-	// 3. フィールドの更新
 	updates := make(map[string]interface{})
 	if input.RepositoryURL != nil {
 		container.RepositoryURL = *input.RepositoryURL
@@ -274,18 +232,15 @@ func UpdateContainer(ctx context.Context, input UpdateContainerInput) (map[strin
 		updates["resources"] = *input.Resources
 	}
 
-	// 再ビルドのために新しいイメージIDを生成
 	newImageID := "img_" + uuid.New().String()
 	container.ImageID = newImageID
 	updates["image_id"] = newImageID
 	updates["updated_at"] = time.Now()
 
-	// 4. 更新を保存
 	if err := database.DB.Model(container).Updates(updates).Error; err != nil {
 		return nil, err
 	}
 
-	// 5. 新しい Image レコードを作成
 	newImage := model.Image{
 		ID:          newImageID,
 		ContainerID: container.ID,
@@ -298,7 +253,6 @@ func UpdateContainer(ctx context.Context, input UpdateContainerInput) (map[strin
 		return nil, err
 	}
 
-	// 6. BuildJob を作成
 	buildJob := model.BuildJob{
 		ID:            "bj_" + uuid.New().String(),
 		ProjectID:     project.ID,
@@ -314,8 +268,9 @@ func UpdateContainer(ctx context.Context, input UpdateContainerInput) (map[strin
 		return nil, err
 	}
 
-	// 7. ビルドを開始
-	go startRailpackBuild(*project, *container, buildJob)
+	if err := enqueueBuildTask(project, container, buildJob); err != nil {
+		fmt.Printf("[service] failed to enqueue build task: %v\n", err)
+	}
 
 	return map[string]interface{}{
 		"data": map[string]interface{}{
@@ -325,18 +280,16 @@ func UpdateContainer(ctx context.Context, input UpdateContainerInput) (map[strin
 	}, nil
 }
 
-// RebuildContainer はコンテナを再ビルドしてデプロイします
+// RebuildContainer はコンテナを再ビルドします
 func RebuildContainer(ctx context.Context, containerID, ownerID string) (map[string]interface{}, error) {
-	// UpdateContainer は内部で新しい ImageID を生成し、ビルドを開始する
 	return UpdateContainer(ctx, UpdateContainerInput{
 		ContainerID: containerID,
 		OwnerID:     ownerID,
 	})
 }
 
-// RedeployContainer はコンテナを再デプロイします (ビルドなし)
+// RedeployContainer はコンテナを再デプロイします（ビルドなし）
 func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[string]interface{}, error) {
-	// 1. コンテナを取得
 	container, err := model.GetContainerByID(containerID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -345,7 +298,6 @@ func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[st
 		return nil, err
 	}
 
-	// 2. プロジェクトを取得して権限チェック
 	project, err := model.GetProjectByID(container.ProjectID)
 	if err != nil {
 		return nil, err
@@ -354,10 +306,6 @@ func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[st
 		return nil, ErrForbidden
 	}
 
-	// 3. ステータスをデプロイ中に変更
-	model.UpdateContainerStatus(container.ID, "Deploying")
-
-	// 4. imageRef を構築 (image.go のロジックに合わせる)
 	registryHost := os.Getenv("REGISTRY_HOST")
 	if registryHost == "" {
 		registryHost = "172.33.0.1"
@@ -366,12 +314,27 @@ func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[st
 	if registryProject == "" {
 		registryProject = "launchs"
 	}
-	imageName := container.ID
-	imageTag := container.ImageID
-	imageRef := fmt.Sprintf("%s/%s/%s:%s", registryHost, registryProject, imageName, imageTag)
+	imageRef := fmt.Sprintf("%s/%s/%s:%s", registryHost, registryProject, container.ID, container.ImageID)
 
-	// 5. デプロイ実行 (非同期)
-	go DeployToKubernetes(container.ID, imageRef)
+	// deploy タスクをキューに投入
+	payload := map[string]string{
+		"container_id": container.ID,
+		"image_ref":    imageRef,
+		"namespace":    project.Namespace,
+		"build_job_id": "",
+	}
+	payloadJSON, _ := json.Marshal(payload)
+
+	deployTask := &model.Task{
+		ID:        "task_deploy_" + container.ID[:8] + "_" + fmt.Sprintf("%d", time.Now().UnixNano()),
+		TaskType:  "deploy",
+		Status:    "pending",
+		Payload:   string(payloadJSON),
+		TimeoutAt: time.Now().Add(10 * time.Minute),
+	}
+	if err := model.CreateTask(deployTask); err != nil {
+		return nil, err
+	}
 
 	return map[string]interface{}{
 		"data": container,
@@ -383,7 +346,6 @@ type ListBuildJobsInput struct {
 	OwnerID     string
 }
 
-// ListBuildJobs はコンテナのビルド履歴一覧を取得します
 func ListBuildJobs(ctx context.Context, input ListBuildJobsInput) (map[string]interface{}, error) {
 	container, err := model.GetContainerByID(input.ContainerID)
 	if err != nil {
@@ -414,7 +376,6 @@ func ListBuildJobs(ctx context.Context, input ListBuildJobsInput) (map[string]in
 	}, nil
 }
 
-// GetContainer はコンテナの詳細を取得します
 func GetContainer(ctx context.Context, containerID string, ownerID string) (map[string]interface{}, error) {
 	container, err := model.GetContainerByID(containerID)
 	if err != nil {
@@ -437,9 +398,7 @@ func GetContainer(ctx context.Context, containerID string, ownerID string) (map[
 	}, nil
 }
 
-// StreamContainerLogs はコンテナの実行ログをストリーミングします
 func StreamContainerLogs(ctx context.Context, containerID string, ownerID string, baselogCallback func(k8slogwatcher.LogEntry)) error {
-	// 1. コンテナを取得
 	container, err := model.GetContainerByID(containerID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -448,7 +407,6 @@ func StreamContainerLogs(ctx context.Context, containerID string, ownerID string
 		return err
 	}
 
-	// 2. プロジェクトを取得して権限チェック
 	project, err := model.GetProjectByID(container.ProjectID)
 	if err != nil {
 		return err
@@ -457,29 +415,50 @@ func StreamContainerLogs(ctx context.Context, containerID string, ownerID string
 		return ErrForbidden
 	}
 
-	// 3. 購読を開始 (1時間前からのログを取得)
 	sinceTime := time.Now().Add(-1 * time.Hour)
-
-	// callback を生成
 	logCallback := func(entry k8slogwatcher.LogEntry) {
-		// データベースに保存する
-
 		baselogCallback(entry)
 	}
-	
-	// GlobalWatcher を使用して Deployment (コンテナ名と一致) を監視
+
 	sub, err := k8slogwatcher.GlobalWatcher.Subscribe(ctx, project.Namespace, container.Name, sinceTime, logCallback)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe container logs: %w", err)
 	}
 
-	// コンテキストがキャンセルされるまで待機 (WebSocketが切れるまで)
 	<-ctx.Done()
 
-	// 購読を停止
 	k8slogwatcher.GlobalWatcher.Unsubscribe(project.Namespace, container.Name)
-
-	_ = sub // Subscription を使用しない場合の警告回避
+	_ = sub
 
 	return nil
+}
+
+// enqueueBuildTask は build タスクを tasks テーブルに INSERT します
+func enqueueBuildTask(project *model.Project, container *model.Container, buildJob model.BuildJob) error {
+	payload := map[string]string{
+		"build_job_id":   buildJob.ID,
+		"container_id":   container.ID,
+		"image_id":       container.ImageID,
+		"project_id":     project.ID,
+		"project_name":   project.Name,
+		"container_name": container.Name,
+		"namespace":      project.Namespace,
+		"repository_url": container.RepositoryURL,
+		"branch":         container.Branch,
+		"directory":      container.Directory,
+		"build_type":     "railpack",
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	task := &model.Task{
+		ID:        "task_build_" + buildJob.ID,
+		TaskType:  "build",
+		Status:    "pending",
+		Payload:   string(payloadJSON),
+		TimeoutAt: time.Now().Add(30 * time.Minute),
+	}
+	return model.CreateTask(task)
 }

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"launchs/shared/database" // データベース
 	"backend/middlewares"     // ミドルウェア
 	"launchs/shared/model"   // モデル
 	"backend/k8slogwatcher"  // Kubernetes ログウォッチャー
 	"backend/service"
+	"backend/worker"
 	"net/http" // HTTP
 
 	"github.com/labstack/echo/v5"            // Echo
@@ -34,10 +36,18 @@ func main() {
 		&model.Service{},
 		&model.Ingress{},
 		&model.Volume{},
+		&model.Task{},
 	); err != nil {
 		// マイグレーション失敗時はパニック
 		panic("failed to migrate database: " + err.Error())
 	}
+
+	// バックグラウンドワーカーを起動
+	workerCtx := context.Background()
+	go worker.RunBuildWorker(workerCtx)
+	go worker.RunDeployWorker(workerCtx)
+	go worker.RunDeleteWorker(workerCtx)
+	go worker.RunTimeoutWorker(workerCtx)
 
 	// Echo インスタンスを作成
 	router := echo.New()
