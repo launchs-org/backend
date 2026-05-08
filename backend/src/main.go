@@ -28,6 +28,7 @@ func main() {
 	service.StartVolumeSync()
 
 	// データベースの自動マイグレーションを実行 (各種テーブルの作成・更新)
+	// Task テーブルは init.sql で作成済みなため除外
 	if err := database.DB.AutoMigrate(
 		&model.Project{},
 		&model.Container{},
@@ -36,7 +37,6 @@ func main() {
 		&model.Service{},
 		&model.Ingress{},
 		&model.Volume{},
-		&model.Task{},
 	); err != nil {
 		// マイグレーション失敗時はパニック
 		panic("failed to migrate database: " + err.Error())
