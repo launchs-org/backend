@@ -35,6 +35,7 @@ services:
     volumes:
       - ./backend/src:/app
       - ./backend/received:/received
+      - ./shared:/shared
       - ~/.kube/config:/root/.kube/config
     ports:
       - 8090:8090
@@ -53,8 +54,70 @@ services:
       - -c
       - "ip route add 172.33.0.0/16 via 172.20.0.1 && exec go tool air -c ./.air.toml"
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+  builder:
+    hostname: builder
+    build:
+      context: ./builder
+      dockerfile: dockerfile
+      target: develop
+    volumes:
+      - ./builder/src:/app
+      - ./builder/received:/received
+      - ./shared:/shared
+      - ~/.kube/config:/root/.kube/config
+    ports:
+      - 8091:8091
+    env_file:
+      - ./config/app.env
+      - ./openssl/jwtKeys/public.env
+    tty: true
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - default
+      - host_network
+    entrypoint:
+      - /bin/bash
+      - -c
+      - "ip route add 172.33.0.0/16 via 172.20.0.1 && exec go tool air -c ./.air.toml"
+    depends_on:
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+
+  watcher:
+    hostname: watcher
+    build:
+      context: ./watcher
+      dockerfile: dockerfile
+      target: develop
+    volumes:
+      - ./watcher/src:/app
+      - ./shared:/shared
+      - ~/.kube/config:/root/.kube/config
+    env_file:
+      - ./config/app.env
+      - ./openssl/jwtKeys/public.env
+    tty: true
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    networks:
+      - default
+      - host_network
+    entrypoint:
+      - /bin/bash
+      - -c
+      - "ip route add 172.33.0.0/16 via 172.20.0.1 && exec go tool air -c ./.air.toml"
+    depends_on:
+      postgres:
+        condition: service_started
       redis:
         condition: service_started
 
@@ -68,30 +131,32 @@ services:
     volumes:
       - ./auth/icons:/assets/icons
     depends_on:
-      migrate:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_started
 
   migrate:
     image: ghcr.io/mattuu0/authbase/auth:latest
     env_file:
         - ./config/auth.env
     command: ["/auth","migrate","-r"]
+    depends_on:
+      postgres:
+        condition: service_started
 
-  mysql:
+  postgres:
     hostname: db
-    image: mysql
+    image: postgres:16-alpine
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: root
+      POSTGRES_PASSWORD: root
       TZ: Asia/Tokyo
     volumes:
-      - dbdata:/var/lib/mysql
-      - ./database/my.cnf:/etc/mysql/conf.d/my.cnf
+      - dbdata:/var/lib/postgresql/data
       - ./database/script/init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - 3306:3306
+      - 5432:5432
     healthcheck:
-      test: [ "CMD", "mysqladmin", "ping", "-h", "db", "-u", "root", "-proot" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
       timeout: 10s
       retries: 5
@@ -115,3 +180,4 @@ networks:
       config:
         - subnet: 172.20.0.0/16
           gateway: 172.20.0.1
+ 
