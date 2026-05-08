@@ -52,7 +52,7 @@ services:
     entrypoint:
       - /bin/bash
       - -c
-      - "ip route add 172.33.0.0/16 via 172.20.0.1 && exec go tool air -c ./.air.toml"
+      - "ip route add 172.33.0.0/16 via 172.20.0.1 && go install github.com/air-verse/air@latest && exec go tool air -c ./.air.toml"
     depends_on:
       postgres:
         condition: service_started
@@ -84,7 +84,7 @@ services:
     entrypoint:
       - /bin/bash
       - -c
-      - "ip route add 172.33.0.0/16 via 172.20.0.1 && exec go tool air -c ./.air.toml"
+      - "ip route add 172.33.0.0/16 via 172.20.0.1 && go install github.com/air-verse/air@latest && exec go tool air -c ./.air.toml"
     depends_on:
       postgres:
         condition: service_started
@@ -114,7 +114,7 @@ services:
     entrypoint:
       - /bin/bash
       - -c
-      - "ip route add 172.33.0.0/16 via 172.20.0.1 && exec go tool air -c ./.air.toml"
+      - "ip route add 172.33.0.0/16 via 172.20.0.1 && go install github.com/air-verse/air@latest && exec go tool air -c ./.air.toml"
     depends_on:
       postgres:
         condition: service_started

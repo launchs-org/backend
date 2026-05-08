@@ -7,13 +7,10 @@ RUN apt update && \
 # 作業ディレクトリを設定
 WORKDIR /app
 
+# go.mod only (no dependency download yet, shared module is mounted at runtime)
 COPY ./src/go.mod .
 
-# 開発用にAIR をインストール
-RUN go get -tool github.com/air-verse/air@latest
-
-# コンテナを止めないための設定
-ENTRYPOINT [ "go","tool","air","-c","./.air.toml" ]
+# air はホストの go tool で実行するため、ここではインストールしない
 
 # ビルド用のコンテナ
 FROM golang:1.26 as builder
