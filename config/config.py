@@ -56,7 +56,25 @@ def create_env_file(file_path, content):
         file.write(content.strip())
     print(f"✅ ファイル '{file_path}' を生成しました。")
 
-def create_auth_env():
+def get_db_config():
+    """
+    使用するデータベースの種類を選択させ、対応する設定を返します。
+    """
+    print("\n--- データベース設定 ---")
+    print("1: MySQL")
+    print("2: PostgreSQL")
+    choice = input("使用するデータベースを選択してください (1/2, デフォルト: 1): ")
+    
+    if choice == '2':
+        return "postgres", \
+               "host=db user=main password=main dbname=authdb port=5432 sslmode=disable TimeZone=Asia/Tokyo", \
+               "host=db user=main password=main dbname=maindb port=5432 sslmode=disable TimeZone=Asia/Tokyo"
+    else:
+        return "mysql", \
+               "main:main@tcp(db:3306)/authdb?charset=utf8mb4&parseTime=True&loc=Local", \
+               "main:main@tcp(db:3306)/maindb?charset=utf8mb4&parseTime=True&loc=Local"
+
+def create_auth_env(db_type, db_dsn):
     """
     auth.env ファイルを生成するための設定情報を対話形式で取得し、ファイルに書き出します。
     """
@@ -94,7 +112,8 @@ MicrosoftCallback = https://localhost:8947/auth/oauth/microsoftonline/callback
 AdminEmail = "{admin_email}"
 AdminPassword = "{admin_password}"
 
-DB_DSN = "main:main@tcp(db:3306)/authdb?charset=utf8mb4&parseTime=True&loc=Local"
+DB_TYPE = "{db_type}"
+DB_DSN = "{db_dsn}"
 
 TOKEN_SECRET = {token_secret_key}
 ADMIN_SESSION_KEY = {admin_session_key}
@@ -120,15 +139,19 @@ def main():
     if not confirm_overwrite_all(files_to_check):
         return
 
+    # データベース設定を取得
+    db_type, auth_dsn, app_dsn = get_db_config()
+
     # auth.env ファイルを生成
-    create_auth_env()
+    create_auth_env(db_type, auth_dsn)
 
     # app.env のテンプレート
     session_secret_key = generate_random_key()
     app_env_template = f"""
 SessionSecret = "{session_secret_key}"
 GRPC_SERVER = auth:9000
-DATABASE_DSN = "main:main@tcp(db:3306)/maindb?charset=utf8mb4&parseTime=True&loc=Local"
+DATABASE_TYPE = "{db_type}"
+DATABASE_DSN = "{app_dsn}"
 """
 
     # app.env ファイルを生成

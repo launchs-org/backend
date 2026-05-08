@@ -3,7 +3,7 @@ package database
 import (
 	"os"
 
-	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -14,7 +14,7 @@ func Init() {
 	dsn := os.Getenv("DATABASE_DSN")
 
 	var err error
-	DB, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		panic("failed to connect database: " + err.Error())
 	}

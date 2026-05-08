@@ -33,20 +33,20 @@ tasks:
   # データベース接続
   dbshell:
     cmds:
-      - docker compose exec {{.DBContainer}} mysql -u root -p {{.Database}} --password=$DBPassword
+      - docker compose exec {{.DBContainer}} psql -U {{.User}} -d {{.Database}}
     env:
-      DBPassword: root
+      PGPASSWORD: root
     vars:
-      # Database: maindb
-      Database: authdb
-      DBContainer: mysql
+      Database: maindb
+      User: main
+      DBContainer: postgres
     silent: true
   
   # データベースのリセット
   dbreset:
     cmds:
-      - docker compose down mysql --volumes --remove-orphans
-      - docker compose up mysql -d --build
+      - docker compose down postgres --volumes --remove-orphans
+      - docker compose up postgres -d --build
     silent: true
   
   # 初回セットアップ

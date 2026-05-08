@@ -51,9 +51,9 @@ func GetBuildJobByID(id string) (*BuildJob, error) {
 
 // AppendBuildLog はビルドログを追記します
 func AppendBuildLog(id string, log []byte) error {
-	// MySQLの CONCAT を使用して追記します
+	// PostgreSQLの || 演算子を使用して追記します
 	// 初期値が NULL の場合を考慮して COALESCE を使用します
-	err := database.DB.Model(&BuildJob{}).Where("id = ?", id).Update("build_log", gorm.Expr("CONCAT(COALESCE(build_log, ''), ?)", log)).Error
+	err := database.DB.Model(&BuildJob{}).Where("id = ?", id).Update("build_log", gorm.Expr("COALESCE(build_log, '\\x'::bytea) || ?", log)).Error
 	if err != nil {
 		database.DB.Logger.Error(context.Background(), "failed to append build log: %v", err)
 	}
