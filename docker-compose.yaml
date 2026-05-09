@@ -44,15 +44,12 @@ services:
       - ./openssl/jwtKeys/public.env
     tty: true
     restart: always
-    cap_add:
-      - NET_ADMIN
     networks:
       - default
-      - host_network
     entrypoint:
       - /bin/bash
       - -c
-      - "ip route add 172.33.0.0/16 via 172.20.0.1 && go install github.com/air-verse/air@latest && exec go tool air -c ./.air.toml"
+      - "go install github.com/air-verse/air@latest && exec go tool air -c ./.air.toml"
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,7 +69,7 @@ services:
     ports:
       - 8091:8091
     env_file:
-      - ./config/app.env
+      - ./config/builder.env
       - ./openssl/jwtKeys/public.env
     tty: true
     restart: always
@@ -102,7 +99,7 @@ services:
       - ./shared:/shared
       - ~/.kube/config:/root/.kube/config
     env_file:
-      - ./config/app.env
+      - ./config/watcher.env
       - ./openssl/jwtKeys/public.env
     tty: true
     restart: always
@@ -119,6 +116,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_started
+      builder:
         condition: service_started
 
   auth:
@@ -143,6 +142,17 @@ services:
       postgres:
         condition: service_started
 
+  riverui:
+    image: ghcr.io/riverqueue/riverui:latest
+    ports:
+      - 8080:8080
+    environment:
+      DATABASE_URL: "postgres://task_user:task_pass@db:5432/taskdb?sslmode=disable"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+
   postgres:
     hostname: db
     image: postgres:16-alpine
@@ -166,10 +176,13 @@ services:
     restart: always
     ports:
       - 6379:6379
+    networks:
+      - default
 
 volumes:
   dbdata:
     driver: local
+
 
 networks:
   default:
