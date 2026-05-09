@@ -1,14 +1,14 @@
 package service
 
 import (
-	"launchs/shared/database" // データベースパッケージ
-	"launchs/shared/model"   // モデルパッケージ
-	"context"         // コンテキスト
-	"encoding/json"
-	"errors"          // エラー処理
-	"fmt"             // 文字列フォーマット
-	"regexp"          // 正規表現
-	"time"
+	"launchs/shared/database"   // データベースパッケージ
+	"launchs/shared/job_queue"
+	"launchs/shared/job_queue/jobs"
+	"launchs/shared/model"     // モデルパッケージ
+	"context"                  // コンテキスト
+	"errors"                   // エラー処理
+	"fmt"                      // 文字列フォーマット
+	"regexp"                   // 正規表現
 
 	"github.com/google/uuid" // UUID生成
 	corev1 "k8s.io/api/core/v1" // K8s API
@@ -192,18 +192,9 @@ func DeleteProject(ctx context.Context, id string, userID string) error {
 		return ErrForbidden
 	}
 
-	// delete_project タスクをキューに投入
-	payload := map[string]string{
-		"project_id": id,
-		"namespace":  project.Namespace,
-	}
-	payloadJSON, _ := json.Marshal(payload)
-	deleteTask := &model.Task{
-		ID:        "task_delproj_" + id[:8] + "_" + fmt.Sprintf("%d", time.Now().UnixNano()),
-		TaskType:  "delete_project",
-		Status:    "pending",
-		Payload:   string(payloadJSON),
-		TimeoutAt: time.Now().Add(10 * time.Minute),
-	}
-	return model.CreateTask(deleteTask)
+	// delete_project ジョブをキューに追加
+	return job_queue.Enqueue(ctx, jobs.DeleteProjectJobArgs{
+		ProjectID: id,
+		Namespace: project.Namespace,
+	}, nil)
 }

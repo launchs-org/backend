@@ -2,14 +2,14 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"time"
 
 	"launchs/shared/database"
-	"backend/k8slogwatcher"
+	"launchs/shared/job_queue"
+	"launchs/shared/job_queue/jobs"
 	"launchs/shared/model"
 
 	"github.com/google/uuid"
@@ -129,7 +129,7 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 	}
 
 	// build タスクをキューに投入
-	if err := enqueueBuildTask(project, &container, buildJob); err != nil {
+	if err := enqueueBuildTask(ctx, project, &container, buildJob); err != nil {
 		fmt.Printf("[service] failed to enqueue build task: %v\n", err)
 	}
 
@@ -159,22 +159,12 @@ func DeleteContainer(ctx context.Context, containerID string, ownerID string) er
 		return ErrForbidden
 	}
 
-	// delete_container タスクを投入
-	payload := map[string]string{
-		"container_id": containerID,
-		"namespace":    project.Namespace,
-		"image_name":   container.ID,
-	}
-	payloadJSON, _ := json.Marshal(payload)
-
-	deleteTask := &model.Task{
-		ID:        "task_del_" + containerID[:8] + "_" + fmt.Sprintf("%d", time.Now().UnixNano()),
-		TaskType:  "delete_container",
-		Status:    "pending",
-		Payload:   string(payloadJSON),
-		TimeoutAt: time.Now().Add(5 * time.Minute),
-	}
-	return model.CreateTask(deleteTask)
+	// delete_container ジョブをキューに追加
+	return job_queue.Enqueue(ctx, jobs.DeleteContainerJobArgs{
+		ContainerID: containerID,
+		Namespace:   project.Namespace,
+		ImageName:   container.ID,
+	}, nil)
 }
 
 type UpdateContainerInput struct {
@@ -268,7 +258,7 @@ func UpdateContainer(ctx context.Context, input UpdateContainerInput) (map[strin
 		return nil, err
 	}
 
-	if err := enqueueBuildTask(project, container, buildJob); err != nil {
+	if err := enqueueBuildTask(ctx, project, container, buildJob); err != nil {
 		fmt.Printf("[service] failed to enqueue build task: %v\n", err)
 	}
 
@@ -316,23 +306,12 @@ func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[st
 	}
 	imageRef := fmt.Sprintf("%s/%s/%s:%s", registryHost, registryProject, container.ID, container.ImageID)
 
-	// deploy タスクをキューに投入
-	payload := map[string]string{
-		"container_id": container.ID,
-		"image_ref":    imageRef,
-		"namespace":    project.Namespace,
-		"build_job_id": "",
-	}
-	payloadJSON, _ := json.Marshal(payload)
-
-	deployTask := &model.Task{
-		ID:        "task_deploy_" + container.ID[:8] + "_" + fmt.Sprintf("%d", time.Now().UnixNano()),
-		TaskType:  "deploy",
-		Status:    "pending",
-		Payload:   string(payloadJSON),
-		TimeoutAt: time.Now().Add(10 * time.Minute),
-	}
-	if err := model.CreateTask(deployTask); err != nil {
+	// deploy ジョブをキューに追加
+	if err := job_queue.Enqueue(ctx, jobs.DeployJobArgs{
+		ContainerID: container.ID,
+		ImageRef:    imageRef,
+		Namespace:   project.Namespace,
+	}, nil); err != nil {
 		return nil, err
 	}
 
@@ -398,67 +377,19 @@ func GetContainer(ctx context.Context, containerID string, ownerID string) (map[
 	}, nil
 }
 
-func StreamContainerLogs(ctx context.Context, containerID string, ownerID string, baselogCallback func(k8slogwatcher.LogEntry)) error {
-	container, err := model.GetContainerByID(containerID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrContainerNotFound
-		}
-		return err
-	}
-
-	project, err := model.GetProjectByID(container.ProjectID)
-	if err != nil {
-		return err
-	}
-	if project.OwnerID != ownerID {
-		return ErrForbidden
-	}
-
-	sinceTime := time.Now().Add(-1 * time.Hour)
-	logCallback := func(entry k8slogwatcher.LogEntry) {
-		baselogCallback(entry)
-	}
-
-	sub, err := k8slogwatcher.GlobalWatcher.Subscribe(ctx, project.Namespace, container.Name, sinceTime, logCallback)
-	if err != nil {
-		return fmt.Errorf("failed to subscribe container logs: %w", err)
-	}
-
-	<-ctx.Done()
-
-	k8slogwatcher.GlobalWatcher.Unsubscribe(project.Namespace, container.Name)
-	_ = sub
-
-	return nil
-}
-
-// enqueueBuildTask は build タスクを tasks テーブルに INSERT します
-func enqueueBuildTask(project *model.Project, container *model.Container, buildJob model.BuildJob) error {
-	payload := map[string]string{
-		"build_job_id":   buildJob.ID,
-		"container_id":   container.ID,
-		"image_id":       container.ImageID,
-		"project_id":     project.ID,
-		"project_name":   project.Name,
-		"container_name": container.Name,
-		"namespace":      project.Namespace,
-		"repository_url": container.RepositoryURL,
-		"branch":         container.Branch,
-		"directory":      container.Directory,
-		"build_type":     "railpack",
-	}
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
-	task := &model.Task{
-		ID:        "task_build_" + buildJob.ID,
-		TaskType:  "build",
-		Status:    "pending",
-		Payload:   string(payloadJSON),
-		TimeoutAt: time.Now().Add(30 * time.Minute),
-	}
-	return model.CreateTask(task)
+// enqueueBuildTask は build ジョブをキューに追加します
+func enqueueBuildTask(ctx context.Context, project *model.Project, container *model.Container, buildJob model.BuildJob) error {
+	return job_queue.Enqueue(ctx, jobs.BuildJobArgs{
+		BuildJobID:    buildJob.ID,
+		ContainerID:   container.ID,
+		ImageID:       container.ImageID,
+		ProjectID:     project.ID,
+		ProjectName:   project.Name,
+		ContainerName: container.Name,
+		Namespace:     project.Namespace,
+		RepositoryURL: container.RepositoryURL,
+		Branch:        container.Branch,
+		Directory:     container.Directory,
+		BuildType:     "railpack",
+	}, nil)
 }

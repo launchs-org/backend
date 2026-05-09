@@ -1,10 +1,7 @@
 package controller
 
 import (
-	"context"
-	"backend/k8slogwatcher"
 	"backend/service"
-	"log"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -169,8 +166,6 @@ func DeleteContainer(ctx *echo.Context) error {
 	err := service.DeleteContainer((*ctx).Request().Context(), containerID, userID)
 
 	if err != nil {
-		// ログを表示
-		log.Println("[DeleteContainer] " + err.Error())
 
 		switch err {
 		case service.ErrContainerNotFound:
@@ -327,67 +322,4 @@ func RedeployContainer(ctx *echo.Context) error {
 	}
 
 	return (*ctx).JSON(http.StatusOK, res)
-}
-
-// StreamContainerLogsWS はコンテナの実行ログをWebSocketでストリーミングするハンドラーです
-func StreamContainerLogsWS(ctx *echo.Context) error {
-	// パスパラメータからコンテナIDを取得
-	containerID := (*ctx).Param("id")
-	// JWTからユーザーIDを取得
-	userID, ok := (*ctx).Get("UserID").(string)
-	if !ok {
-		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
-			"code":    "UNAUTHORIZED",
-			"message": "認証に失敗しました",
-		})
-	}
-
-	// サブプロトコルからトークンを取得している場合、ハンドシェイク時にそれを返す必要がある
-	responseHeader := http.Header{}
-	if protocol := (*ctx).Request().Header.Get("Sec-WebSocket-Protocol"); protocol != "" {
-		responseHeader.Set("Sec-WebSocket-Protocol", protocol)
-	}
-
-	ws, err := upgrader.Upgrade((*ctx).Response(), (*ctx).Request(), responseHeader)
-	if err != nil {
-		return err
-	}
-	// ハンドラー終了時にWebSocketを閉じる
-	defer ws.Close()
-
-	// コンテキストを作成し、書き込みエラー時にキャンセルできるようにする
-	streamCtx, cancel := context.WithCancel((*ctx).Request().Context())
-	defer cancel()
-
-	// ログのストリーミングを開始
-	err = service.StreamContainerLogs(
-		streamCtx,
-		containerID,
-		userID,
-		func(entry k8slogwatcher.LogEntry) {
-			// ログエントリをクライアントに送信
-			err := ws.WriteJSON(map[string]interface{}{
-				"event":     "log",
-				"log":       entry.Message,
-				"pod":       entry.PodName,
-				"container": entry.Container,
-				"timestamp": entry.Timestamp,
-			})
-
-			// エラー処理 (broken pipeなど)
-			if err != nil {
-				log.Printf("[WS Write Error] %v", err)
-				// エラーが発生した場合はストリーミングを停止する
-				cancel()
-				return 
-			}
-		},
-	)
-
-	if err != nil {
-		// エラーが発生した場合はクライアントに通知
-		_ = ws.WriteJSON(map[string]string{"error": err.Error()})
-	}
-
-	return nil
 }
