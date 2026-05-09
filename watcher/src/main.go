@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"launchs/shared/database"
+	"launchs/shared/model"
 	"watcher/leader"
 	"watcher/watcher"
 )
@@ -19,6 +20,19 @@ func main() {
 	database.Init()
 	database.InitK8s()
 	database.InitRedis()
+
+	// DB マイグレーション実行
+	if err := database.DB.AutoMigrate(
+		&model.Project{},
+		&model.Container{},
+		&model.BuildJob{},
+		&model.Image{},
+		&model.Service{},
+		&model.Ingress{},
+		&model.Volume{},
+	); err != nil {
+		fmt.Printf("[watcher] migration error: %v\n", err)
+	}
 
 	fmt.Println("[watcher] initialized database, k8s, redis")
 

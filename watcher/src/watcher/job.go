@@ -112,6 +112,15 @@ func handleJobEvent(ctx context.Context, clientset *kubernetes.Clientset, redisC
 			now := time.Now()
 			updates["finished_at"] = now
 			model.UpdateBuildJobStatus(buildJobID, updates)
+
+			// Container のステータスも更新
+			if buildJob, err := model.GetBuildJobByID(buildJobID); err == nil {
+				containerStatus := "Failed"
+				if status == "Success" {
+					containerStatus = "Deploying"
+				}
+				model.UpdateContainerStatus(buildJob.ContainerID, containerStatus)
+			}
 			return nil
 		}
 
