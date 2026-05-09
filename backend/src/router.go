@@ -9,9 +9,6 @@ import (
 
 // InitRouter はルーターを初期化する関数です
 func InitRouter(router *echo.Echo) {
-	// 内部用エンドポイント (tarアップロード)
-	router.POST("/internal/upload", controller.UploadTar)
-
 	// API V1用のグループを作成する
 	v1Group := router.Group("/v1")
 	// V1グループ全体に認証ミドルウェアを適用する
@@ -138,9 +135,6 @@ func InitRouter(router *echo.Echo) {
 			streamGroup.GET("/build-jobs/:id", controller.GetBuildJobLogs)
 		}
 
-		// WebSocket関連
-		v1Group.GET("/ws/build-jobs/:id", controller.StreamBuildJobLogsWS)
-		v1Group.GET("/ws/containers/:id/logs", controller.StreamContainerLogsWS)
 	}
 
 }

@@ -2,30 +2,31 @@ package main
 
 import (
 	"context"
-	"launchs/shared/database" // データベース
-	"backend/middlewares"     // ミドルウェア
-	"launchs/shared/model"   // モデル
-	"backend/k8slogwatcher"  // Kubernetes ログウォッチャー
-	"backend/service"
-	"backend/worker"
-	"net/http" // HTTP
+	"launchs/shared/database"
+	"launchs/shared/job_queue"
+	"backend/middlewares"
+	"launchs/shared/model"
+	"net/http"
 
-	"github.com/labstack/echo/v5"            // Echo
-	"github.com/labstack/echo/v5/middleware" // Echoミドルウェア
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 )
 
 // main はアプリケーションのエントリーポイントです
 func main() {
 	// データベース接続の初期化
 	database.Init()
-	// Kubernetes クライアントの初期化
-	database.InitK8s()
 	// Redis の初期化
 	database.InitRedis()
-	// Kubernetes ログウォッチャーの初期化
-	k8slogwatcher.Init()
-	// ボリューム同期プロセスの開始
-	service.StartVolumeSync()
+
+	// k8s クライアントを初期化
+	database.InitK8s()
+
+	// River ジョブキュー用 DB の初期化（挿入専用クライアント）
+	database.InitTaskDB()
+	if err := job_queue.UseRiver(context.Background(), database.TaskDB, nil); err != nil {
+		panic("failed to initialize job queue: " + err.Error())
+	}
 
 	// データベースの自動マイグレーションを実行 (各種テーブルの作成・更新)
 	// Task テーブルは init.sql で作成済みなため除外
@@ -38,23 +39,15 @@ func main() {
 		&model.Ingress{},
 		&model.Volume{},
 	); err != nil {
-		// マイグレーション失敗時はパニック
 		panic("failed to migrate database: " + err.Error())
 	}
-
-	// バックグラウンドワーカーを起動
-	workerCtx := context.Background()
-	go worker.RunBuildWorker(workerCtx)
-	go worker.RunDeployWorker(workerCtx)
-	go worker.RunDeleteWorker(workerCtx)
-	go worker.RunTimeoutWorker(workerCtx)
 
 	// Echo インスタンスを作成
 	router := echo.New()
 	// リクエストログ出力ミドルウェアを適用
 	router.Use(middleware.RequestLogger())
 	// パニック復帰ミドルウェアを適用
-	router.Use(middleware.Recover())
+	// router.Use(middleware.Recover())
 
 	// ミドルウェアのグローバル初期化
 	middlewares.Init()
