@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -9,14 +10,16 @@ import (
 	"path/filepath"
 	"time"
 
+	"launchs/shared/job_queue"
+	"launchs/shared/job_queue/jobs"
 	"launchs/shared/model"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/crane"
 )
 
-// HandleUploadTar は受け取った tar を Harbor にプッシュし、deploy タスクを作成します
-func HandleUploadTar(body io.Reader, jobID, imageName, imageTag string) error {
+// HandleUploadTar は受け取った tar を Harbor にプッシュし、deploy ジョブを作成します
+func HandleUploadTar(ctx context.Context, body io.Reader, jobID, imageName, imageTag string) error {
 	saveDir := "./launchs-tar"
 	if err := os.MkdirAll(saveDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create dir: %w", err)
@@ -45,33 +48,25 @@ func HandleUploadTar(body io.Reader, jobID, imageName, imageTag string) error {
 		"finished_at": now,
 	})
 
-	// deploy タスクを tasks テーブルに INSERT
+	// deploy ジョブをキューに追加
 	registryHost := registryHostEnv()
 	registryProject := registryProjectEnv()
 	imageRef := fmt.Sprintf("%s/%s/%s:%s", registryHost, registryProject, imageName, imageTag)
 
-	job, err := model.GetBuildJobByID(jobID)
+	buildJob, err := model.GetBuildJobByID(jobID)
 	if err != nil {
 		return fmt.Errorf("failed to get build job: %w", err)
 	}
 
-	deployPayload := fmt.Sprintf(
-		`{"container_id":%q,"image_ref":%q,"namespace":"","build_job_id":%q}`,
-		job.ContainerID, imageRef, jobID,
-	)
-
-	deployTask := &model.Task{
-		ID:        "task_deploy_" + jobID,
-		TaskType:  "deploy",
-		Status:    "pending",
-		Payload:   deployPayload,
-		TimeoutAt: time.Now().Add(10 * time.Minute),
-	}
-	if err := model.CreateTask(deployTask); err != nil {
-		return fmt.Errorf("failed to create deploy task: %w", err)
+	if err := job_queue.Enqueue(ctx, jobs.DeployJobArgs{
+		ContainerID: buildJob.ContainerID,
+		ImageRef:    imageRef,
+		BuildJobID:  jobID,
+	}, nil); err != nil {
+		return fmt.Errorf("failed to enqueue deploy job: %w", err)
 	}
 
-	fmt.Printf("[builder] created deploy task for container %s\n", job.ContainerID)
+	fmt.Printf("[builder] enqueued deploy job for container %s\n", buildJob.ContainerID)
 	return nil
 }
 
