@@ -36,12 +36,37 @@ services:
       - ./backend/src:/app
       - ./backend/received:/received
       - ./shared:/shared
-      - ~/.kube/config:/root/.kube/config
     ports:
       - 8090:8090
     env_file:
       - ./config/app.env
       - ./openssl/jwtKeys/public.env
+    tty: true
+    restart: always
+    networks:
+      - default
+    entrypoint:
+      - /bin/bash
+      - -c
+      - "go install github.com/air-verse/air@latest && exec go tool air -c ./.air.toml"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  controller:
+    hostname: controller
+    build:
+      context: ./controller
+      dockerfile: dockerfile
+      target: develop
+    volumes:
+      - ./controller/src:/app
+      - ./shared:/shared
+      - ~/.kube/config:/root/.kube/config
+    env_file:
+      - ./config/controller.env
     tty: true
     restart: always
     networks:
