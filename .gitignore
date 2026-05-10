@@ -12,3 +12,6 @@ dist/
 .env
 .env.local
 *.log
+watcher/src/tmp/main
+shared/shared
+builder/src/tmp/main
