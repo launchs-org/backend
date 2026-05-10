@@ -88,7 +88,8 @@ func processBuildTask(ctx context.Context, payload jobs.BuildJobArgs) error {
 	}
 
 	fmt.Printf("[build-worker] K8s Job created (jobID: %s), polling for completion...\n", jobID)
-	return waitForBuildJobCompletion(ctx, payload.BuildJobID)
+	// return waitForBuildJobCompletion(ctx, payload.BuildJobID)
+	return nil
 }
 
 func waitForBuildJobCompletion(ctx context.Context, buildJobID string) error {

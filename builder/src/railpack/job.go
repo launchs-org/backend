@@ -46,18 +46,33 @@ func createJob(ctx context.Context, clientset *kubernetes.Clientset, cfg BuildCo
 	jobName  := "railpack-" + jobID
 	deadline := int64(cfg.Timeout.Seconds())
 
+	// Job と Pod の両方に launchs-managed=true を付与することで
+	// watcher が LabelSelector で効率的に絞り込めるようにする。
+	// build-job-id は watcher 側で DB の BuildJob と紐付けるために使用する。
+	managedLabels := map[string]string{
+		"app":             "railpack",
+		"job-uuid":        jobID,
+		"launchs-managed": "true",
+		"build-job-id":    cfg.JobID, // "bj-xxx-yyy" 形式（"-" 区切り）
+	}
+	podLabels := map[string]string{
+		"job-uuid":        jobID,
+		"launchs-managed": "true",
+		"build-job-id":    cfg.JobID,
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
 			Namespace: cfg.Namespace,
-			Labels:    map[string]string{"app": "railpack", "job-uuid": jobID},
+			Labels:    managedLabels,
 		},
 		Spec: batchv1.JobSpec{
 			TTLSecondsAfterFinished: pointer.Int32(600),
 			ActiveDeadlineSeconds:   &deadline,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"job-uuid": jobID},
+					Labels: podLabels,
 				},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
