@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"launchs/shared/database"
@@ -26,12 +25,13 @@ type PodLogMessage struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// WatchDeployments は全 ns-* Namespace の Deployment を監視し、Container.Status を同期します
+// WatchDeployments は launchs-managed=true ラベルを持つ全 Namespace の Deployment を監視し、
+// Container.Status を同期します。エラー時は 3 秒待機して自動再起動します。
 func WatchDeployments(ctx context.Context) {
 	clientset := database.K8sClientset.(*kubernetes.Clientset)
 	redisClient := database.RedisClient
 
-	fmt.Println("[deploy-watcher] starting deployment watcher")
+	fmt.Println("[deploy-watcher] starting deployment watcher (label: launchs-managed=true)")
 
 	for {
 		select {
@@ -52,9 +52,14 @@ func WatchDeployments(ctx context.Context) {
 	}
 }
 
+// runDeploymentWatch は K8s Deployment の Watch セッションを 1 つ実行します。
+// "launchs-managed=true" ラベルで絞り込み、全 Namespace を対象にします。
 func runDeploymentWatch(ctx context.Context, clientset *kubernetes.Clientset, redisClient *redis.Client) error {
-	// 全 Namespace を対象に Watch
-	watcher, err := clientset.AppsV1().Deployments("").Watch(ctx, metav1.ListOptions{})
+	// launchs-managed=true が付いた Deployment のみ Watch。
+	// backend の DeployWorker が Deployment 作成時にこのラベルを付与する。
+	watcher, err := clientset.AppsV1().Deployments("").Watch(ctx, metav1.ListOptions{
+		LabelSelector: "launchs-managed=true",
+	})
 	if err != nil {
 		return fmt.Errorf("failed to start deployment watch: %w", err)
 	}
@@ -65,6 +70,7 @@ func runDeploymentWatch(ctx context.Context, clientset *kubernetes.Clientset, re
 		case <-ctx.Done():
 			return nil
 		case event, ok := <-watcher.ResultChan():
+			// チャンネルが閉じられたら上位ループで再接続する
 			if !ok {
 				return fmt.Errorf("watch channel closed")
 			}
@@ -75,47 +81,52 @@ func runDeploymentWatch(ctx context.Context, clientset *kubernetes.Clientset, re
 	}
 }
 
+// handleDeploymentEvent は Deployment の Watch イベントを処理します。
+// container-id ラベルで DB の Container レコードを特定し、ステータスを同期します。
 func handleDeploymentEvent(ctx context.Context, clientset *kubernetes.Clientset, redisClient *redis.Client, event watch.Event) error {
 	deploy, ok := event.Object.(*appsv1.Deployment)
 	if !ok {
 		return nil
 	}
 
-	// ns-{projectID} 形式の Namespace のみ処理
-	if !strings.HasPrefix(deploy.Namespace, "ns-") {
+	// container-id ラベルから DB の Container ID を取得
+	// (ラベルがない古い Deployment は無視する)
+	containerID, ok := deploy.Labels["container-id"]
+	if !ok || containerID == "" {
 		return nil
 	}
-
-	containerName := deploy.Name
-	namespace := deploy.Namespace
 
 	status := determineDeploymentStatus(deploy)
 
-	// DB から Container を名前+Namespace で検索
-	var containers []model.Container
-	if err := database.DB.
-		Joins("JOIN projects ON projects.id = containers.project_id").
-		Where("containers.name = ? AND projects.namespace = ?", containerName, namespace).
-		Find(&containers).Error; err != nil || len(containers) == 0 {
+	// ステータス変化時のログ出力
+	logDeploymentEvent(event.Type, deploy, containerID, status)
+
+	// DB から Container を取得してステータスを比較
+	container, err := model.GetContainerByID(containerID)
+	if err != nil {
+		// 削除済みコンテナなどは無視
 		return nil
 	}
-	container := containers[0]
 
-	// ステータスが変化した場合のみ更新
+	// ステータスが変化した場合のみ DB 更新・キャッシュ削除
 	if container.Status != status {
-		model.UpdateContainerStatus(container.ID, status)
-		// Redis キャッシュを削除
-		database.RedisClient.Del(ctx, fmt.Sprintf("cache:container:%s", container.ID))
+		fmt.Printf("[deploy-watcher] status changed: container=%s %s → %s\n",
+			containerID, container.Status, status)
+		model.UpdateContainerStatus(containerID, status)
+		// フロントエンドのキャッシュを無効化
+		database.RedisClient.Del(ctx, fmt.Sprintf("cache:container:%s", containerID))
 	}
 
-	// Pod ログを Redis に配信 (Running 状態時)
+	// Running 状態になったら Pod ログのストリームを開始
 	if status == "Running" {
-		go streamDeploymentPodLogs(ctx, clientset, redisClient, namespace, containerName)
+		go streamDeploymentPodLogs(ctx, clientset, redisClient, deploy.Namespace, deploy.Name)
 	}
 
 	return nil
 }
 
+// determineDeploymentStatus は Deployment の spec/status から
+// アプリケーション用のステータス文字列を返します。
 func determineDeploymentStatus(deploy *appsv1.Deployment) string {
 	if deploy.Spec.Replicas == nil {
 		return "Stopped"
@@ -133,6 +144,8 @@ func determineDeploymentStatus(deploy *appsv1.Deployment) string {
 	return "Deploying"
 }
 
+// streamDeploymentPodLogs は Deployment に紐づく Pod のログを Redis に配信します。
+// 既存の Pod すべてに対してゴルーチンを起動します。
 func streamDeploymentPodLogs(ctx context.Context, clientset *kubernetes.Clientset, redisClient *redis.Client, namespace, deploymentName string) {
 	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("app=%s", deploymentName),
@@ -148,11 +161,13 @@ func streamDeploymentPodLogs(ctx context.Context, clientset *kubernetes.Clientse
 	}
 }
 
+// streamPodContainerLogs は 1 つの Pod のコンテナログを末尾 100 行から追従して読み込み、
+// 各行を Redis チャンネルに Publish します。
 func streamPodContainerLogs(ctx context.Context, clientset *kubernetes.Clientset, redisClient *redis.Client, namespace, podName, containerName, redisChannel string) {
 	req := clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
-		Container:  containerName,
-		Follow:     true,
-		TailLines:  int64Ptr(100),
+		Container: containerName,
+		Follow:    true,
+		TailLines: int64Ptr(100),
 	})
 	stream, err := req.Stream(ctx)
 	if err != nil {
