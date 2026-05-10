@@ -1,198 +1,93 @@
 package service
 
 import (
-	"launchs/shared/database"   // データベースパッケージ
+	"context"
+	"errors"
+	"fmt"
+	"regexp"
+
 	"launchs/shared/job_queue"
 	"launchs/shared/job_queue/jobs"
-	"launchs/shared/model"     // モデルパッケージ
-	"context"                  // コンテキスト
-	"errors"                   // エラー処理
-	"fmt"                      // 文字列フォーマット
-	"regexp"                   // 正規表現
+	"launchs/shared/model"
 
-	"github.com/google/uuid" // UUID生成
-	corev1 "k8s.io/api/core/v1" // K8s API
-	networkingv1 "k8s.io/api/networking/v1" // K8s Networking API
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // K8s Meta API
+	"github.com/google/uuid"
 )
 
-// プロジェクト名のバリデーション用正規表現 (英小文字、数字、ハイフンのみ)
 var projectNameRegex = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 var (
-	// 不正なプロジェクト名のエラー
 	ErrInvalidProjectName   = errors.New("INVALID_PROJECT_NAME")
-	// プロジェクト名重複のエラー
 	ErrProjectAlreadyExists = errors.New("PROJECT_ALREADY_EXISTS")
-	// プロジェクトが見つからないエラー
 	ErrProjectNotFound      = errors.New("NOT_FOUND")
-	// 権限がないエラー
 	ErrForbidden            = errors.New("FORBIDDEN")
-
 )
 
-// CreateProjectInput はプロジェクト作成の入力データです
 type CreateProjectInput struct {
-	Name    string // プロジェクト名
-	OwnerID string // 所有者ID
+	Name    string
+	OwnerID string
 }
 
-// CreateProject はプロジェクトを作成するビジネスロジックを実行します
 func CreateProject(ctx context.Context, input CreateProjectInput) (*model.Project, error) {
-	// プロジェクト名のバリデーションを実行 (空文字チェックと正規表現チェック)
 	if input.Name == "" || !projectNameRegex.MatchString(input.Name) {
-		// 不正な名前の場合はエラーを返す
 		return nil, ErrInvalidProjectName
 	}
 
-	// データベースから同名のプロジェクトが存在するか確認
 	existing, _ := model.GetProjectByName(input.Name)
-	// 既に存在する場合
 	if existing != nil {
-		// 重複エラーを返す
 		return nil, ErrProjectAlreadyExists
 	}
 
-	// 新しいプロジェクトIDをUUIDで生成
 	projectID := uuid.New().String()
-	// K8sで使用するNamespace名を決定 (ns-{uuid})
 	namespace := fmt.Sprintf("ns-%s", projectID)
 
-	// プロジェクトエンティティを作成
 	project := &model.Project{
-		ID:              projectID,      // ID
-		Name:            input.Name,      // プロジェクト名
-		K8sResourceName: input.Name,      // K8s用リソース名
-		Namespace:       namespace,       // Namespace
-		OwnerID:         input.OwnerID,   // 所有者ID
+		ID:              projectID,
+		Name:            input.Name,
+		K8sResourceName: input.Name,
+		Namespace:       namespace,
+		OwnerID:         input.OwnerID,
 	}
 
-	// Kubernetes Namespace の定義を作成
-	nsSpec := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: namespace, // Namespace名
-			Labels: map[string]string{
-				"managed-by": "launchs",    // 管理者ラベル
-				"project-id": projectID,   // プロジェクトIDラベル
-			},
-		},
-	}
-	// Kubernetes API を呼び出して Namespace を実際に作成
-	_, err := database.K8sClientset.CoreV1().Namespaces().Create(ctx, nsSpec, metav1.CreateOptions{})
-	// K8sリソース作成に失敗した場合
-	if err != nil {
-		// エラーをラップして返す
-		return nil, fmt.Errorf("Kubernetes Namespace の作成に失敗しました: %w", err)
-	}
-
-	// NetworkPolicy を作成 (traefik, cloudflared, 自身のnamespaceからのアクセスを許可)
-	netPol := &networkingv1.NetworkPolicy{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "allow-traefik-cloudflared-local",
-			Namespace: namespace,
-		},
-		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{}, // 全てのPod
-			PolicyTypes: []networkingv1.PolicyType{
-				networkingv1.PolicyTypeIngress,
-				networkingv1.PolicyTypeEgress,
-			},
-			Ingress: []networkingv1.NetworkPolicyIngressRule{
-				{
-					From: []networkingv1.NetworkPolicyPeer{
-						{
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"kubernetes.io/metadata.name": "traefik",
-								},
-							},
-						},
-						{
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"kubernetes.io/metadata.name": "cloudflared",
-								},
-							},
-						},
-						{
-							NamespaceSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"kubernetes.io/metadata.name": namespace,
-								},
-							},
-						},
-					},
-				},
-			},
-			Egress: []networkingv1.NetworkPolicyEgressRule{
-				{}, // 全ての宛先への通信を許可
-			},
-		},
-	}
-	_, _ = database.K8sClientset.NetworkingV1().NetworkPolicies(namespace).Create(ctx, netPol, metav1.CreateOptions{})
-
-	// データベースにプロジェクト情報を保存
 	if err := model.CreateProject(project); err != nil {
-		// 保存に失敗した場合はエラーを返す
 		return nil, fmt.Errorf("プロジェクトの保存に失敗しました: %w", err)
 	}
 
-	// 作成したプロジェクトを返す
+	if err := job_queue.Enqueue(ctx, jobs.CreateProjectJobArgs{
+		ProjectID:   projectID,
+		ProjectName: input.Name,
+		Namespace:   namespace,
+		OwnerID:     input.OwnerID,
+	}, nil); err != nil {
+		fmt.Printf("[service] failed to enqueue create_project job: %v\n", err)
+	}
+
 	return project, nil
 }
 
-// GetProjectByID はプロジェクトの詳細を取得します
 func GetProjectByID(ctx context.Context, id string, userID string) (*model.Project, error) {
-	// データベースからIDでプロジェクトを取得
 	project, err := model.GetProjectByID(id)
-	// エラーが発生した場合
 	if err != nil {
-		// 見つからない場合は ErrProjectNotFound を返す
 		return nil, ErrProjectNotFound
 	}
-
-	// 所有者チェック (他のユーザーのプロジェクトにはアクセスできない)
 	if project.OwnerID != userID {
-		// 権限エラーを返す
 		return nil, ErrForbidden
 	}
-
-	// プロジェクトを返す
 	return project, nil
 }
 
-// ListProjects はユーザーが所有するプロジェクト一覧を取得します
 func ListProjects(ctx context.Context, userID string) ([]model.Project, error) {
-	// データベースから所有者IDでプロジェクト一覧を取得
-	projects, err := model.GetProjectsByOwnerID(userID)
-	// エラーが発生した場合
-	if err != nil {
-		// 内部エラーとしてそのまま返す (実際は空の場合もエラーにならない想定だが、DBエラー等のため)
-		return nil, err
-	}
-
-	// プロジェクト一覧を返す
-	return projects, nil
+	return model.GetProjectsByOwnerID(userID)
 }
 
-
-// プロジェクトを削除するサービス
 func DeleteProject(ctx context.Context, id string, userID string) error {
-	// データベースからIDでプロジェクトを取得
 	project, err := model.GetProjectByID(id)
-	// エラーが発生した場合
 	if err != nil {
-		// 見つからない場合は ErrProjectNotFound を返す
 		return ErrProjectNotFound
 	}
-
-	// 所有者チェック (他のユーザーのプロジェクトにはアクセスできない)
 	if project.OwnerID != userID {
-		// 権限エラーを返す
 		return ErrForbidden
 	}
 
-	// delete_project ジョブをキューに追加
 	return job_queue.Enqueue(ctx, jobs.DeleteProjectJobArgs{
 		ProjectID: id,
 		Namespace: project.Namespace,
