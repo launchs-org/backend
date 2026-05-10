@@ -1,0 +1,23 @@
+FROM golang:1.26-bookworm as develop
+
+RUN apt update && \
+    apt install curl wget git -y
+
+WORKDIR /app
+
+COPY ./src/go.mod .
+
+FROM golang:1.26-bookworm as builder
+
+WORKDIR /go/src/app
+
+COPY ./src .
+COPY /shared /shared
+
+RUN go mod download
+
+RUN CGO_ENABLED=0 go build -o /go/bin/app .
+
+FROM gcr.io/distroless/static-debian12
+COPY --from=builder /go/bin/app /app
+CMD ["/app"]
