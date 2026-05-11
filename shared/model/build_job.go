@@ -13,6 +13,7 @@ type BuildJob struct {
 	ID            string     `gorm:"primaryKey;type:varchar(255)" json:"id"`
 	ProjectID     string     `gorm:"index;type:varchar(255)" json:"project_id"`
 	ContainerID   string     `gorm:"index;type:varchar(255)" json:"container_id"`
+	ImageID       string     `gorm:"type:varchar(255)" json:"image_id"`
 	RepositoryURL string     `json:"repository_url"`
 	Branch        string     `json:"branch"`
 	Directory     string     `json:"directory"`
