@@ -48,6 +48,7 @@ func main() {
 		&model.Service{},
 		&model.Ingress{},
 		&model.Volume{},
+		&model.HarborCredential{},
 	); err != nil {
 		panic("failed to migrate database: " + err.Error())
 	}
