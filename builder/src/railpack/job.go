@@ -18,144 +18,80 @@ import (
 type BuildStatus string
 
 const (
-	StatusInit      BuildStatus = "Init"      // Job作成済み、Pod起動待ち
-	StatusRunning   BuildStatus = "Running"   // ビルド実行中
-	StatusComplete  BuildStatus = "Complete"  // ビルド成功
-	StatusFailed    BuildStatus = "Failed"    // ビルド失敗
+	StatusInit     BuildStatus = "Init"     // Job作成済み、Pod起動待ち
+	StatusRunning  BuildStatus = "Running"  // ビルド実行中
+	StatusComplete BuildStatus = "Complete" // ビルド成功
+	StatusFailed   BuildStatus = "Failed"   // ビルド失敗
 )
 
-// createJob は BuildConfig を元に Kubernetes Job を作成し、jobID を返します。
-func createJob(ctx context.Context, clientset *kubernetes.Clientset, cfg BuildConfig) (string, error) {
-	resources := cfg.Resources
+func newResources(cpu, memory, disk string) corev1.ResourceRequirements {
+	rl := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse(cpu),
+		corev1.ResourceMemory: resource.MustParse(memory),
+	}
+	if disk != "" {
+		rl[corev1.ResourceEphemeralStorage] = resource.MustParse(disk)
+	}
+	return corev1.ResourceRequirements{Limits: rl}
+}
 
-	buildResources := newResourceRequirements(resources.BuildCPU, resources.BuildMemory, resources.BuildDisk)
-	initResources  := newResourceRequirements(resources.InitCPU, resources.InitMemory, "")
-	pushResources  := newResourceRequirements(resources.PushCPU, resources.PushMemory, "")
+// createJob は BuildConfig を元に Kubernetes Job を作成し jobID を返す。
+func createJob(ctx context.Context, cs *kubernetes.Clientset, ns string, cfg BuildConfig) (string, error) {
+	r := cfg.Resources
 
-	// emptyDir のサイズ制限は BuildDisk の 90% に設定
-	diskQuantity := resource.MustParse(resources.BuildDisk)
+	buildRes := newResources(r.BuildCPU, r.BuildMemory, r.BuildDisk)
+	initRes := newResources(r.InitCPU, r.InitMemory, "")
+
+	// emptyDir は BuildDisk の 90%
+	diskQty := resource.MustParse(r.BuildDisk)
 	emptyDirSize := resource.NewMilliQuantity(
-		int64(float64(diskQuantity.Value())*0.9)*1000,
+		int64(float64(diskQty.Value())*0.9)*1000,
 		resource.BinarySI,
 	)
 
-	jobID := cfg.JobID
-	if jobID == "" {
-		jobID = uuid.New().String()
-	}
-	jobName  := "railpack-" + jobID
+	jobID := uuid.New().String()
+	jobName := "railpack-" + jobID
 	deadline := int64(cfg.Timeout.Seconds())
-
-	// Job と Pod の両方に launchs-managed=true を付与することで
-	// watcher が LabelSelector で効率的に絞り込めるようにする。
-	// build-job-id は watcher 側で DB の BuildJob と紐付けるために使用する。
-	managedLabels := map[string]string{
-		"app":             "railpack",
-		"job-uuid":        jobID,
-		"launchs-managed": "true",
-		"build-job-id":    cfg.JobID, // "bj-xxx-yyy" 形式（"-" 区切り）
-	}
-	podLabels := map[string]string{
-		"job-uuid":        jobID,
-		"launchs-managed": "true",
-		"build-job-id":    cfg.JobID,
-	}
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
-			Namespace: cfg.Namespace,
-			Labels:    managedLabels,
+			Namespace: ns,
+			Labels:    map[string]string{"app": "railpack", "job-uuid": jobID},
 		},
 		Spec: batchv1.JobSpec{
 			TTLSecondsAfterFinished: pointer.Int32(600),
 			ActiveDeadlineSeconds:   &deadline,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: podLabels,
+					Labels: map[string]string{"job-uuid": jobID},
 				},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
 					Volumes:       buildVolumes(emptyDirSize),
 					InitContainers: []corev1.Container{
-						gitCloneContainer(cfg, initResources),
-						railpackPrepareContainer(cfg, initResources),
+						// 1. Harbor TLS 証明書をシステム CA バンドルと結合して配置
+						//    + レジストリ認証用 config.json を生成
+						setupEnvContainer(cfg, initRes),
+						// 2. Git リポジトリをクローン
+						gitCloneContainer(cfg, initRes),
+						// 3. railpack prepare でビルドプランを生成
+						railpackPrepareContainer(cfg, initRes),
 					},
 					Containers: []corev1.Container{
-						buildctlContainer(cfg, buildResources),
-						tarPushContainer(cfg, pushResources, jobID),
+						// buildctl でビルドしてそのままレジストリへプッシュ
+						buildctlContainer(cfg, buildRes),
 					},
 				},
 			},
 		},
 	}
 
-	_, err := clientset.BatchV1().Jobs(cfg.Namespace).Create(ctx, job, metav1.CreateOptions{})
+	_, err := cs.BatchV1().Jobs(ns).Create(ctx, job, metav1.CreateOptions{})
 	return jobID, err
 }
 
-// deleteJob は指定した jobID の Kubernetes Job を強制削除します。
-func deleteJob(ctx context.Context, clientset *kubernetes.Clientset, namespace, jobID string) error {
-	propagation := metav1.DeletePropagationForeground
-	return clientset.BatchV1().Jobs(namespace).Delete(
-		ctx,
-		"railpack-"+jobID,
-		metav1.DeleteOptions{PropagationPolicy: &propagation},
-	)
-}
-
-// getJobStatus は指定した jobID の現在の BuildStatus を返します。
-func getJobStatus(ctx context.Context, clientset *kubernetes.Clientset, namespace, jobID string) (BuildStatus, error) {
-	job, err := clientset.BatchV1().Jobs(namespace).Get(ctx, "railpack-"+jobID, metav1.GetOptions{})
-	if err != nil {
-		return StatusFailed, err
-	}
-	switch {
-	case job.Status.Succeeded > 0:
-		return StatusComplete, nil
-	case job.Status.Failed > 0:
-		return StatusFailed, nil
-	case job.Status.Active > 0:
-		return StatusRunning, nil
-	default:
-		return StatusInit, nil
-	}
-}
-
-// waitForPod は jobID に対応する Pod が現れるまで最大 30 秒待機します。
-func waitForPod(ctx context.Context, clientset *kubernetes.Clientset, namespace, jobID string) (*corev1.Pod, error) {
-	for range make([]struct{}, 30) {
-		pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: "job-uuid=" + jobID,
-		})
-		if err == nil && len(pods.Items) > 0 {
-			return &pods.Items[0], nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(time.Second):
-		}
-	}
-	return nil, fmt.Errorf("job %s の Pod が見つかりません", jobID)
-}
-
-
-// ── リソース設定ヘルパー ────────────────────────────────────
-
-// newResourceRequirements は CPU・メモリ・ディスクから ResourceRequirements を作成します。
-func newResourceRequirements(cpu, memory, disk string) corev1.ResourceRequirements {
-	resourceList := corev1.ResourceList{
-		corev1.ResourceCPU:    resource.MustParse(cpu),
-		corev1.ResourceMemory: resource.MustParse(memory),
-	}
-	if disk != "" {
-		resourceList[corev1.ResourceEphemeralStorage] = resource.MustParse(disk)
-	}
-	return corev1.ResourceRequirements{Limits: resourceList}
-}
-
-// ── ボリューム定義 ──────────────────────────────────────────
+// ── ボリューム ──────────────────────────────────────────────
 
 func buildVolumes(emptyDirSize *resource.Quantity) []corev1.Volume {
 	return []corev1.Volume{
@@ -172,19 +108,64 @@ func buildVolumes(emptyDirSize *resource.Quantity) []corev1.Volume {
 	}
 }
 
-// ── InitContainer 定義 ──────────────────────────────────────
+// ── InitContainer ───────────────────────────────────────────
 
-// gitCloneContainer は Git リポジトリをクローンする InitContainer を返します。
-// cfg.GitSubmodules が true の場合はサブモジュールも再帰的にクローンします。
-func gitCloneContainer(cfg BuildConfig, res corev1.ResourceRequirements) corev1.Container {
-	// サブモジュールの有無でコマンドを切り替える
-	cloneCommand := "git clone --verbose --depth=1 --branch=${GIT_BRANCH} ${GIT_REPO} /workspace/repo"
-	if cfg.GitSubmodules {
-		// --recurse-submodules でサブモジュールも同時にクローン
-		// --shallow-submodules でサブモジュールも depth=1 に抑える
-		cloneCommand = "git clone --verbose --depth=1 --branch=${GIT_BRANCH} --recurse-submodules --shallow-submodules ${GIT_REPO} /workspace/repo"
+// setupEnvContainer は以下を一括で行う InitContainer:
+//  1. Harbor の TLS 証明書チェーンを取得
+//  2. moby/buildkit イメージのシステム CA バンドルと結合して /workspace/certs/ca-bundle.crt に保存
+//     (buildctl-daemonless rootless では --opt registry.X.ca が効かないため
+//     SSL_CERT_FILE による指定が唯一の有効な回避策)
+//  3. レジストリ認証情報を /workspace/.docker/config.json に書き出す
+//     (buildctl は DOCKER_CONFIG でこのディレクトリを参照する)
+//
+// 参照: https://github.com/moby/buildkit/issues/6068
+func setupEnvContainer(cfg BuildConfig, res corev1.ResourceRequirements) corev1.Container {
+	// システム CA バンドルのパスは moby/buildkit イメージと同じものを使う
+	const systemCABundle = "/etc/ssl/certs/ca-certificates.crt"
+
+	script := fmt.Sprintf(`
+set -e
+
+# ── 証明書 ──────────────────────────────────────────────────
+mkdir -p /workspace/certs
+# システム CA バンドルをベースにコピーし Harbor の証明書チェーンを追記する
+cp %s /workspace/certs/ca-bundle.crt
+openssl s_client \
+  -connect "%s:443" \
+  -showcerts \
+  </dev/null 2>/dev/null \
+| awk '/-----BEGIN CERTIFICATE-----/{p=1} p{print} /-----END CERTIFICATE-----/{p=0}' \
+>> /workspace/certs/ca-bundle.crt
+echo "証明書を取得しました: $(grep -c 'BEGIN CERTIFICATE' /workspace/certs/ca-bundle.crt) 件"
+
+# ── 認証情報 ─────────────────────────────────────────────────
+mkdir -p /workspace/.docker
+AUTH_B64=$(printf '%%s:%%s' "${REGISTRY_USERNAME}" "${REGISTRY_PASSWORD}" | base64 | tr -d '\n')
+printf '{"auths":{"%s":{"auth":"%%s"}}}\n' "${AUTH_B64}" > /workspace/.docker/config.json
+echo "config.json を生成しました"
+`,
+		systemCABundle,
+		cfg.RegistryHost,
+		cfg.RegistryHost,
+	)
+
+	return corev1.Container{
+		Name:      "setup-env",
+		Image:     "moby/buildkit:master-rootless", // CA バンドルのパスを buildctl と合わせる
+		Resources: res,
+		Env: []corev1.EnvVar{
+			{Name: "REGISTRY_USERNAME", Value: cfg.RegistryUsername},
+			{Name: "REGISTRY_PASSWORD", Value: cfg.RegistryPassword},
+		},
+		Command: []string{"sh", "-c"},
+		Args:    []string{script},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: "workspace", MountPath: "/workspace"},
+		},
 	}
+}
 
+func gitCloneContainer(cfg BuildConfig, res corev1.ResourceRequirements) corev1.Container {
 	return corev1.Container{
 		Name:      "git-clone",
 		Image:     "alpine/git:latest",
@@ -194,24 +175,13 @@ func gitCloneContainer(cfg BuildConfig, res corev1.ResourceRequirements) corev1.
 			{Name: "GIT_BRANCH", Value: cfg.GitBranch},
 		},
 		Command: []string{"sh", "-c"},
-		Args:    []string{"mkdir -p /workspace/repo && " + cloneCommand + " && chmod -R 777 /workspace"},
-		// SecurityContext: &corev1.SecurityContext{
-		// 	RunAsNonRoot:             pointer.Bool(true),
-		// 	RunAsUser:                pointer.Int64(1000),
-		// 	RunAsGroup:               pointer.Int64(1000),
-		// 	ReadOnlyRootFilesystem:   pointer.Bool(true),
-		// 	AllowPrivilegeEscalation: pointer.Bool(false),
-		// 	Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-		// 	SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
-		// },
+		Args:    []string{"mkdir -p /workspace/repo && git clone --depth=1 --branch=${GIT_BRANCH} ${GIT_REPO} /workspace/repo && chmod -R 777 /workspace"},
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: "workspace", MountPath: "/workspace"},
 		},
 	}
 }
 
-// railpackPrepareContainer は railpack の prepare コマンドを実行する InitContainer を返します。
-// railpack バイナリの実行に root 権限が必要なため、SecurityContext は設定しません。
 func railpackPrepareContainer(cfg BuildConfig, res corev1.ResourceRequirements) corev1.Container {
 	return corev1.Container{
 		Name:       "railpack",
@@ -229,30 +199,63 @@ func railpackPrepareContainer(cfg BuildConfig, res corev1.ResourceRequirements) 
 	}
 }
 
-// ── メインコンテナ定義 ──────────────────────────────────────
+// ── メインコンテナ ──────────────────────────────────────────
 
-// buildctlContainer は BuildKit によるイメージビルドを行うメインコンテナを返します。
-// レジストリキャッシュ・認証は使用しません。出力は /workspace/output.tar に保存します。
+// buildctlContainer はビルドしてそのままレジストリへ直接プッシュする。
+// キャッシュも同じレジストリへ export/import する。
+//
+// TLS: setupEnvContainer が生成した ca-bundle.crt を SSL_CERT_FILE で指定する。
+//
+//	buildctl-daemonless rootless では --opt registry.X.ca が効かないため
+//	SSL_CERT_FILE が唯一の有効な回避策。(github.com/moby/buildkit/issues/6068)
+//
+// 認証: setupEnvContainer が生成した config.json を DOCKER_CONFIG で参照する。
 func buildctlContainer(cfg BuildConfig, res corev1.ResourceRequirements) corev1.Container {
+	imageRef := fmt.Sprintf("%s/%s/%s:%s",
+		cfg.RegistryHost, cfg.RegistryProject, cfg.ImageName, cfg.ImageTag)
+
+	insecureFlag := ""
+	if cfg.RegistryInsecure {
+		insecureFlag = ",registry.insecure=true"
+	}
+
+	buildArgs := fmt.Sprintf(
+		`buildctl-daemonless.sh build \
+  --local context=/workspace/repo/${BUILD_CONTEXT_SUBDIR} \
+  --local dockerfile=/workspace \
+  --frontend=gateway.v0 \
+  --opt source=ghcr.io/railwayapp/railpack-frontend \
+  --opt compression=zstd \
+  --opt compression-level=22 \
+  --output "type=image,name=%s,push=true%s" \
+  --export-cache type=inline \
+  --import-cache type=registry,ref=%s%s`,
+		imageRef, insecureFlag,
+		imageRef, insecureFlag,
+	)
+
+	envVars := []corev1.EnvVar{
+		{Name: "BUILD_CONTEXT_SUBDIR", Value: cfg.Subdir},
+		{Name: "BUILDKITD_FLAGS", Value: "--oci-worker-no-process-sandbox"},
+		// setupEnvContainer が生成した config.json のディレクトリを指定
+		{Name: "DOCKER_CONFIG", Value: "/workspace/.docker"},
+	}
+	// Insecure=false のときのみ SSL_CERT_FILE を設定する
+	if !cfg.RegistryInsecure {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "SSL_CERT_FILE",
+			Value: "/workspace/certs/ca-bundle.crt",
+		})
+	}
+
 	return corev1.Container{
 		Name:       "buildctl",
 		Image:      "moby/buildkit:master-rootless",
 		Resources:  res,
 		WorkingDir: "/workspace",
-		Env: []corev1.EnvVar{
-			{Name: "BUILD_CONTEXT_SUBDIR", Value: cfg.Subdir},
-			{Name: "BUILDKITD_FLAGS", Value: "--oci-worker-no-process-sandbox"},
-		},
-		Command: []string{"sh", "-c"},
-		Args: []string{
-			`buildctl-daemonless.sh build \
-  --local context=/workspace/repo/${BUILD_CONTEXT_SUBDIR} \
-  --local dockerfile=/workspace \
-  --frontend=gateway.v0 \
-  --opt source=ghcr.io/railwayapp/railpack-frontend \
-  --output "type=docker,dest=/workspace/output.tar" && \
-touch /workspace/build.done`,
-		},
+		Env:        envVars,
+		Command:    []string{"sh", "-c"},
+		Args:       []string{buildArgs},
 		SecurityContext: &corev1.SecurityContext{
 			SeccompProfile:  &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined},
 			AppArmorProfile: &corev1.AppArmorProfile{Type: corev1.AppArmorProfileTypeUnconfined},
@@ -266,44 +269,43 @@ touch /workspace/build.done`,
 	}
 }
 
-// tarPushContainer はビルド成果物の tar を受け取り側サーバーへ送信するコンテナを返します。
-func tarPushContainer(cfg BuildConfig, res corev1.ResourceRequirements, jobID string) corev1.Container {
-	return corev1.Container{
-		Name:      "tar-push",
-		Image:     "alpine:latest",
-		Resources: res,
-		Env: []corev1.EnvVar{
-			{Name: "UPLOAD_URL", Value: cfg.UploadEndpoint},
-			{Name: "UPLOAD_TOKEN", Value: cfg.UploadToken},
-			{Name: "JOB_ID", Value: jobID},
-			{Name: "IMAGE_NAME", Value: cfg.ImageName},
-			{Name: "IMAGE_TAG", Value: cfg.ImageTag},
-		},
-		Command: []string{"sh", "-c"},
-		Args: []string{
-			`apk add --no-cache curl
-until [ -f /workspace/build.done ]; do sleep 3; done
-curl -k --fail \
-  -X POST "${UPLOAD_URL}" \
-  -H "Authorization: Bearer ${UPLOAD_TOKEN}" \
-  -H "X-Job-Id: ${JOB_ID}" \
-  -H "X-Image-Name: ${IMAGE_NAME}" \
-  -H "X-Image-Tag: ${IMAGE_TAG}" \
-  -H "Content-Type: application/octet-stream" \
-  -H "Transfer-Encoding: chunked" \
-  --data-binary @/workspace/output.tar`,
-		},
-		// SecurityContext: &corev1.SecurityContext{
-		// 	RunAsNonRoot:             pointer.Bool(true),
-		// 	RunAsUser:                pointer.Int64(1000),
-		// 	RunAsGroup:               pointer.Int64(1000),
-		// 	ReadOnlyRootFilesystem:   pointer.Bool(false), // apk install のため書き込みが必要
-		// 	AllowPrivilegeEscalation: pointer.Bool(false),
-		// 	Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
-		// 	SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
-		// },
-		VolumeMounts: []corev1.VolumeMount{
-			{Name: "workspace", MountPath: "/workspace"},
-		},
+// ── Job 管理ヘルパー ────────────────────────────────────────
+
+func deleteJob(ctx context.Context, cs *kubernetes.Clientset, ns, jobID string) error {
+	prop := metav1.DeletePropagationForeground
+	return cs.BatchV1().Jobs(ns).Delete(ctx,
+		"railpack-"+jobID,
+		metav1.DeleteOptions{PropagationPolicy: &prop},
+	)
+}
+
+// getJobStatus は指定した jobID の現在の BuildStatus を返す。
+func getJobStatus(ctx context.Context, cs *kubernetes.Clientset, ns, jobID string) (BuildStatus, error) {
+	job, err := cs.BatchV1().Jobs(ns).Get(ctx, "railpack-"+jobID, metav1.GetOptions{})
+	if err != nil {
+		return StatusFailed, err
 	}
+	switch {
+	case job.Status.Succeeded > 0:
+		return StatusComplete, nil
+	case job.Status.Failed > 0:
+		return StatusFailed, nil
+	case job.Status.Active > 0:
+		return StatusRunning, nil
+	default:
+		return StatusInit, nil
+	}
+}
+
+func waitForPod(ctx context.Context, cs *kubernetes.Clientset, ns, jobID string) (*corev1.Pod, error) {
+	for range make([]struct{}, 30) {
+		pods, err := cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
+			LabelSelector: "job-uuid=" + jobID,
+		})
+		if err == nil && len(pods.Items) > 0 {
+			return &pods.Items[0], nil
+		}
+		time.Sleep(time.Second)
+	}
+	return nil, fmt.Errorf("pod not found for job %s", jobID)
 }

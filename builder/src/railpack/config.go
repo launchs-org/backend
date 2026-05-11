@@ -21,12 +21,17 @@ type BuildConfig struct {
 	// ImageTag: イメージのタグ (例: "v1.0.0")
 	ImageTag string
 
-	// ── tar 送信先 ───────────────────────────────────────────
-	// UploadEndpoint: ビルド成果物 (tar) の送信先エンドポイント
-	// 例: "http://10.10.11.8:8080/upload"
-	UploadEndpoint string
-	// UploadToken: 送信時の Bearer 認証トークン (空なら認証なし)
-	UploadToken string
+	// ── レジストリ (直接プッシュ) ────────────────────────────
+	// RegistryHost: プッシュ先レジストリホスト (例: "172.33.0.1")
+	RegistryHost string
+	// RegistryProject: Harbor のプロジェクト名 (例: "buildkit")
+	RegistryProject string
+	// RegistryUsername: buildkit が使う Harbor ユーザー名
+	RegistryUsername string
+	// RegistryPassword: buildkit が使う Harbor パスワード
+	RegistryPassword string
+	// RegistryInsecure: true にすると HTTP / 自己署名証明書を許可
+	RegistryInsecure bool
 
 	// ── Kubernetes ───────────────────────────────────────────
 	// Namespace: Job を作成する Kubernetes namespace
@@ -39,9 +44,6 @@ type BuildConfig struct {
 	// ── タイムアウト ─────────────────────────────────────────
 	// Timeout: ビルド全体のタイムアウト (省略時: 10分)
 	Timeout time.Duration
-
-	// JobID: Kubernetes Job の識別子に使用するID (省略時は自動生成)
-	JobID string
 }
 
 // ResourceConfig は各コンテナのリソース制限設定です。
@@ -87,6 +89,12 @@ func applyDefaults(cfg BuildConfig) BuildConfig {
 	}
 	if cfg.Resources.BuildCPU == "" {
 		cfg.Resources = DefaultResourceConfig()
+	}
+	if cfg.RegistryHost == "" {
+		cfg.RegistryHost = "172.33.0.1"
+	}
+	if cfg.RegistryProject == "" {
+		cfg.RegistryProject = "buildkit"
 	}
 	return cfg
 }

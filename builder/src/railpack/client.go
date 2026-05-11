@@ -45,8 +45,8 @@ func New(clientset *kubernetes.Clientset, config BuildConfig) (*Client, error) {
 	if config.GitRepo == "" {
 		return nil, fmt.Errorf("GitRepo は必須です")
 	}
-	if config.UploadEndpoint == "" {
-		return nil, fmt.Errorf("UploadEndpoint は必須です")
+	if config.RegistryUsername == "" {
+		return nil, fmt.Errorf("RegistryUsername は必須です")
 	}
 	if config.Namespace == "" {
 		return nil, fmt.Errorf("Namespace は必須です")
@@ -70,7 +70,7 @@ func New(clientset *kubernetes.Clientset, config BuildConfig) (*Client, error) {
 // jobID を使って Status / StreamLogs / Cancel を呼び出してください。
 // この関数はジョブを起動するだけで、完了を待ちません。
 func (client *Client) Build(ctx context.Context) (jobID string, err error) {
-	jobID, err = createJob(ctx, client.clientset, client.config)
+	jobID, err = createJob(ctx, client.clientset,"buildkit", client.config)
 	if err != nil {
 		return "", fmt.Errorf("ジョブの作成に失敗しました: %w", err)
 	}
@@ -100,8 +100,7 @@ func (client *Client) Status(ctx context.Context, jobID string) (BuildStatus, er
 // 実行順にログを取得するコンテナ:
 //   - git-clone    (InitContainer)
 //   - railpack     (InitContainer)
-//   - buildctl     (メインコンテナ)
-//   - tar-push     (メインコンテナ)
+//   - buildctl     (メインコンテナ、ビルド＆プッシュ)
 //
 // 使用例:
 //
@@ -118,7 +117,7 @@ func (client *Client) StreamLogs(ctx context.Context, jobID string) (<-chan stri
 
 	// 実行順にログを取得するコンテナ名の一覧
 	// InitContainer → メインコンテナの順で直列に実行されるため、この順番で追う
-	containerNames := []string{"git-clone", "railpack", "buildctl", "tar-push"}
+	containerNames := []string{"git-clone", "railpack", "buildctl"}
 
 	go func() {
 		defer close(logCh)
