@@ -3,19 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"builder/controller"
 	"builder/worker"
 	"launchs/shared/database"
 	"launchs/shared/job_queue"
 	"launchs/shared/model"
 
-	"github.com/labstack/echo/v5"
-	"github.com/labstack/echo/v5/middleware"
 	"github.com/riverqueue/river"
 )
 
@@ -36,6 +32,7 @@ func main() {
 		&model.Service{},
 		&model.Ingress{},
 		&model.Volume{},
+		&model.HarborCredential{},
 	); err != nil {
 		fmt.Printf("[builder] migration error: %v\n", err)
 	}
@@ -48,31 +45,11 @@ func main() {
 	river.AddWorker(workers, &worker.BuildWorker{})
 	river.AddWorker(workers, &worker.DeleteImageWorker{})
 
-	if err := job_queue.UseRiver(ctx, database.TaskDB, workers); err != nil {
+	if err := job_queue.UseRiver(ctx, database.TaskDB, workers, "builder"); err != nil {
 		panic("[builder] failed to start job queue: " + err.Error())
 	}
 
-	// Echo HTTP サーバー起動
-	e := echo.New()
-	e.Use(middleware.RequestLogger())
-	e.Use(middleware.Recover())
-
-	// /internal/upload — K8s Job の tar-push コンテナからのアップロードを受け取る
-	e.POST("/internal/upload", func(c *echo.Context) error {
-		return controller.UploadTar(c)
-	})
-
-	e.GET("/", func(c *echo.Context) error {
-		return (*c).String(http.StatusOK, "builder ok")
-	})
-
-	port := os.Getenv("BUILDER_PORT")
-	if port == "" {
-		port = "8091"
-	}
-
-	fmt.Printf("[builder] listening on :%s\n", port)
-	if err := e.Start(":" + port); err != nil {
-		e.Logger.Error("server error", "error", err)
-	}
+	fmt.Println("[builder] job queue started, waiting for jobs...")
+	<-ctx.Done()
+	fmt.Println("[builder] shutting down")
 }

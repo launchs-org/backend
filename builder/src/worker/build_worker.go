@@ -2,11 +2,14 @@ package worker
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net/http"
 	"os"
-	"strings"
+	// "strings"
 	"time"
 
+	"builder/harbor"
 	"builder/railpack"
 	"launchs/shared/database"
 	"launchs/shared/job_queue/jobs"
@@ -39,15 +42,26 @@ func (w *BuildWorker) Work(ctx context.Context, job *river.Job[jobs.BuildJobArgs
 }
 
 func processBuildTask(ctx context.Context, payload jobs.BuildJobArgs) error {
+	failJob := func(err error) error {
+		model.UpdateBuildJobStatus(payload.BuildJobID, map[string]interface{}{
+			"status":      "Failed",
+			"finished_at": time.Now(),
+		})
+		model.UpdateContainerStatus(payload.ContainerID, "Failed")
+		return err
+	}
+
 	model.UpdateContainerStatus(payload.ContainerID, "Building")
 	model.UpdateBuildJobStatus(payload.BuildJobID, map[string]interface{}{
 		"status":     "Running",
 		"started_at": time.Now(),
+		"image_id":   payload.ImageID,
 	})
 
-	uploadEndpoint := os.Getenv("UPLOAD_ENDPOINT")
-	if uploadEndpoint == "" {
-		uploadEndpoint = "http://builder:8091/internal/upload"
+	// Harbor から projectID に対応する robot クレデンシャルを取得（なければ作成）
+	cred, err := resolveHarborCredential(ctx, payload.ProjectID)
+	if err != nil {
+		return failJob(fmt.Errorf("Harbor クレデンシャルの取得に失敗: %w", err))
 	}
 
 	buildNamespace := os.Getenv("BUILD_NAMESPACE")
@@ -55,67 +69,95 @@ func processBuildTask(ctx context.Context, payload jobs.BuildJobArgs) error {
 		buildNamespace = "buildkit"
 	}
 
+	registryHost := os.Getenv("REGISTRY_HOST")
+	if registryHost == "" {
+		registryHost = "172.33.0.1"
+	}
+
 	clientset := database.K8sClientset.(*kubernetes.Clientset)
 
 	client, err := railpack.New(clientset, railpack.BuildConfig{
-		GitRepo:        payload.RepositoryURL,
-		GitBranch:      payload.Branch,
-		Subdir:         payload.Directory,
-		ImageName:      payload.ContainerID,
-		ImageTag:       payload.ImageID,
-		UploadEndpoint: uploadEndpoint,
-		Namespace:      buildNamespace,
-		JobID:          strings.ReplaceAll(payload.BuildJobID, "_", "-"),
-		Timeout:        35 * time.Minute,
+		GitRepo:          payload.RepositoryURL,
+		GitBranch:        payload.Branch,
+		Subdir:           payload.Directory,
+		ImageName:        payload.ContainerID,
+		ImageTag:         payload.ImageID,
+		RegistryHost:     registryHost,
+		RegistryProject:  payload.ProjectID,
+		RegistryUsername: cred.RobotName,
+		RegistryPassword: cred.RobotSecret,
+		RegistryInsecure: os.Getenv("REGISTRY_INSECURE") == "true",
+		Namespace:        buildNamespace,
+		// JobID:            strings.ReplaceAll(payload.BuildJobID, "_", "-"),
+		Timeout:          35 * time.Minute,
 	})
 	if err != nil {
-		model.UpdateBuildJobStatus(payload.BuildJobID, map[string]interface{}{
-			"status":      "Failed",
-			"finished_at": time.Now(),
-		})
-		model.UpdateContainerStatus(payload.ContainerID, "Failed")
-		return fmt.Errorf("failed to create railpack client: %w", err)
+		return failJob(fmt.Errorf("railpack クライアントの作成に失敗: %w", err))
 	}
 
 	jobID, err := client.Build(ctx)
 	if err != nil {
-		model.UpdateBuildJobStatus(payload.BuildJobID, map[string]interface{}{
-			"status":      "Failed",
-			"finished_at": time.Now(),
-		})
-		model.UpdateContainerStatus(payload.ContainerID, "Failed")
-		return fmt.Errorf("failed to create build job: %w", err)
+		return failJob(fmt.Errorf("K8s ビルドジョブの作成に失敗: %w", err))
 	}
 
-	fmt.Printf("[build-worker] K8s Job created (jobID: %s), polling for completion...\n", jobID)
-	// return waitForBuildJobCompletion(ctx, payload.BuildJobID)
+	fmt.Printf("[build-worker] K8s Job created (jobID: %s)\n", jobID)
 	return nil
 }
 
-func waitForBuildJobCompletion(ctx context.Context, buildJobID string) error {
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	timeout := time.After(35 * time.Minute)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timeout:
-			return fmt.Errorf("build job timed out after 35 minutes")
-		case <-ticker.C:
-			job, err := model.GetBuildJobByID(buildJobID)
-			if err != nil {
-				fmt.Printf("[build-worker] polling error for %s: %v\n", buildJobID, err)
-				continue
-			}
-			switch job.Status {
-			case "Success":
-				return nil
-			case "Failed":
-				return fmt.Errorf("build job failed")
-			}
-		}
+// resolveHarborCredential は projectID に対応する Harbor robot クレデンシャルを返します。
+// DB に存在しない場合は Harbor 上にプロジェクトと robot を作成して DB に保存します。
+func resolveHarborCredential(ctx context.Context, projectID string) (*model.HarborCredential, error) {
+	cred, err := model.GetHarborCredentialByProjectID(projectID)
+	if err != nil {
+		return nil, err
 	}
+	if cred != nil {
+		return cred, nil
+	}
+
+	harborURL := os.Getenv("HARBOR_URL")
+	if harborURL == "" {
+		harborURL = "https://172.33.0.1"
+	}
+	harborUser := os.Getenv("HARBOR_USERNAME")
+	if harborUser == "" {
+		harborUser = "robot$launchs-org"
+	}
+	harborPass := os.Getenv("HARBOR_PASSWORD")
+
+	insecure := true //os.Getenv("REGISTRY_INSECURE") == "true"
+	hc := harbor.NewClient(harbor.Config{
+		BaseURL:  harborURL,
+		Username: harborUser,
+		Password: harborPass,
+		HTTPClient: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: insecure},
+			},
+		},
+	})
+
+	if err := hc.CreateProject(ctx, projectID, false); err != nil {
+		return nil, fmt.Errorf("Harbor プロジェクト作成失敗: %w", err)
+	}
+
+	robot, err := hc.CreateProjectRobot(ctx, projectID, "buildkit", -1)
+	if err != nil {
+		return nil, fmt.Errorf("Harbor robot 作成失敗: %w", err)
+	}
+
+	cred = &model.HarborCredential{
+		ProjectID:     projectID,
+		HarborProject: projectID,
+		RobotID:       robot.ID,
+		RobotName:     robot.Name,
+		RobotSecret:   robot.Secret,
+	}
+	if err := model.SaveHarborCredential(cred); err != nil {
+		return nil, fmt.Errorf("クレデンシャルの保存に失敗: %w", err)
+	}
+
+	fmt.Printf("[build-worker] Harbor robot '%s' を作成しました (project: %s)\n", robot.Name, projectID)
+	return cred, nil
 }
