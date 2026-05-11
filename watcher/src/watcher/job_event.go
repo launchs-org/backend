@@ -3,8 +3,11 @@ package watcher
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
+	"launchs/shared/job_queue"
+	"launchs/shared/job_queue/jobs"
 	"launchs/shared/model"
 
 	"github.com/redis/go-redis/v9"
@@ -90,18 +93,43 @@ func onJobAddedOrModified(
 }
 
 // syncContainerStatus は BuildJob の結果に応じて Container のステータスを更新します。
-// 成功なら "Deploying"、失敗なら "Failed" に遷移します。
+// 成功なら "Deploying" に遷移して deploy ジョブをキューに追加します。
+// 失敗なら "Failed" に遷移します。
 func syncContainerStatus(buildJobID, jobStatus string) {
 	buildJob, err := model.GetBuildJobByID(buildJobID)
 	if err != nil {
+		fmt.Printf("[job-watcher] failed to get build job %s: %v\n", buildJobID, err)
 		return
 	}
 
-	containerStatus := "Failed"
-	if jobStatus == "Success" {
-		containerStatus = "Deploying"
+	if jobStatus != "Success" {
+		model.UpdateContainerStatus(buildJob.ContainerID, "Failed")
+		return
 	}
-	model.UpdateContainerStatus(buildJob.ContainerID, containerStatus)
+
+	model.UpdateContainerStatus(buildJob.ContainerID, "Deploying")
+
+	registryHost := os.Getenv("REGISTRY_HOST")
+	if registryHost == "" {
+		registryHost = "172.33.0.1"
+	}
+	registryProject := os.Getenv("REGISTRY_PROJECT")
+	if registryProject == "" {
+		registryProject = "launchs"
+	}
+	imageRef := fmt.Sprintf("%s/%s/%s:%s",
+		registryHost, registryProject, buildJob.ContainerID, buildJob.ImageID)
+
+	ctx := context.Background()
+	if err := job_queue.Enqueue(ctx, jobs.DeployJobArgs{
+		ContainerID: buildJob.ContainerID,
+		ImageRef:    imageRef,
+		BuildJobID:  buildJobID,
+	}, nil); err != nil {
+		fmt.Printf("[job-watcher] failed to enqueue deploy job for container %s: %v\n", buildJob.ContainerID, err)
+	} else {
+		fmt.Printf("[job-watcher] enqueued deploy job for container %s\n", buildJob.ContainerID)
+	}
 }
 
 // determineJobStatus は Job の Conditions と Active/Succeeded/Failed カウントから

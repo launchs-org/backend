@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"launchs/shared/database"
+	"launchs/shared/job_queue"
 	"launchs/shared/model"
 	"watcher/leader"
 	"watcher/watcher"
@@ -20,6 +21,7 @@ func main() {
 	database.Init()
 	database.InitK8s()
 	database.InitRedis()
+	database.InitTaskDB()
 
 	// DB マイグレーション実行
 	if err := database.DB.AutoMigrate(
@@ -30,8 +32,13 @@ func main() {
 		&model.Service{},
 		&model.Ingress{},
 		&model.Volume{},
+		&model.HarborCredential{},
 	); err != nil {
 		fmt.Printf("[watcher] migration error: %v\n", err)
+	}
+
+	if err := job_queue.UseRiver(context.Background(), database.TaskDB, nil); err != nil {
+		panic("[watcher] failed to init job queue: " + err.Error())
 	}
 
 	fmt.Println("[watcher] initialized database, k8s, redis")
