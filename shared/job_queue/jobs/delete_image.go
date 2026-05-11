@@ -10,5 +10,5 @@ type DeleteImageJobArgs struct {
 func (DeleteImageJobArgs) Kind() string { return "delete_image" }
 
 func (DeleteImageJobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 3}
+	return river.InsertOpts{MaxAttempts: 3, Queue: "builder"}
 }

@@ -19,5 +19,5 @@ type BuildJobArgs struct {
 func (BuildJobArgs) Kind() string { return "build" }
 
 func (BuildJobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 1}
+	return river.InsertOpts{MaxAttempts: 1, Queue: "builder"}
 }

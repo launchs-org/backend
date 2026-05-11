@@ -14,7 +14,8 @@ var Default Queue
 // UseRiver は River 実装で Queue を初期化する。
 // sqlDB: taskdb への *sql.DB 接続
 // workers: ワーカー登録済みの *river.Workers（nil なら挿入専用クライアント）
-func UseRiver(ctx context.Context, sqlDB *sql.DB, workers *river.Workers) error {
+// queues: 処理するキュー名のリスト（nil の場合は default キューのみ）
+func UseRiver(ctx context.Context, sqlDB *sql.DB, workers *river.Workers, queues ...string) error {
 	migrator, err := rivermigrate.New(riverdatabasesql.New(sqlDB), nil)
 	if err != nil {
 		return err
@@ -25,9 +26,13 @@ func UseRiver(ctx context.Context, sqlDB *sql.DB, workers *river.Workers) error 
 
 	cfg := &river.Config{}
 	if workers != nil {
-		cfg.Queues = map[string]river.QueueConfig{
+		queueConfig := map[string]river.QueueConfig{
 			river.QueueDefault: {MaxWorkers: 10},
 		}
+		for _, q := range queues {
+			queueConfig[q] = river.QueueConfig{MaxWorkers: 10}
+		}
+		cfg.Queues = queueConfig
 		cfg.Workers = workers
 	}
 
