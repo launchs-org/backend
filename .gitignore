@@ -15,3 +15,5 @@ dist/
 watcher/src/tmp/main
 shared/shared
 builder/src/tmp/main
+controller/src/tmp/main
+config/*.env
