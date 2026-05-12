@@ -27,10 +27,9 @@ func handleJobEvent(ctx context.Context, clientset *kubernetes.Clientset, redisC
 	// ラベル "build-job-id" から BuildJob ID を取得する（優先）。
 	// ラベルがない場合は Job 名から変換してフォールバック。
 	buildJobID := job.Labels["build-job-id"]
+
 	if buildJobID == "" {
-		buildJobID = jobNameToBuildJobID(job.Name)
-	}
-	if buildJobID == "" {
+		fmt.Printf("[job-watcher] event=%s job=%s build_job_id=%s\n", event.Type, job.Name, buildJobID)
 		return nil
 	}
 
@@ -39,6 +38,7 @@ func handleJobEvent(ctx context.Context, clientset *kubernetes.Clientset, redisC
 
 	switch event.Type {
 	case watch.Added, watch.Modified:
+		fmt.Printf("[job-watcher] event=%s job=%s build_job_id=%s\n", event.Type, job.Name, buildJobID)
 		if err := onJobAddedOrModified(ctx, clientset, redisClient, namespace, job, buildJobID, redisChannel, event.Type); err != nil {
 			return err
 		}
@@ -71,19 +71,24 @@ func onJobAddedOrModified(
 
 	switch status {
 	case "Running":
+		fmt.Printf("[job-watcher] event=%s job=%s build_job_id=%s status=%s\n", eventType, job.Name, buildJobID, status)
+		
 		// 実行開始時刻を記録し、ログストリームをバックグラウンドで開始
 		updates["started_at"] = time.Now()
+		updates["status"] = "Building"
 		model.UpdateBuildJobStatus(buildJobID, updates)
 		go streamJobLogs(ctx, clientset, redisClient, namespace, job.Name, buildJobID, redisChannel)
 
 	case "Success", "Failed":
+		fmt.Printf("[job-watcher] event=%s job=%s build_job_id=%s status=%s\n", eventType, job.Name, buildJobID, status)
+
 		// 完了時刻を記録して DB を更新
 		updates["finished_at"] = time.Now()
+		updates["status"] = status
 		model.UpdateBuildJobStatus(buildJobID, updates)
 
 		// Container のステータスも連動して更新
 		syncContainerStatus(buildJobID, status)
-
 	default:
 		// Queued などその他の状態はステータスのみ更新
 		model.UpdateBuildJobStatus(buildJobID, updates)
@@ -113,12 +118,17 @@ func syncContainerStatus(buildJobID, jobStatus string) {
 	if registryHost == "" {
 		registryHost = "172.33.0.1"
 	}
-	registryProject := os.Getenv("REGISTRY_PROJECT")
-	if registryProject == "" {
-		registryProject = "launchs"
+
+	// コンテナを取得する
+	container, err := model.GetContainerByID(buildJob.ContainerID)
+	if err != nil {
+		fmt.Printf("[job-watcher] failed to get container %s: %v\n", buildJob.ContainerID, err)
+		return
 	}
+
+	
 	imageRef := fmt.Sprintf("%s/%s/%s:%s",
-		registryHost, registryProject, buildJob.ContainerID, buildJob.ImageID)
+		registryHost, container.ProjectID, buildJob.ContainerID, buildJob.ImageID)
 
 	ctx := context.Background()
 	if err := job_queue.Enqueue(ctx, jobs.DeployJobArgs{

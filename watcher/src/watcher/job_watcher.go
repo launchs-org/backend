@@ -34,6 +34,8 @@ func WatchJobs(ctx context.Context) {
 		default:
 		}
 
+		fmt.Println("[job-watcher] starting job watch...")
+
 		if err := runJobWatch(ctx, clientset, redisClient, namespace); err != nil {
 			fmt.Printf("[job-watcher] watch error: %v, restarting...\n", err)
 		}
@@ -69,6 +71,7 @@ func runJobWatch(ctx context.Context, clientset *kubernetes.Clientset, redisClie
 			if !ok {
 				return fmt.Errorf("watch channel closed")
 			}
+
 			if err := handleJobEvent(ctx, clientset, redisClient, namespace, event); err != nil {
 				fmt.Printf("[job-watcher] handle event error: %v\n", err)
 			}

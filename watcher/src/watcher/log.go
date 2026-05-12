@@ -12,7 +12,7 @@ import (
 // logJobEvent は K8s Job のイベント発生時に構造化ログを出力します。
 // ステータス・JobID・BuildJobID・イベント種別を 1 行にまとめて出力します。
 func logJobEvent(eventType watch.EventType, job *batchv1.Job, buildJobID, status string) {
-	jobID := job.Labels["job-uuid"]
+	jobID := job.Labels["build-job-id"]
 	fmt.Printf("[job-watcher] event=%s job=%s build_job_id=%s status=%s active=%d succeeded=%d failed=%d ts=%s\n",
 		eventType,
 		job.Name,

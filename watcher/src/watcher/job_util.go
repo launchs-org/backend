@@ -15,7 +15,7 @@ func jobNameToBuildJobID(jobName string) string {
 	// "railpack-" を除去: "bj-abc-123"
 	withoutPrefix := strings.TrimPrefix(jobName, "railpack-")
 	// 先頭の "-" だけ "_" に置換: "bj_abc-123"
-	return strings.Replace(withoutPrefix, "-", "_", 1)
+	return withoutPrefix
 }
 
 // parseTimestampedLine は K8s ログ行の先頭にある RFC3339Nano タイムスタンプを
