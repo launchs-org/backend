@@ -3,9 +3,12 @@ package worker
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+
 	// "strings"
 	"time"
 
@@ -86,9 +89,9 @@ func processBuildTask(ctx context.Context, payload jobs.BuildJobArgs) error {
 		RegistryProject:  payload.ProjectID,
 		RegistryUsername: cred.RobotName,
 		RegistryPassword: cred.RobotSecret,
-		RegistryInsecure: os.Getenv("REGISTRY_INSECURE") == "true",
+		RegistryInsecure: false,
 		Namespace:        buildNamespace,
-		// JobID:            strings.ReplaceAll(payload.BuildJobID, "_", "-"),
+		JobID:            payload.BuildJobID,
 		Timeout:          35 * time.Minute,
 	})
 	if err != nil {
@@ -100,8 +103,33 @@ func processBuildTask(ctx context.Context, payload jobs.BuildJobArgs) error {
 		return failJob(fmt.Errorf("K8s ビルドジョブの作成に失敗: %w", err))
 	}
 
+	log.Printf("[railpack] ジョブを開始しました: %s", jobID)
+
+	// ── ログをチャンネルで受け取って出力 ────────────────────
+	logCh, errCh := client.StreamLogs(ctx, jobID)
+	go func() {
+		for line := range logCh {
+			log.Println("[build]", line)
+		}
+		if err := <-errCh; err != nil {
+			log.Printf("[railpack] ログストリームエラー: %v", err)
+		}
+	}()
+
+	// ── 完了まで待機 ─────────────────────────────────────────
+	status, err := client.Wait(ctx, jobID)
+	if err != nil {
+		return fmt.Errorf("ビルド待機中にエラー: %w", err)
+	}
+
+	if status == railpack.StatusComplete {
+		log.Printf("✓ ビルド成功")
+		return nil
+	}
+
 	fmt.Printf("[build-worker] K8s Job created (jobID: %s)\n", jobID)
-	return nil
+
+	return errors.New("Failed To Build Container Status: ")
 }
 
 // resolveHarborCredential は projectID に対応する Harbor robot クレデンシャルを返します。
@@ -119,11 +147,15 @@ func resolveHarborCredential(ctx context.Context, projectID string) (*model.Harb
 	if harborURL == "" {
 		harborURL = "https://172.33.0.1"
 	}
-	harborUser := os.Getenv("HARBOR_USERNAME")
-	if harborUser == "" {
-		harborUser = "robot$launchs-org"
-	}
+	// harborUser := os.Getenv("HARBOR_USERNAME")
+	
+	harborUser := "robot$launchs-org"
 	harborPass := os.Getenv("HARBOR_PASSWORD")
+
+	// パスワードとユーザー名を表示
+	fmt.Printf("[build-worker] Harbor URL: %s\n", harborURL)
+	fmt.Printf("[build-worker] Harbor User: %s\n", harborUser)
+	fmt.Printf("[build-worker] Harbor Password: %s\n", harborPass)
 
 	insecure := true //os.Getenv("REGISTRY_INSECURE") == "true"
 	hc := harbor.NewClient(harbor.Config{
