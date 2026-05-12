@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -49,22 +48,21 @@ func createJob(ctx context.Context, cs *kubernetes.Clientset, ns string, cfg Bui
 		resource.BinarySI,
 	)
 
-	jobID := uuid.New().String()
-	jobName := "railpack-" + jobID
+	jobName := "railpack-" + cfg.JobID
 	deadline := int64(cfg.Timeout.Seconds())
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
 			Namespace: ns,
-			Labels:    map[string]string{"app": "railpack", "job-uuid": jobID},
+			Labels:    map[string]string{"app": "railpack", "build-job-id": cfg.JobID,"managed-by": "launchs","launchs-managed": "true"},
 		},
 		Spec: batchv1.JobSpec{
 			TTLSecondsAfterFinished: pointer.Int32(600),
 			ActiveDeadlineSeconds:   &deadline,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"job-uuid": jobID},
+					Labels: map[string]string{"build-job-id": cfg.JobID, "managed-by": "launchs"},
 				},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
@@ -88,7 +86,7 @@ func createJob(ctx context.Context, cs *kubernetes.Clientset, ns string, cfg Bui
 	}
 
 	_, err := cs.BatchV1().Jobs(ns).Create(ctx, job, metav1.CreateOptions{})
-	return jobID, err
+	return cfg.JobID, err
 }
 
 // ── ボリューム ──────────────────────────────────────────────
@@ -151,7 +149,7 @@ echo "config.json を生成しました"
 
 	return corev1.Container{
 		Name:      "setup-env",
-		Image:     "moby/buildkit:master-rootless", // CA バンドルのパスを buildctl と合わせる
+		Image:     "moby/buildkit:v0.27.0-rootless", // CA バンドルのパスを buildctl と合わせる
 		Resources: res,
 		Env: []corev1.EnvVar{
 			{Name: "REGISTRY_USERNAME", Value: cfg.RegistryUsername},
@@ -226,6 +224,7 @@ func buildctlContainer(cfg BuildConfig, res corev1.ResourceRequirements) corev1.
   --frontend=gateway.v0 \
   --opt source=ghcr.io/railwayapp/railpack-frontend \
   --opt compression=zstd \
+  --opt push-parallelism=1 \
   --opt compression-level=22 \
   --output "type=image,name=%s,push=true%s" \
   --export-cache type=inline \
@@ -250,7 +249,7 @@ func buildctlContainer(cfg BuildConfig, res corev1.ResourceRequirements) corev1.
 
 	return corev1.Container{
 		Name:       "buildctl",
-		Image:      "moby/buildkit:master-rootless",
+		Image:      "moby/buildkit:v0.27.0-rootless",
 		Resources:  res,
 		WorkingDir: "/workspace",
 		Env:        envVars,
@@ -300,7 +299,7 @@ func getJobStatus(ctx context.Context, cs *kubernetes.Clientset, ns, jobID strin
 func waitForPod(ctx context.Context, cs *kubernetes.Clientset, ns, jobID string) (*corev1.Pod, error) {
 	for range make([]struct{}, 30) {
 		pods, err := cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
-			LabelSelector: "job-uuid=" + jobID,
+			LabelSelector: "build-job-id=" + jobID,
 		})
 		if err == nil && len(pods.Items) > 0 {
 			return &pods.Items[0], nil

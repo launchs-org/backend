@@ -40,6 +40,9 @@ type BuildConfig struct {
 	// ── リソース制限 ─────────────────────────────────────────
 	// Resources: 各コンテナのリソース設定 (省略時: DefaultResourceConfig())
 	Resources ResourceConfig
+	
+	// ジョブを識別するID
+	JobID string 
 
 	// ── タイムアウト ─────────────────────────────────────────
 	// Timeout: ビルド全体のタイムアウト (省略時: 10分)

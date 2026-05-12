@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/google/go-containerregistry v0.21.5
-	github.com/labstack/echo/v5 v5.1.0
+	github.com/google/uuid v1.6.0
 	github.com/riverqueue/river v0.35.1
 	k8s.io/api v0.36.0
 	k8s.io/apimachinery v0.36.0
@@ -34,9 +34,7 @@ require (
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/gohugoio/hugo v0.149.1 // indirect
-	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.9.2 // indirect
