@@ -1,6 +1,7 @@
 package service
 
 import (
+	"launchs/shared/database"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -203,7 +204,7 @@ func DeleteIngressRoute(ctx context.Context, containerID, ownerID string) (map[s
 		return nil, err
 	}
 
-	if err := model.DeleteIngress(containerID); err != nil {
+	if err := model.DeleteIngress(database.DB,containerID); err != nil {
 		return nil, err
 	}
 

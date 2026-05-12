@@ -55,10 +55,10 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 		return nil, ErrContainerAlreadyExists
 	}
 
-	containerID := "cont_" + uuid.New().String()
-	imageID := "img_" + uuid.New().String()
-	serviceID := "svc_" + uuid.New().String()
-	buildJobID := "bj_" + uuid.New().String()
+	containerID := "cont-" + uuid.New().String()
+	imageID := "img-" + uuid.New().String()
+	serviceID := "svc-" + uuid.New().String()
+	buildJobID := "bj-" + uuid.New().String()
 
 	branch := input.Branch
 	if branch == "" {
@@ -244,7 +244,7 @@ func UpdateContainer(ctx context.Context, input UpdateContainerInput) (map[strin
 	}
 
 	buildJob := model.BuildJob{
-		ID:            "bj_" + uuid.New().String(),
+		ID:            "bj-" + uuid.New().String(),
 		ProjectID:     project.ID,
 		ContainerID:   container.ID,
 		RepositoryURL: container.RepositoryURL,
@@ -300,10 +300,9 @@ func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[st
 	if registryHost == "" {
 		registryHost = "172.33.0.1"
 	}
-	registryProject := os.Getenv("REGISTRY_PROJECT")
-	if registryProject == "" {
-		registryProject = "launchs"
-	}
+	
+	registryProject := container.ProjectID
+
 	imageRef := fmt.Sprintf("%s/%s/%s:%s", registryHost, registryProject, container.ID, container.ImageID)
 
 	// deploy ジョブをキューに追加

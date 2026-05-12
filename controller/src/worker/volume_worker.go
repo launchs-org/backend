@@ -92,7 +92,7 @@ func (w *DeleteVolumeWorker) Work(ctx context.Context, job *river.Job[jobs.Delet
 		return fmt.Errorf("failed to delete PVC %s: %w", pvcName, err)
 	}
 
-	if err := model.DeleteVolume(payload.VolumeID); err != nil {
+	if err := model.DeleteVolume(database.DB,payload.VolumeID); err != nil {
 		return fmt.Errorf("failed to delete volume from DB: %w", err)
 	}
 
