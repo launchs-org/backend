@@ -57,7 +57,35 @@ func UpdateContainerStatus(id, status string) error {
 }
 
 func DeleteContainer(id string) error {
-	return database.DB.Where("id = ?", id).Delete(&Container{}).Error
+	// トランザクションを作成
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		// コンテナを取得する
+		container, err := GetContainerByID(id)
+		if err != nil {
+			return err
+		}
+		
+		// コンテナの関連リソースを削除する
+		if err := DeleteIngress(tx,id); err != nil {
+			return err
+		}
+
+		// コンテナの関連リソースを削除する
+		if err := DeleteServiceByContainerID(tx,id); err != nil {
+			return err
+		}
+
+		// ボリュームを回す
+		for _, volume := range container.Volumes {
+			if err := DeleteVolume(tx,volume.ID); err != nil {
+				return err
+			}
+		}
+
+		return tx.Where("id = ?", id).Delete(&Container{}).Error
+	})
+
+	return err
 }
 
 func GetContainerByID(id string) (*Container, error) {
@@ -68,3 +96,4 @@ func GetContainerByID(id string) (*Container, error) {
 	}
 	return &container, nil
 }
+

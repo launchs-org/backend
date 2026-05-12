@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"launchs/shared/database"
+
+	"gorm.io/gorm"
 )
 
 type Service struct {
@@ -27,8 +29,8 @@ func GetServiceByContainerID(containerID string) (*Service, error) {
 	return &service, nil
 }
 
-func DeleteServiceByContainerID(containerID string) error {
-	return database.DB.Where("container_id = ?", containerID).Delete(&Service{}).Error
+func DeleteServiceByContainerID(tx *gorm.DB,containerID string) error {
+	return tx.Where("container_id = ?", containerID).Delete(&Service{}).Error
 }
 
 func UpdateService(service *Service) error {

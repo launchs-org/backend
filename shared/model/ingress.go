@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"launchs/shared/database"
+
+	"gorm.io/gorm"
 )
 
 type Ingress struct {
@@ -35,6 +37,6 @@ func UpdateIngress(ingress *Ingress) error {
 	return database.DB.Save(ingress).Error
 }
 
-func DeleteIngress(containerID string) error {
-	return database.DB.Where("container_id = ?", containerID).Delete(&Ingress{}).Error
+func DeleteIngress(tx *gorm.DB,containerID string) error {
+	return tx.Where("container_id = ?", containerID).Delete(&Ingress{}).Error
 }

@@ -3,6 +3,8 @@ package model
 import (
 	"launchs/shared/database"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 type Volume struct {
@@ -46,6 +48,6 @@ func UpdateVolume(volume *Volume) error {
 	return database.DB.Save(volume).Error
 }
 
-func DeleteVolume(id string) error {
+func DeleteVolume(tx *gorm.DB,id string) error {
 	return database.DB.Where("id = ?", id).Delete(&Volume{}).Error
 }
