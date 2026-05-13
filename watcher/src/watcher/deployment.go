@@ -108,6 +108,12 @@ func handleDeploymentEvent(ctx context.Context, clientset *kubernetes.Clientset,
 		return nil
 	}
 
+	// デプロイ中・再デプロイ中は Failed に上書きしない（Pod 起動過渡期の誤検知を防ぐ）
+	transitioning := container.Status == "Deploying" || container.Status == "Redeploying"
+	if transitioning && status == "Failed" {
+		return nil
+	}
+
 	// ステータスが変化した場合のみ DB 更新・キャッシュ削除
 	if container.Status != status {
 		fmt.Printf("[deploy-watcher] status changed: container=%s %s → %s\n",
@@ -128,6 +134,8 @@ func handleDeploymentEvent(ctx context.Context, clientset *kubernetes.Clientset,
 
 // determineDeploymentStatus は Deployment の spec/status から
 // アプリケーション用のステータス文字列を返します。
+// UnavailableReplicas > 0 だけでは Failed にせず、K8s が明示的に失敗 Condition を
+// 付けた場合のみ Failed とします（Pod 起動過渡期の誤検知を防ぐため）。
 func determineDeploymentStatus(deploy *appsv1.Deployment) string {
 	if deploy.Spec.Replicas == nil {
 		return "Stopped"
@@ -139,8 +147,14 @@ func determineDeploymentStatus(deploy *appsv1.Deployment) string {
 	if deploy.Status.ReadyReplicas >= desired {
 		return "Running"
 	}
-	if deploy.Status.UnavailableReplicas > 0 {
-		return "Failed"
+	// Conditions を確認して明示的な失敗のみ Failed とする
+	for _, c := range deploy.Status.Conditions {
+		if c.Type == appsv1.DeploymentProgressing && c.Reason == "ProgressDeadlineExceeded" {
+			return "Failed"
+		}
+		if c.Type == appsv1.DeploymentReplicaFailure && c.Status == corev1.ConditionTrue {
+			return "Failed"
+		}
 	}
 	return "Deploying"
 }
