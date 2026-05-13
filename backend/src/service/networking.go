@@ -63,7 +63,7 @@ func UpdateService(ctx context.Context, containerID, ownerID, svcType string, po
 		portArgs[i] = jobs.ServicePortArgs{Name: p.Name, Port: p.Port, Target: p.Target}
 	}
 
-	if err := job_queue.Enqueue(ctx, jobs.UpdateServiceJobArgs{
+	if err := job_queue.EnqueueTo(ctx, "controller", jobs.UpdateServiceJobArgs{
 		ContainerID: containerID,
 		Namespace:   project.Namespace,
 		ServiceName: container.Name,
@@ -117,7 +117,7 @@ func CreateIngress(ctx context.Context, containerID, ownerID, customDomain strin
 		return nil, err
 	}
 
-	if err := job_queue.Enqueue(ctx, jobs.CreateIngressJobArgs{
+	if err := job_queue.EnqueueTo(ctx, "controller", jobs.CreateIngressJobArgs{
 		ContainerID:         containerID,
 		ContainerName:       container.Name,
 		Namespace:           project.Namespace,
@@ -165,7 +165,7 @@ func UpdateIngress(ctx context.Context, containerID, ownerID, customDomain strin
 		return nil, err
 	}
 
-	if err := job_queue.Enqueue(ctx, jobs.UpdateIngressJobArgs{
+	if err := job_queue.EnqueueTo(ctx, "controller", jobs.UpdateIngressJobArgs{
 		ContainerID:         containerID,
 		ContainerName:       container.Name,
 		Namespace:           project.Namespace,
@@ -208,7 +208,7 @@ func DeleteIngressRoute(ctx context.Context, containerID, ownerID string) (map[s
 		return nil, err
 	}
 
-	if err := job_queue.Enqueue(ctx, jobs.DeleteIngressJobArgs{
+	if err := job_queue.EnqueueTo(ctx, "controller", jobs.DeleteIngressJobArgs{
 		ContainerID:   containerID,
 		ContainerName: container.Name,
 		Namespace:     project.Namespace,

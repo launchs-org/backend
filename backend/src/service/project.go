@@ -52,7 +52,7 @@ func CreateProject(ctx context.Context, input CreateProjectInput) (*model.Projec
 		return nil, fmt.Errorf("プロジェクトの保存に失敗しました: %w", err)
 	}
 
-	if err := job_queue.Enqueue(ctx, jobs.CreateProjectJobArgs{
+	if err := job_queue.EnqueueTo(ctx, "controller", jobs.CreateProjectJobArgs{
 		ProjectID:   projectID,
 		ProjectName: input.Name,
 		Namespace:   namespace,
@@ -88,7 +88,11 @@ func DeleteProject(ctx context.Context, id string, userID string) error {
 		return ErrForbidden
 	}
 
-	return job_queue.Enqueue(ctx, jobs.DeleteProjectJobArgs{
+	if err := model.UpdateProjectStatus(id, "Deleting"); err != nil {
+		return fmt.Errorf("failed to update project status: %w", err)
+	}
+
+	return job_queue.EnqueueTo(ctx, "controller", jobs.DeleteProjectJobArgs{
 		ProjectID: id,
 		Namespace: project.Namespace,
 	}, nil)

@@ -36,7 +36,7 @@ func main() {
 	river.AddWorker(workers, &worker.CreateVolumeWorker{})
 	river.AddWorker(workers, &worker.DeleteVolumeWorker{})
 
-	if err := job_queue.UseRiver(ctx, database.TaskDB, workers); err != nil {
+	if err := job_queue.UseRiver(ctx, database.TaskDB, workers, "controller"); err != nil {
 		panic("failed to initialize job queue: " + err.Error())
 	}
 

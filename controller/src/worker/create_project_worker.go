@@ -7,6 +7,7 @@ import (
 
 	"launchs/shared/database"
 	"launchs/shared/job_queue/jobs"
+	"launchs/shared/model"
 
 	"github.com/riverqueue/river"
 	corev1 "k8s.io/api/core/v1"
@@ -87,6 +88,10 @@ func (w *CreateProjectWorker) Work(ctx context.Context, job *river.Job[jobs.Crea
 		},
 	}
 	_, _ = database.K8sClientset.NetworkingV1().NetworkPolicies(namespace).Create(ctx, netPol, metav1.CreateOptions{})
+
+	if err := model.UpdateProjectStatus(payload.ProjectID, "Running"); err != nil {
+		fmt.Printf("[create-project-worker] failed to update project status: %v\n", err)
+	}
 
 	fmt.Printf("[create-project-worker] created namespace and network policy for project %s\n", payload.ProjectID)
 	return nil

@@ -12,5 +12,5 @@ type CreateProjectJobArgs struct {
 func (CreateProjectJobArgs) Kind() string { return "create_project" }
 
 func (CreateProjectJobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 3}
+	return river.InsertOpts{MaxAttempts: 3, Queue: "controller"}
 }

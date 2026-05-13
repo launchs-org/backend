@@ -12,5 +12,5 @@ type DeployJobArgs struct {
 func (DeployJobArgs) Kind() string { return "deploy" }
 
 func (DeployJobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 1}
+	return river.InsertOpts{MaxAttempts: 1, Queue: "controller"}
 }

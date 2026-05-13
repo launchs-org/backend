@@ -160,7 +160,7 @@ func DeleteContainer(ctx context.Context, containerID string, ownerID string) er
 	}
 
 	// delete_container ジョブをキューに追加
-	return job_queue.Enqueue(ctx, jobs.DeleteContainerJobArgs{
+	return job_queue.EnqueueTo(ctx, "controller", jobs.DeleteContainerJobArgs{
 		ContainerID: containerID,
 		Namespace:   project.Namespace,
 		ImageName:   container.ID,
@@ -306,7 +306,7 @@ func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[st
 	imageRef := fmt.Sprintf("%s/%s/%s:%s", registryHost, registryProject, container.ID, container.ImageID)
 
 	// deploy ジョブをキューに追加
-	if err := job_queue.Enqueue(ctx, jobs.DeployJobArgs{
+	if err := job_queue.EnqueueTo(ctx, "controller", jobs.DeployJobArgs{
 		ContainerID: container.ID,
 		ImageRef:    imageRef,
 		Namespace:   project.Namespace,
@@ -378,7 +378,7 @@ func GetContainer(ctx context.Context, containerID string, ownerID string) (map[
 
 // enqueueBuildTask は build ジョブをキューに追加します
 func enqueueBuildTask(ctx context.Context, project *model.Project, container *model.Container, buildJob model.BuildJob) error {
-	return job_queue.Enqueue(ctx, jobs.BuildJobArgs{
+	return job_queue.EnqueueTo(ctx, "builder", jobs.BuildJobArgs{
 		BuildJobID:    buildJob.ID,
 		ContainerID:   container.ID,
 		ImageID:       container.ImageID,

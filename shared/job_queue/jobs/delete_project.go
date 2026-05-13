@@ -10,5 +10,5 @@ type DeleteProjectJobArgs struct {
 func (DeleteProjectJobArgs) Kind() string { return "delete_project" }
 
 func (DeleteProjectJobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 3}
+	return river.InsertOpts{MaxAttempts: 3, Queue: "controller"}
 }

@@ -13,6 +13,7 @@ type Project struct {
 	K8sResourceName string         `gorm:"type:varchar(255);not null" json:"k8s_resource_name"`
 	Namespace       string         `gorm:"type:varchar(255);not null" json:"namespace"`
 	OwnerID         string         `gorm:"type:varchar(255);not null;index" json:"owner_id"`
+	Status          string         `gorm:"type:varchar(255);default:'Pending'" json:"status"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
 	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
@@ -51,6 +52,10 @@ func GetProjectsByOwnerID(ownerID string) ([]Project, error) {
 		return nil, err
 	}
 	return projects, nil
+}
+
+func UpdateProjectStatus(id, status string) error {
+	return database.DB.Model(&Project{}).Where("id = ?", id).Update("status", status).Error
 }
 
 func DeleteProject(id string) error {

@@ -15,7 +15,7 @@ type CreateIngressJobArgs struct {
 func (CreateIngressJobArgs) Kind() string { return "create_ingress" }
 
 func (CreateIngressJobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 3}
+	return river.InsertOpts{MaxAttempts: 3, Queue: "controller"}
 }
 
 type UpdateIngressJobArgs struct {
@@ -31,7 +31,7 @@ type UpdateIngressJobArgs struct {
 func (UpdateIngressJobArgs) Kind() string { return "update_ingress" }
 
 func (UpdateIngressJobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 3}
+	return river.InsertOpts{MaxAttempts: 3, Queue: "controller"}
 }
 
 type DeleteIngressJobArgs struct {
@@ -43,5 +43,5 @@ type DeleteIngressJobArgs struct {
 func (DeleteIngressJobArgs) Kind() string { return "delete_ingress" }
 
 func (DeleteIngressJobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 3}
+	return river.InsertOpts{MaxAttempts: 3, Queue: "controller"}
 }

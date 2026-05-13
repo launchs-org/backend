@@ -131,7 +131,7 @@ func syncContainerStatus(buildJobID, jobStatus string) {
 		registryHost, container.ProjectID, buildJob.ContainerID, buildJob.ImageID)
 
 	ctx := context.Background()
-	if err := job_queue.Enqueue(ctx, jobs.DeployJobArgs{
+	if err := job_queue.EnqueueTo(ctx, "controller", jobs.DeployJobArgs{
 		ContainerID: buildJob.ContainerID,
 		ImageRef:    imageRef,
 		BuildJobID:  buildJobID,

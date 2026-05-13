@@ -11,5 +11,5 @@ type DeleteContainerJobArgs struct {
 func (DeleteContainerJobArgs) Kind() string { return "delete_container" }
 
 func (DeleteContainerJobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 3}
+	return river.InsertOpts{MaxAttempts: 3, Queue: "controller"}
 }

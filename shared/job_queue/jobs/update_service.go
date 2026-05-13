@@ -20,5 +20,5 @@ type UpdateServiceJobArgs struct {
 func (UpdateServiceJobArgs) Kind() string { return "update_service" }
 
 func (UpdateServiceJobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 3}
+	return river.InsertOpts{MaxAttempts: 3, Queue: "controller"}
 }

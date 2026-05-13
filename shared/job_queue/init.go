@@ -26,8 +26,10 @@ func UseRiver(ctx context.Context, sqlDB *sql.DB, workers *river.Workers, queues
 
 	cfg := &river.Config{}
 	if workers != nil {
-		queueConfig := map[string]river.QueueConfig{
-			river.QueueDefault: {MaxWorkers: 10},
+		queueConfig := map[string]river.QueueConfig{}
+		if len(queues) == 0 {
+			// キュー名が未指定の場合のみ default キューを購読する
+			queueConfig[river.QueueDefault] = river.QueueConfig{MaxWorkers: 10}
 		}
 		for _, q := range queues {
 			queueConfig[q] = river.QueueConfig{MaxWorkers: 10}
@@ -52,6 +54,16 @@ func UseRiver(ctx context.Context, sqlDB *sql.DB, workers *river.Workers, queues
 }
 
 func Enqueue(ctx context.Context, args river.JobArgs, opts *river.InsertOpts) error {
+	return Default.Enqueue(ctx, args, opts)
+}
+
+// EnqueueTo は opts の Queue フィールドを上書きしてジョブを投入します。
+// InsertOpts() メソッドより確実にキューを指定したい場合に使います。
+func EnqueueTo(ctx context.Context, queue string, args river.JobArgs, opts *river.InsertOpts) error {
+	if opts == nil {
+		opts = &river.InsertOpts{}
+	}
+	opts.Queue = queue
 	return Default.Enqueue(ctx, args, opts)
 }
 

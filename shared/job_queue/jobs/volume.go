@@ -11,7 +11,7 @@ type CreateVolumeJobArgs struct {
 func (CreateVolumeJobArgs) Kind() string { return "create_volume" }
 
 func (CreateVolumeJobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 3}
+	return river.InsertOpts{MaxAttempts: 3, Queue: "controller"}
 }
 
 type DeleteVolumeJobArgs struct {
@@ -22,5 +22,5 @@ type DeleteVolumeJobArgs struct {
 func (DeleteVolumeJobArgs) Kind() string { return "delete_volume" }
 
 func (DeleteVolumeJobArgs) InsertOpts() river.InsertOpts {
-	return river.InsertOpts{MaxAttempts: 3}
+	return river.InsertOpts{MaxAttempts: 3, Queue: "controller"}
 }

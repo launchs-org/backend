@@ -59,7 +59,7 @@ func CreateVolume(ctx context.Context, input CreateVolumeInput) (*model.Volume, 
 		return nil, fmt.Errorf("failed to save volume to DB: %w", err)
 	}
 
-	if err := job_queue.Enqueue(ctx, jobs.CreateVolumeJobArgs{
+	if err := job_queue.EnqueueTo(ctx, "controller", jobs.CreateVolumeJobArgs{
 		VolumeID:  volumeID,
 		Namespace: project.Namespace,
 		SizeMB:    input.SizeMB,
@@ -108,7 +108,7 @@ func DeleteVolume(ctx context.Context, volumeID string, ownerID string) error {
 		return fmt.Errorf("failed to update volume status: %w", err)
 	}
 
-	if err := job_queue.Enqueue(ctx, jobs.DeleteVolumeJobArgs{
+	if err := job_queue.EnqueueTo(ctx, "controller", jobs.DeleteVolumeJobArgs{
 		VolumeID:  volumeID,
 		Namespace: project.Namespace,
 	}, nil); err != nil {
