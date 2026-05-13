@@ -217,18 +217,42 @@ func buildctlContainer(cfg BuildConfig, res corev1.ResourceRequirements) corev1.
 		insecureFlag = ",registry.insecure=true"
 	}
 
+	// ビルド＆プッシュコマンド。失敗時はキャッシュを利用して最大3回リトライする。
+	// 2回目以降はインラインキャッシュがヒットするためビルドはほぼスキップされ、
+	// プッシュのみ再実行される。リトライ間隔は指数バックオフ（10s, 30s）。
 	buildArgs := fmt.Sprintf(
-		`buildctl-daemonless.sh build \
-  --local context=/workspace/repo/${BUILD_CONTEXT_SUBDIR} \
-  --local dockerfile=/workspace \
-  --frontend=gateway.v0 \
-  --opt source=ghcr.io/railwayapp/railpack-frontend \
-  --opt compression=zstd \
-  --opt push-parallelism=1 \
-  --opt compression-level=22 \
-  --output "type=image,name=%s,push=true%s" \
-  --export-cache type=inline \
-  --import-cache type=registry,ref=%s%s`,
+		`
+MAX_RETRIES=3
+RETRY_DELAYS="10 30"
+attempt=0
+
+run_build() {
+  buildctl-daemonless.sh build \
+    --local context=/workspace/repo/${BUILD_CONTEXT_SUBDIR} \
+    --local dockerfile=/workspace \
+    --frontend=gateway.v0 \
+    --opt source=ghcr.io/railwayapp/railpack-frontend \
+    --opt compression=zstd \
+    --opt push-parallelism=1 \
+    --opt compression-level=22 \
+    --output "type=image,name=%s,push=true%s" \
+    --export-cache type=inline \
+    --import-cache type=registry,ref=%s%s
+}
+
+run_build && exit 0
+attempt=1
+
+for delay in $RETRY_DELAYS; do
+  echo "[buildctl-retry] attempt $((attempt+1))/$MAX_RETRIES failed, retrying in ${delay}s..."
+  sleep "$delay"
+  attempt=$((attempt+1))
+  run_build && exit 0
+done
+
+echo "[buildctl-retry] all $MAX_RETRIES attempts failed"
+exit 1
+`,
 		imageRef, insecureFlag,
 		imageRef, insecureFlag,
 	)
