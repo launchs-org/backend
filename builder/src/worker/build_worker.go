@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log"
@@ -147,9 +148,15 @@ func resolveHarborCredential(ctx context.Context, projectID string) (*model.Harb
 	if harborURL == "" {
 		harborURL = "https://172.33.0.1"
 	}
-	// harborUser := os.Getenv("HARBOR_USERNAME")
+	harborDecodeUser,err := base64.StdEncoding.DecodeString(os.Getenv("HARBOR_USERNAME"))
+
+	// エラー処理
+	if err != nil {
+		log.Fatal(err)
+	}
+	harborUser := string(harborDecodeUser)
 	
-	harborUser := "robot$launchs-org"
+	// harborUser := "robot$launchs-org"
 	harborPass := os.Getenv("HARBOR_PASSWORD")
 
 	// パスワードとユーザー名を表示
@@ -170,7 +177,7 @@ func resolveHarborCredential(ctx context.Context, projectID string) (*model.Harb
 		},
 	})
 
-	if err := hc.CreateProject(ctx, projectID, false); err != nil {
+	if err := hc.CreateProject(ctx, projectID, true); err != nil {
 		return nil, fmt.Errorf("Harbor プロジェクト作成失敗: %w", err)
 	}
 
