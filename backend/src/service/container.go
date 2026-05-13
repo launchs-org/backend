@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"launchs/shared/database"
@@ -277,7 +278,8 @@ func RebuildContainer(ctx context.Context, containerID, ownerID string) (map[str
 	})
 }
 
-// RedeployContainer はビルドなしで既存イメージのまま rollout restart を行います。
+// RedeployContainer はビルドなしで Deployment を削除・再作成します。
+// controller が DB から最新のコンテナ情報を取得して Deployment を再構築します。
 func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[string]interface{}, error) {
 	container, err := model.GetContainerByID(containerID)
 	if err != nil {
@@ -295,10 +297,19 @@ func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[st
 		return nil, ErrForbidden
 	}
 
+	registryHost := os.Getenv("REGISTRY_HOST")
+	if registryHost == "" {
+		registryHost = "172.33.0.1"
+	}
+	imageRef := fmt.Sprintf("%s/%s/%s:%s", registryHost, container.ProjectID, container.ID, container.ImageID)
+
+	model.UpdateContainerStatus(containerID, "Redeploying")
+
 	if err := job_queue.EnqueueTo(ctx, "controller", jobs.RolloutRestartJobArgs{
 		ContainerID: container.ID,
 		Namespace:   project.Namespace,
 		Deployment:  container.Name,
+		ImageRef:    imageRef,
 	}, nil); err != nil {
 		return nil, err
 	}
