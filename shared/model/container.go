@@ -21,6 +21,7 @@ type Container struct {
 	EnvVars       string    `gorm:"type:text" json:"env_vars"`
 	Resources     string    `gorm:"type:text" json:"resources"`
 	Status        string    `gorm:"default:'Stopped'" json:"status"`
+	ExecLog       []byte    `gorm:"type:bytea" json:"-"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	Service       *Service  `gorm:"foreignKey:ContainerID" json:"service"`
@@ -54,6 +55,24 @@ func CreateContainerWithRelatedRecords(image *Image, container *Container, servi
 
 func UpdateContainerStatus(id, status string) error {
 	return database.DB.Model(&Container{}).Where("id = ?", id).Update("status", status).Error
+}
+
+func AppendContainerLog(id string, log []byte) error {
+	return database.DB.Model(&Container{}).Where("id = ?", id).
+		Update("exec_log", gorm.Expr("COALESCE(exec_log, '\\x'::bytea) || ?", log)).Error
+}
+
+func GetContainerLog(id string) ([]byte, error) {
+	var c Container
+	err := database.DB.Select("exec_log").Where("id = ?", id).First(&c).Error
+	if err != nil {
+		return nil, err
+	}
+	return c.ExecLog, nil
+}
+
+func ClearContainerLog(id string) error {
+	return database.DB.Model(&Container{}).Where("id = ?", id).Update("exec_log", nil).Error
 }
 
 func DeleteContainer(id string) error {

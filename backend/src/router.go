@@ -42,9 +42,7 @@ func InitRouter(router *echo.Echo) {
 			containersGroup.POST("/:id/redeploy", controller.RedeployContainer)
 			containersGroup.DELETE("/:id", controller.DeleteContainer)
 			containersGroup.GET("/:id/build-jobs", controller.ListBuildJobs)
-			containersGroup.GET("/:id/logs", func(c *echo.Context) error {
-				return c.String(http.StatusOK, "not implemented")
-			})
+			containersGroup.GET("/:id/logs", controller.StreamContainerLogs)
 			containersGroup.PATCH("/:id/service", controller.UpdateService)
 			containersGroup.POST("/:id/ingress", controller.CreateIngress)
 			containersGroup.PATCH("/:id/ingress", controller.UpdateIngress)
