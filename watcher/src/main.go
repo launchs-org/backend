@@ -33,6 +33,7 @@ func main() {
 		&model.Ingress{},
 		&model.Volume{},
 		&model.HarborCredential{},
+		&model.PodStatus{},
 	); err != nil {
 		fmt.Printf("[watcher] migration error: %v\n", err)
 	}

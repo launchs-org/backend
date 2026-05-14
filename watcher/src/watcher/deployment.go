@@ -123,6 +123,9 @@ func handleDeploymentEvent(ctx context.Context, clientset *kubernetes.Clientset,
 		database.RedisClient.Del(ctx, fmt.Sprintf("cache:container:%s", containerID))
 	}
 
+	// Pod ステータスを常に同期する
+	syncPodStatuses(ctx, clientset, deploy, containerID)
+
 	// Running 状態になったら古いログをクリアして Pod ログのストリームを開始
 	if status == "Running" {
 		model.ClearContainerLog(containerID)
@@ -130,6 +133,69 @@ func handleDeploymentEvent(ctx context.Context, clientset *kubernetes.Clientset,
 	}
 
 	return nil
+}
+
+// syncPodStatuses は Deployment に紐づく Pod 一覧を取得して DB に upsert します。
+func syncPodStatuses(ctx context.Context, clientset *kubernetes.Clientset, deploy *appsv1.Deployment, containerID string) {
+	pods, err := clientset.CoreV1().Pods(deploy.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("app=%s", deploy.Name),
+	})
+	if err != nil {
+		fmt.Printf("[deploy-watcher] failed to list pods for %s: %v\n", deploy.Name, err)
+		return
+	}
+
+	statuses := make([]model.PodStatus, 0, len(pods.Items))
+	activePodIDs := make([]string, 0, len(pods.Items))
+
+	for _, pod := range pods.Items {
+		phase := string(pod.Status.Phase)
+		ready := false
+		var restarts int32
+		var message string
+		var startedAt *time.Time
+
+		// コンテナステータスから Ready・Restarts・Message を取得
+		for _, cs := range pod.Status.ContainerStatuses {
+			restarts += cs.RestartCount
+			if cs.Ready {
+				ready = true
+			}
+			if cs.State.Waiting != nil && cs.State.Waiting.Message != "" {
+				message = cs.State.Waiting.Message
+			}
+			if cs.State.Terminated != nil && cs.State.Terminated.Message != "" {
+				message = cs.State.Terminated.Message
+			}
+		}
+
+		if pod.Status.StartTime != nil {
+			t := pod.Status.StartTime.Time
+			startedAt = &t
+		}
+
+		now := time.Now()
+		statuses = append(statuses, model.PodStatus{
+			ID:          string(pod.UID),
+			ContainerID: containerID,
+			Name:        pod.Name,
+			Phase:       phase,
+			Ready:       ready,
+			Restarts:    restarts,
+			Message:     message,
+			StartedAt:   startedAt,
+			UpdatedAt:   now,
+		})
+		activePodIDs = append(activePodIDs, string(pod.UID))
+	}
+
+	if err := model.UpsertPodStatuses(statuses); err != nil {
+		fmt.Printf("[deploy-watcher] failed to upsert pod statuses: %v\n", err)
+	}
+	// 消えた Pod のレコードを削除
+	if err := model.DeleteStalePodStatuses(containerID, activePodIDs); err != nil {
+		fmt.Printf("[deploy-watcher] failed to delete stale pod statuses: %v\n", err)
+	}
 }
 
 // determineDeploymentStatus は Deployment の spec/status から
