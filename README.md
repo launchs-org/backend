@@ -151,3 +151,4 @@ DB_NAME=acp
 ```bash
 docker compose exec -T app go test ./controller/... ./service/... ./model/...
 ```
+
