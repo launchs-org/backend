@@ -1,4 +1,4 @@
-FROM golang:1.26-bookworm as develop
+FROM golang:1.26-bookworm AS develop
 
 RUN apt update && apt install curl wget git iproute2 -y
 
@@ -6,4 +6,17 @@ WORKDIR /app
 
 COPY ./src/go.mod .
 
-# go.mod only (no dependency download yet, shared module is mounted at runtime)
+FROM golang:1.26-bookworm AS builder
+
+WORKDIR /go/src/app
+
+COPY ./src .
+COPY --from=shared . /shared
+
+RUN go mod download
+
+RUN CGO_ENABLED=0 go build -o /go/bin/app .
+
+FROM gcr.io/distroless/static-debian12
+COPY --from=builder /go/bin/app /app
+CMD ["/app"]
