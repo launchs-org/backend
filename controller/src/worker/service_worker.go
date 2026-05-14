@@ -39,7 +39,7 @@ func (w *UpdateServiceWorker) Work(ctx context.Context, job *river.Job[jobs.Upda
 		if err != nil {
 			fmt.Printf("[update-service-worker] failed to delete service (may not exist): %v\n", err)
 		}
-		if err := model.SetServiceStatus(payload.ContainerID, "active"); err != nil {
+		if err := model.SetServiceStatus(payload.ContainerID, "inactive"); err != nil {
 			fmt.Printf("[update-service-worker] failed to set service status: %v\n", err)
 		}
 		return nil

@@ -159,6 +159,11 @@ func DeleteContainer(ctx context.Context, containerID string, ownerID string) er
 		return ErrForbidden
 	}
 
+	// Service を削除中状態にマーク
+	if err := model.SetServiceStatus(containerID, "deleting"); err != nil {
+		fmt.Printf("[service] failed to set service status to deleting: %v\n", err)
+	}
+
 	// delete_container ジョブをキューに追加
 	return job_queue.EnqueueTo(ctx, "controller", jobs.DeleteContainerJobArgs{
 		ContainerID: containerID,
