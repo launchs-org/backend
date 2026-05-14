@@ -38,6 +38,7 @@ func GetProjectByID(id string) (*Project, error) {
 	err := database.DB.Preload("Containers.Service").
 		Preload("Containers.Ingress").
 		Preload("Containers.Volumes").
+		Preload("Containers.PodStatuses").
 		Where("id = ?", id).First(&project).Error
 	if err != nil {
 		return nil, err

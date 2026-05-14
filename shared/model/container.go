@@ -24,9 +24,10 @@ type Container struct {
 	ExecLog       []byte    `gorm:"type:bytea" json:"-"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
-	Service       *Service  `gorm:"foreignKey:ContainerID" json:"service"`
-	Ingress       *Ingress  `gorm:"foreignKey:ContainerID" json:"ingress"`
-	Volumes       []Volume  `gorm:"foreignKey:ContainerID" json:"volumes"`
+	Service       *Service    `gorm:"foreignKey:ContainerID" json:"service"`
+	Ingress       *Ingress    `gorm:"foreignKey:ContainerID" json:"ingress"`
+	Volumes       []Volume    `gorm:"foreignKey:ContainerID" json:"volumes"`
+	PodStatuses   []PodStatus `gorm:"foreignKey:ContainerID" json:"pods"`
 }
 
 func GetContainerCountByProjectIDAndName(projectID, name string) (int64, error) {
