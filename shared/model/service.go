@@ -16,6 +16,7 @@ type Service struct {
 	IsActive    bool      `json:"is_active"`
 	InternalIP  string    `json:"internal_ip"`
 	ExternalIP  string    `json:"external_ip"`
+	Status      string    `gorm:"type:varchar(32);default:'pending'" json:"status"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -29,7 +30,11 @@ func GetServiceByContainerID(containerID string) (*Service, error) {
 	return &service, nil
 }
 
-func DeleteServiceByContainerID(tx *gorm.DB,containerID string) error {
+func SetServiceStatus(containerID, status string) error {
+	return database.DB.Model(&Service{}).Where("container_id = ?", containerID).Update("status", status).Error
+}
+
+func DeleteServiceByContainerID(tx *gorm.DB, containerID string) error {
 	return tx.Where("container_id = ?", containerID).Delete(&Service{}).Error
 }
 

@@ -16,6 +16,7 @@ type Ingress struct {
 	TlsEnabled          bool      `json:"tls_enabled"`
 	CustomDomain        string    `json:"custom_domain"`
 	CustomDomainEnabled bool      `json:"custom_domain_enabled"`
+	Status              string    `gorm:"type:varchar(32);default:'pending'" json:"status"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
 }
@@ -37,6 +38,10 @@ func UpdateIngress(ingress *Ingress) error {
 	return database.DB.Save(ingress).Error
 }
 
-func DeleteIngress(tx *gorm.DB,containerID string) error {
+func SetIngressStatus(containerID, status string) error {
+	return database.DB.Model(&Ingress{}).Where("container_id = ?", containerID).Update("status", status).Error
+}
+
+func DeleteIngress(tx *gorm.DB, containerID string) error {
 	return tx.Where("container_id = ?", containerID).Delete(&Ingress{}).Error
 }

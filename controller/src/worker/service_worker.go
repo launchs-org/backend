@@ -7,6 +7,7 @@ import (
 
 	"launchs/shared/database"
 	"launchs/shared/job_queue/jobs"
+	"launchs/shared/model"
 
 	"github.com/riverqueue/river"
 	corev1 "k8s.io/api/core/v1"
@@ -37,6 +38,9 @@ func (w *UpdateServiceWorker) Work(ctx context.Context, job *river.Job[jobs.Upda
 		err := clientset.CoreV1().Services(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 		if err != nil {
 			fmt.Printf("[update-service-worker] failed to delete service (may not exist): %v\n", err)
+		}
+		if err := model.SetServiceStatus(payload.ContainerID, "active"); err != nil {
+			fmt.Printf("[update-service-worker] failed to set service status: %v\n", err)
 		}
 		return nil
 	}
@@ -78,5 +82,8 @@ func (w *UpdateServiceWorker) Work(ctx context.Context, job *river.Job[jobs.Upda
 	}
 
 	fmt.Printf("[update-service-worker] synced service %s in %s\n", name, namespace)
+	if err := model.SetServiceStatus(payload.ContainerID, "active"); err != nil {
+		fmt.Printf("[update-service-worker] failed to set service status: %v\n", err)
+	}
 	return nil
 }

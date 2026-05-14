@@ -54,6 +54,7 @@ func UpdateService(ctx context.Context, containerID, ownerID, svcType string, po
 	svc.Type = svcType
 	svc.Ports = string(portsJSON)
 	svc.IsActive = isActive
+	svc.Status = "pending"
 	if err := model.UpdateService(svc); err != nil {
 		return nil, err
 	}
@@ -110,6 +111,7 @@ func CreateIngress(ctx context.Context, containerID, ownerID, customDomain strin
 		CustomDomainEnabled: customDomainEnabled,
 		HttpPort:            httpPort,
 		TlsEnabled:          false,
+		Status:              "pending",
 		CreatedAt:           time.Now(),
 		UpdatedAt:           time.Now(),
 	}
@@ -159,6 +161,7 @@ func UpdateIngress(ctx context.Context, containerID, ownerID, customDomain strin
 	ing.CustomDomain = customDomain
 	ing.CustomDomainEnabled = customDomainEnabled
 	ing.HttpPort = httpPort
+	ing.Status = "pending"
 	ing.UpdatedAt = time.Now()
 
 	if err := model.UpdateIngress(ing); err != nil {

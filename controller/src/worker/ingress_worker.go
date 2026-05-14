@@ -8,6 +8,7 @@ import (
 
 	"launchs/shared/database"
 	"launchs/shared/job_queue/jobs"
+	"launchs/shared/model"
 
 	"github.com/riverqueue/river"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,7 +43,13 @@ func (w *CreateIngressWorker) Work(ctx context.Context, job *river.Job[jobs.Crea
 		hosts = append(hosts, payload.CustomDomain)
 	}
 
-	return syncIngressRoute(ctx, payload.Namespace, payload.ContainerName, hosts, "/", payload.HttpPort)
+	if err := syncIngressRoute(ctx, payload.Namespace, payload.ContainerName, hosts, "/", payload.HttpPort); err != nil {
+		return err
+	}
+	if err := model.SetIngressStatus(payload.ContainerID, "active"); err != nil {
+		fmt.Printf("[create-ingress-worker] failed to set ingress status: %v\n", err)
+	}
+	return nil
 }
 
 type UpdateIngressWorker struct {
@@ -62,7 +69,13 @@ func (w *UpdateIngressWorker) Work(ctx context.Context, job *river.Job[jobs.Upda
 		hosts = append(hosts, payload.CustomDomain)
 	}
 
-	return syncIngressRoute(ctx, payload.Namespace, payload.ContainerName, hosts, "/", payload.HttpPort)
+	if err := syncIngressRoute(ctx, payload.Namespace, payload.ContainerName, hosts, "/", payload.HttpPort); err != nil {
+		return err
+	}
+	if err := model.SetIngressStatus(payload.ContainerID, "active"); err != nil {
+		fmt.Printf("[update-ingress-worker] failed to set ingress status: %v\n", err)
+	}
+	return nil
 }
 
 type DeleteIngressWorker struct {

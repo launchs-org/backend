@@ -354,6 +354,31 @@ func ListBuildJobs(ctx context.Context, input ListBuildJobsInput) (map[string]in
 	}, nil
 }
 
+func UpdateContainerEnvVars(ctx context.Context, containerID, ownerID, envVars string) (map[string]interface{}, error) {
+	container, err := model.GetContainerByID(containerID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrContainerNotFound
+		}
+		return nil, err
+	}
+
+	project, err := model.GetProjectByID(container.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if project.OwnerID != ownerID {
+		return nil, ErrForbidden
+	}
+
+	if err := database.DB.Model(container).Update("env_vars", envVars).Error; err != nil {
+		return nil, err
+	}
+	container.EnvVars = envVars
+
+	return map[string]interface{}{"data": container}, nil
+}
+
 func GetContainer(ctx context.Context, containerID string, ownerID string) (map[string]interface{}, error) {
 	container, err := model.GetContainerByID(containerID)
 	if err != nil {
