@@ -102,6 +102,11 @@ func DeleteContainer(id string) error {
 			}
 		}
 
+		// PodStatusを削除する
+		if err := tx.Where("container_id = ?", id).Delete(&PodStatus{}).Error; err != nil {
+			return err
+		}
+
 		return tx.Where("id = ?", id).Delete(&Container{}).Error
 	})
 
