@@ -50,8 +50,8 @@ services:
       - -c
       - "go install github.com/air-verse/air@latest && exec go tool air -c ./.air.toml"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate-app:
+        condition: service_completed_successfully
       redis:
         condition: service_started
 
@@ -78,6 +78,7 @@ services:
     depends_on:
       app:
         condition: service_started
+
   builder:
     hostname: builder
     build:
@@ -151,8 +152,8 @@ services:
     volumes:
       - ./auth/icons:/assets/icons
     depends_on:
-      postgres:
-        condition: service_started
+      migrate:
+        condition: service_completed_successfully
 
   migrate:
     image: ghcr.io/mattuu0/authbase/auth:latest
@@ -161,7 +162,31 @@ services:
     command: ["/auth","migrate","-r"]
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
+
+  migrate-app:
+    hostname: migrate-app
+    build:
+      context: ./backend
+      dockerfile: dockerfile
+      target: develop
+    volumes:
+      - ./backend/src:/app
+      - ./backend/received:/received
+      - ./shared:/shared
+    env_file:
+      - ./config/app.env
+    networks:
+      - default
+    entrypoint:
+      - /bin/bash
+      - -c
+      - "cd /app && go run . migrate"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
 
   riverui:
     image: ghcr.io/riverqueue/riverui:latest
@@ -170,8 +195,8 @@ services:
     environment:
       DATABASE_URL: "postgres://task_user:task_pass@db:5432/taskdb?sslmode=disable"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate-app:
+        condition: service_completed_successfully
     restart: always
 
   postgres:

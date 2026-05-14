@@ -14,7 +14,33 @@ import (
 	"github.com/labstack/echo/v5/middleware"
 )
 
+func runMigrate() {
+	database.InitTaskDB()
+	if err := job_queue.UseRiver(context.Background(), database.TaskDB, nil); err != nil {
+		panic("failed to migrate river: " + err.Error())
+	}
+
+	database.Init()
+	if err := database.DB.AutoMigrate(
+		&model.Project{},
+		&model.Container{},
+		&model.BuildJob{},
+		&model.Image{},
+		&model.Service{},
+		&model.Ingress{},
+		&model.Volume{},
+		&model.HarborCredential{},
+	); err != nil {
+		panic("failed to migrate database: " + err.Error())
+	}
+}
+
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		runMigrate()
+		return
+	}
+
 	database.Init()
 	database.InitRedis()
 	database.InitTaskDB()
