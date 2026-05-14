@@ -1,33 +1,23 @@
-FROM golang:1.26-bookworm as develop
+FROM golang:1.26-bookworm AS develop
 
-# git とかの依存関係をインストールする
 RUN apt update && \
     apt install curl wget git iproute2 -y
 
-# 作業ディレクトリを設定
 WORKDIR /app
 
-# go.mod only (no dependency download yet, shared module is mounted at runtime)
 COPY ./src/go.mod .
 
-# air はホストの go tool で実行するため、ここではインストールしない
+FROM golang:1.26 AS builder
 
-# ビルド用のコンテナ
-FROM golang:1.26 as builder
-
-# 作業ディレクトリを設定    
 WORKDIR /go/src/app
 
-# 依存関係をコピーする
 COPY ./src .
+COPY /shared /shared
 
-# 依存関係をインストールする
 RUN go mod download
 
-# プロジェクトをビルドする
-RUN RUN CGO_ENABLED=0 go build -o /go/bin/app
+RUN CGO_ENABLED=0 go build -o /go/bin/app
 
-# 実行用のコンテナ
 FROM gcr.io/distroless/static-debian12
-COPY --from=build /go/bin/app /
+COPY --from=builder /go/bin/app /app
 CMD ["/app"]
