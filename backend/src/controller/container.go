@@ -252,6 +252,56 @@ func UpdateContainer(ctx *echo.Context) error {
 	return (*ctx).JSON(http.StatusOK, res)
 }
 
+// ScaleContainer はコンテナのレプリカ数を変更するハンドラーです (1〜5)
+func ScaleContainer(ctx *echo.Context) error {
+	containerID := (*ctx).Param("id")
+	userID, ok := (*ctx).Get("UserID").(string)
+	if !ok {
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "認証に失敗しました",
+		})
+	}
+
+	var req struct {
+		Replicas int `json:"replicas"`
+	}
+	if err := (*ctx).Bind(&req); err != nil {
+		return (*ctx).JSON(http.StatusBadRequest, map[string]string{
+			"code":    "BAD_REQUEST",
+			"message": "リクエストパラメータが不正です",
+		})
+	}
+
+	res, err := service.ScaleContainer((*ctx).Request().Context(), containerID, userID, req.Replicas)
+	if err != nil {
+		switch err {
+		case service.ErrInvalidReplicas:
+			return (*ctx).JSON(http.StatusBadRequest, map[string]string{
+				"code":    "BAD_REQUEST",
+				"message": "レプリカ数は1〜5の範囲で指定してください",
+			})
+		case service.ErrContainerNotFound:
+			return (*ctx).JSON(http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": "コンテナが見つかりません",
+			})
+		case service.ErrForbidden:
+			return (*ctx).JSON(http.StatusForbidden, map[string]string{
+				"code":    "FORBIDDEN",
+				"message": "アクセス権限がありません",
+			})
+		default:
+			return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR",
+				"message": err.Error(),
+			})
+		}
+	}
+
+	return (*ctx).JSON(http.StatusOK, res)
+}
+
 // UpdateContainerEnvVars は再ビルドせずに環境変数のみ更新するハンドラーです
 func UpdateContainerEnvVars(ctx *echo.Context) error {
 	containerID := (*ctx).Param("id")

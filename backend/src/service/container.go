@@ -359,6 +359,53 @@ func ListBuildJobs(ctx context.Context, input ListBuildJobsInput) (map[string]in
 	}, nil
 }
 
+var ErrInvalidReplicas = errors.New("replicas must be between 1 and 5")
+
+// ScaleContainer はリビルドなしで Deployment のレプリカ数のみ変更します。
+func ScaleContainer(ctx context.Context, containerID, ownerID string, replicas int) (map[string]interface{}, error) {
+	if replicas < 1 || replicas > 5 {
+		return nil, ErrInvalidReplicas
+	}
+
+	container, err := model.GetContainerByID(containerID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrContainerNotFound
+		}
+		return nil, err
+	}
+
+	project, err := model.GetProjectByID(container.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if project.OwnerID != ownerID {
+		return nil, ErrForbidden
+	}
+
+	if err := model.UpdateContainerStatus(container.ID, "Scaling"); err != nil {
+		return nil, err
+	}
+
+	if err := job_queue.EnqueueTo(ctx, "controller", jobs.ScaleJobArgs{
+		ContainerID: container.ID,
+		Namespace:   project.Namespace,
+		Deployment:  container.Name,
+		Replicas:    replicas,
+	}, nil); err != nil {
+		// ジョブ投入失敗時はステータスを戻す
+		model.UpdateContainerStatus(container.ID, container.Status)
+		return nil, err
+	}
+
+	return map[string]interface{}{
+		"data": map[string]interface{}{
+			"container_id": containerID,
+			"replicas":     replicas,
+		},
+	}, nil
+}
+
 func UpdateContainerEnvVars(ctx context.Context, containerID, ownerID, envVars string) (map[string]interface{}, error) {
 	container, err := model.GetContainerByID(containerID)
 	if err != nil {
@@ -401,8 +448,16 @@ func GetContainer(ctx context.Context, containerID string, ownerID string) (map[
 		return nil, ErrForbidden
 	}
 
+	pods, err := model.GetPodStatusesByContainerID(containerID)
+	if err != nil {
+		pods = []model.PodStatus{}
+	}
+
 	return map[string]interface{}{
-		"data": container,
+		"data": map[string]interface{}{
+			"container": container,
+			"pods":      pods,
+		},
 	}, nil
 }
 

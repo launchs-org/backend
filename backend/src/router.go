@@ -41,6 +41,7 @@ func InitRouter(router *echo.Echo) {
 			containersGroup.PATCH("/:id/env-vars", controller.UpdateContainerEnvVars)
 			containersGroup.POST("/:id/rebuild", controller.RebuildContainer)
 			containersGroup.POST("/:id/redeploy", controller.RedeployContainer)
+			containersGroup.POST("/:id/scale", controller.ScaleContainer)
 			containersGroup.DELETE("/:id", controller.DeleteContainer)
 			containersGroup.GET("/:id/build-jobs", controller.ListBuildJobs)
 			containersGroup.GET("/:id/logs", controller.StreamContainerLogs)
