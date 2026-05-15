@@ -14,7 +14,6 @@ type CreateContainerRequest struct {
 	Branch        string `json:"branch"`
 	Directory     string `json:"directory"`
 	EnvVars       string `json:"env_vars"`
-	Replicas      int    `json:"replicas"`
 	Resources     string `json:"resources"`
 }
 
@@ -45,7 +44,6 @@ func CreateContainer(ctx *echo.Context) error {
 		Branch:        req.Branch,
 		Directory:     req.Directory,
 		EnvVars:       req.EnvVars,
-		Replicas:      req.Replicas,
 		Resources:     req.Resources,
 	})
 

@@ -29,7 +29,6 @@ type CreateContainerInput struct {
 	Branch        string
 	Directory     string
 	EnvVars       string
-	Replicas      int
 	Resources     string
 }
 
@@ -68,10 +67,7 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 	if directory == "" {
 		directory = "/"
 	}
-	replicas := input.Replicas
-	if replicas == 0 {
-		replicas = 1
-	}
+	replicas := 1
 	envVarsStr := input.EnvVars
 	if envVarsStr == "" {
 		envVarsStr = "{}"
