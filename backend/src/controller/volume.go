@@ -49,7 +49,14 @@ func CreateContainerVolume(ctx *echo.Context) error {
 	}
 	
 	// data フィールドから Container 構造体を取得 (service.GetContainer の戻り値に合わせて)
-	container, ok := containerMap["data"].(*model.Container)
+	dataMap, ok := containerMap["data"].(map[string]interface{})
+	if !ok {
+		return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": "コンテナデータの取得に失敗しました",
+		})
+	}
+	container, ok := dataMap["container"].(*model.Container)
 	if !ok {
 		return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
 			"code":    "INTERNAL_ERROR",
