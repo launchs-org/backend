@@ -33,6 +33,9 @@ func WatchDeployments(ctx context.Context) {
 
 	fmt.Println("[deploy-watcher] starting deployment watcher (label: launchs-managed=true)")
 
+	// Terminating済みPodの取りこぼしを防ぐ定期同期
+	go periodicPodSync(ctx, clientset)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -48,6 +51,35 @@ func WatchDeployments(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(3 * time.Second):
+		}
+	}
+}
+
+// periodicPodSync は10秒ごとに全Deploymentに対してPodステータスを同期します。
+// スケールダウン後にDeploymentイベントが来なくてもTerminatedPodを削除します。
+func periodicPodSync(ctx context.Context, clientset *kubernetes.Clientset) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			deploys, err := clientset.AppsV1().Deployments("").List(ctx, metav1.ListOptions{
+				LabelSelector: "launchs-managed=true",
+			})
+			if err != nil {
+				fmt.Printf("[deploy-watcher] periodic sync: failed to list deployments: %v\n", err)
+				continue
+			}
+			for i := range deploys.Items {
+				deploy := &deploys.Items[i]
+				containerID, ok := deploy.Labels["container-id"]
+				if !ok || containerID == "" {
+					continue
+				}
+				syncPodStatuses(ctx, clientset, deploy, containerID)
+			}
 		}
 	}
 }
@@ -149,6 +181,11 @@ func syncPodStatuses(ctx context.Context, clientset *kubernetes.Clientset, deplo
 	activePodIDs := make([]string, 0, len(pods.Items))
 
 	for _, pod := range pods.Items {
+		// Terminating中のPodは除外する（DeletionTimestampが設定されている）
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+
 		phase := string(pod.Status.Phase)
 		ready := false
 		var restarts int32
@@ -189,8 +226,15 @@ func syncPodStatuses(ctx context.Context, clientset *kubernetes.Clientset, deplo
 		activePodIDs = append(activePodIDs, string(pod.UID))
 	}
 
-	if err := model.UpsertPodStatuses(statuses); err != nil {
-		fmt.Printf("[deploy-watcher] failed to upsert pod statuses: %v\n", err)
+	// DBにコンテナが存在しない場合はupsertをスキップ（削除済みコンテナのPodイベント）
+	if _, err := model.GetContainerByID(containerID); err != nil {
+		return
+	}
+
+	if len(statuses) > 0 {
+		if err := model.UpsertPodStatuses(statuses); err != nil {
+			fmt.Printf("[deploy-watcher] failed to upsert pod statuses: %v\n", err)
+		}
 	}
 	// 消えた Pod のレコードを削除
 	if err := model.DeleteStalePodStatuses(containerID, activePodIDs); err != nil {
