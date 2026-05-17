@@ -62,6 +62,9 @@ func runJobWatch(ctx context.Context, clientset *kubernetes.Clientset, redisClie
 	}
 	defer watcher.Stop()
 
+	// ログストリームを開始済みの Job 名を追跡して二重起動を防ぐ
+	streamedJobs := make(map[string]bool)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -72,7 +75,7 @@ func runJobWatch(ctx context.Context, clientset *kubernetes.Clientset, redisClie
 				return fmt.Errorf("watch channel closed")
 			}
 
-			if err := handleJobEvent(ctx, clientset, redisClient, namespace, event); err != nil {
+			if err := handleJobEvent(ctx, clientset, redisClient, namespace, event, streamedJobs); err != nil {
 				fmt.Printf("[job-watcher] handle event error: %v\n", err)
 			}
 		}

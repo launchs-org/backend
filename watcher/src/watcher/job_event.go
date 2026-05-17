@@ -18,7 +18,7 @@ import (
 )
 
 // handleJobEvent は K8s Job の Watch イベントを受け取り、DB と Redis を更新します。
-func handleJobEvent(ctx context.Context, clientset *kubernetes.Clientset, redisClient *redis.Client, namespace string, event watch.Event) error {
+func handleJobEvent(ctx context.Context, clientset *kubernetes.Clientset, redisClient *redis.Client, namespace string, event watch.Event, streamedJobs map[string]bool) error {
 	job, ok := event.Object.(*batchv1.Job)
 	if !ok {
 		return nil
@@ -39,7 +39,7 @@ func handleJobEvent(ctx context.Context, clientset *kubernetes.Clientset, redisC
 	switch event.Type {
 	case watch.Added, watch.Modified:
 		fmt.Printf("[job-watcher] event=%s job=%s build_job_id=%s\n", event.Type, job.Name, buildJobID)
-		if err := onJobAddedOrModified(ctx, clientset, redisClient, namespace, job, buildJobID, redisChannel, event.Type); err != nil {
+		if err := onJobAddedOrModified(ctx, clientset, redisClient, namespace, job, buildJobID, redisChannel, event.Type, streamedJobs); err != nil {
 			return err
 		}
 	case watch.Deleted:
@@ -62,6 +62,7 @@ func onJobAddedOrModified(
 	buildJobID string,
 	redisChannel string,
 	eventType watch.EventType,
+	streamedJobs map[string]bool,
 ) error {
 	status := determineJobStatus(job)
 	updates := map[string]interface{}{"status": status}
@@ -72,15 +73,24 @@ func onJobAddedOrModified(
 	switch status {
 	case "Running":
 		fmt.Printf("[job-watcher] event=%s job=%s build_job_id=%s status=%s\n", eventType, job.Name, buildJobID, status)
-		
-		// 実行開始時刻を記録し、ログストリームをバックグラウンドで開始
+
+		// 実行開始時刻を記録し、ログストリームをバックグラウンドで開始（二重起動防止）
 		updates["started_at"] = time.Now()
 		updates["status"] = "Building"
 		model.UpdateBuildJobStatus(buildJobID, updates)
-		go streamJobLogs(ctx, clientset, redisClient, namespace, job.Name, buildJobID, redisChannel)
+		if !streamedJobs[job.Name] {
+			streamedJobs[job.Name] = true
+			go streamJobLogs(ctx, clientset, redisClient, namespace, job.Name, buildJobID, redisChannel)
+		}
 
 	case "Success", "Failed":
 		fmt.Printf("[job-watcher] event=%s job=%s build_job_id=%s status=%s\n", eventType, job.Name, buildJobID, status)
+
+		// Running を経由せず直接完了した場合もログを取得する（二重起動防止）
+		if !streamedJobs[job.Name] {
+			streamedJobs[job.Name] = true
+			go streamJobLogs(ctx, clientset, redisClient, namespace, job.Name, buildJobID, redisChannel)
+		}
 
 		// 完了時刻を記録して DB を更新
 		updates["finished_at"] = time.Now()
