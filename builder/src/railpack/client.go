@@ -70,7 +70,7 @@ func New(clientset *kubernetes.Clientset, config BuildConfig) (*Client, error) {
 // jobID を使って Status / StreamLogs / Cancel を呼び出してください。
 // この関数はジョブを起動するだけで、完了を待ちません。
 func (client *Client) Build(ctx context.Context) (jobID string, err error) {
-	jobID, err = createJob(ctx, client.clientset,"buildkit", client.config)
+	jobID, err = createJob(ctx, client.clientset, client.config.Namespace, client.config)
 	if err != nil {
 		return "", fmt.Errorf("ジョブの作成に失敗しました: %w", err)
 	}
