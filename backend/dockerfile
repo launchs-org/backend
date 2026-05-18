@@ -5,7 +5,12 @@ RUN apt update && \
 
 WORKDIR /app
 
-COPY ./src/go.mod .
+COPY ./backend/src/go.mod ./backend/src/go.sum ./
+COPY ./shared /shared
+
+RUN go mod download
+
+RUN go install github.com/air-verse/air@latest
 
 FROM golang:1.26 AS builder
 
