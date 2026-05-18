@@ -67,24 +67,32 @@ jobs:
           ref: ${{ github.event.workflow_run.head_branch }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update image versions in manifests
+      - name: Update image versions in kustomization
         if: steps.check.outputs.all_done == 'true'
         env:
           VERSION: ${{ steps.check.outputs.version }}
         run: |
-          declare -A IMAGE_MAP=(
-            [manifest/pod-backend.yaml]="ghcr.io/launchs-org/backend"
-            [manifest/pod-watcher.yaml]="ghcr.io/launchs-org/watcher"
-            [manifest/pod-builder.yaml]="ghcr.io/launchs-org/builder"
-            [manifest/pod-controller.yaml]="ghcr.io/launchs-org/controller"
-            [manifest/static.yaml]="ghcr.io/launchs-org/frontend"
+          python3 - <<'EOF'
+          import os, re
+
+          version = os.environ["VERSION"]
+          path = "manifest/kustomization.yaml"
+
+          with open(path) as f:
+              content = f.read()
+
+          # images[].newTag の値を version に置換
+          content = re.sub(
+              r'(name: ghcr\.io/launchs-org/\S+\n\s+newTag:) "[^"]*"',
+              lambda m: f'{m.group(1)} "{version}"',
+              content,
           )
 
-          for file in "${!IMAGE_MAP[@]}"; do
-            image="${IMAGE_MAP[$file]}"
-            sed -i "s|image: ${image}:[^ ]*|image: ${image}:${VERSION}|g" "$file"
-            echo "Updated $file -> ${image}:${VERSION}"
-          done
+          with open(path, "w") as f:
+              f.write(content)
+
+          print(f"Updated {path} to version {version}")
+          EOF
 
       - name: Commit and push manifest updates
         if: steps.check.outputs.all_done == 'true'
@@ -93,9 +101,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add manifest/pod-backend.yaml manifest/pod-watcher.yaml \
-                  manifest/pod-builder.yaml manifest/pod-controller.yaml \
-                  manifest/static.yaml
+          git add manifest/kustomization.yaml
           git diff --cached --quiet && echo "No changes" && exit 0
           git commit -m "chore(manifest): update image versions to ${VERSION}"
           git push origin HEAD:${{ github.event.workflow_run.head_branch }}
