@@ -10,6 +10,7 @@ import (
 	"launchs/shared/database"
 	"launchs/shared/job_queue"
 	"launchs/shared/model"
+	"watcher/leader"
 	"watcher/watcher"
 )
 
@@ -43,8 +44,10 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	go watcher.WatchJobs(ctx)
-	go watcher.WatchDeployments(ctx)
+	go leader.RunWithLeaderElection(ctx, database.DB, func(leaderCtx context.Context) {
+		go watcher.WatchJobs(leaderCtx)
+		watcher.WatchDeployments(leaderCtx)
+	})
 
 	<-ctx.Done()
 	fmt.Println("[watcher] shutting down")
