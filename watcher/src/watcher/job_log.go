@@ -3,40 +3,35 @@ package watcher
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"launchs/shared/model"
 
-	"github.com/redis/go-redis/v9"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
 // streamJobLogs は Job に紐づく Pod の全コンテナ（InitContainer 含む）のログを
-// 順番にストリームします。InitContainer → 通常 Container の順で処理されます。
-func streamJobLogs(ctx context.Context, clientset *kubernetes.Clientset, redisClient *redis.Client, namespace, jobName, buildJobID, redisChannel string) {
-	// Pod が起動するまでポーリングして待機
+// 順番にストリームして DB に保存します。
+func streamJobLogs(ctx context.Context, clientset *kubernetes.Clientset, namespace, jobName, buildJobID string) {
 	pod, err := waitForJobPod(ctx, clientset, namespace, jobName)
 	if err != nil {
 		fmt.Printf("[job-watcher] pod wait error for %s: %v\n", jobName, err)
 		return
 	}
 
-	// InitContainer → Container の順にコンテナ名を列挙
 	containers := collectContainerNames(pod)
 
 	for _, containerName := range containers {
-		// コンテナが Running または Terminated になるまで待機
 		if err := waitForContainerRunning(ctx, clientset, namespace, pod.Name, containerName); err != nil {
 			if ctx.Err() != nil {
-				return // コンテキストキャンセル時はループを抜ける
+				return
 			}
 			continue
 		}
-		streamContainerLogs(ctx, clientset, redisClient, namespace, pod.Name, containerName, buildJobID, redisChannel)
+		streamContainerLogs(ctx, clientset, namespace, pod.Name, containerName, buildJobID)
 	}
 }
 
@@ -52,13 +47,12 @@ func collectContainerNames(pod *corev1.Pod) []string {
 	return names
 }
 
-// streamContainerLogs は 1 つのコンテナのログを最後まで読み込み、
-// 各行を DB に保存しつつ Redis へリアルタイムに Publish します。
-func streamContainerLogs(ctx context.Context, clientset *kubernetes.Clientset, redisClient *redis.Client, namespace, podName, containerName, buildJobID, redisChannel string) {
+// streamContainerLogs は 1 つのコンテナのログを最後まで読み込み DB に保存します。
+func streamContainerLogs(ctx context.Context, clientset *kubernetes.Clientset, namespace, podName, containerName, buildJobID string) {
 	req := clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
 		Container:  containerName,
-		Follow:     true,  // ログを追従して読み続ける
-		Timestamps: true,  // RFC3339 タイムスタンプを先頭に付与
+		Follow:     true,
+		Timestamps: true,
 	})
 
 	stream, err := req.Stream(ctx)
@@ -76,30 +70,10 @@ func streamContainerLogs(ctx context.Context, clientset *kubernetes.Clientset, r
 		}
 
 		line := scanner.Text()
-		// タイムスタンプ部分を除去してメッセージだけを取得
 		_, message := parseTimestampedLine(line)
 		logLine := fmt.Sprintf("[%s] %s\n", containerName, message)
-
-		// ビルドログとして DB に追記
 		model.AppendBuildLog(buildJobID, []byte(logLine))
-
-		// フロントエンドにリアルタイム配信
-		publishJobLog(ctx, redisClient, redisChannel, containerName, message)
 	}
-}
-
-// publishJobLog は 1 行分のログを JSON にシリアライズして Redis チャンネルに Publish します。
-func publishJobLog(ctx context.Context, redisClient *redis.Client, channel, containerName, message string) {
-	msg := JobLogMessage{
-		Container: containerName,
-		Message:   message,
-		Timestamp: time.Now(),
-	}
-	payload, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-	redisClient.Publish(ctx, channel, payload)
 }
 
 // waitForJobPod は Job に紐づく Pod が Running/Succeeded/Failed になるまで
@@ -112,7 +86,6 @@ func waitForJobPod(ctx context.Context, clientset *kubernetes.Clientset, namespa
 			return nil, fmt.Errorf("timeout waiting for pod")
 		}
 
-		// 先に待機してから取得（初回のすぐ存在しないケースを考慮）
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -151,7 +124,6 @@ func waitForContainerRunning(ctx context.Context, clientset *kubernetes.Clientse
 			continue
 		}
 
-		// InitContainer と通常 Container を合わせて確認
 		all := append(pod.Status.InitContainerStatuses, pod.Status.ContainerStatuses...)
 		for _, cs := range all {
 			if cs.Name == containerName && (cs.State.Running != nil || cs.State.Terminated != nil) {

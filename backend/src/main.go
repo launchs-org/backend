@@ -42,7 +42,6 @@ func main() {
 	}
 
 	database.Init()
-	database.InitRedis()
 	database.InitTaskDB()
 
 	if err := job_queue.UseRiver(context.Background(), database.TaskDB, nil); err != nil {

@@ -3,14 +3,12 @@ package watcher
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"launchs/shared/database"
 	"launchs/shared/model"
 
-	"github.com/redis/go-redis/v9"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,18 +16,10 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// PodLogMessage は Redis に Publish するコンテナログの形式です
-type PodLogMessage struct {
-	PodName   string    `json:"pod_name"`
-	Message   string    `json:"message"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
 // WatchDeployments は launchs-managed=true ラベルを持つ全 Namespace の Deployment を監視し、
 // Container.Status を同期します。エラー時は 3 秒待機して自動再起動します。
 func WatchDeployments(ctx context.Context) {
 	clientset := database.K8sClientset.(*kubernetes.Clientset)
-	redisClient := database.RedisClient
 
 	fmt.Println("[deploy-watcher] starting deployment watcher (label: launchs-managed=true)")
 
@@ -43,7 +33,7 @@ func WatchDeployments(ctx context.Context) {
 		default:
 		}
 
-		if err := runDeploymentWatch(ctx, clientset, redisClient); err != nil {
+		if err := runDeploymentWatch(ctx, clientset); err != nil {
 			fmt.Printf("[deploy-watcher] watch error: %v, restarting...\n", err)
 		}
 
@@ -86,7 +76,7 @@ func periodicPodSync(ctx context.Context, clientset *kubernetes.Clientset) {
 
 // runDeploymentWatch は K8s Deployment の Watch セッションを 1 つ実行します。
 // "launchs-managed=true" ラベルで絞り込み、全 Namespace を対象にします。
-func runDeploymentWatch(ctx context.Context, clientset *kubernetes.Clientset, redisClient *redis.Client) error {
+func runDeploymentWatch(ctx context.Context, clientset *kubernetes.Clientset) error {
 	// launchs-managed=true が付いた Deployment のみ Watch。
 	// backend の DeployWorker が Deployment 作成時にこのラベルを付与する。
 	watcher, err := clientset.AppsV1().Deployments("").Watch(ctx, metav1.ListOptions{
@@ -106,7 +96,7 @@ func runDeploymentWatch(ctx context.Context, clientset *kubernetes.Clientset, re
 			if !ok {
 				return fmt.Errorf("watch channel closed")
 			}
-			if err := handleDeploymentEvent(ctx, clientset, redisClient, event); err != nil {
+			if err := handleDeploymentEvent(ctx, clientset, event); err != nil {
 				fmt.Printf("[deploy-watcher] handle event error: %v\n", err)
 			}
 		}
@@ -115,7 +105,7 @@ func runDeploymentWatch(ctx context.Context, clientset *kubernetes.Clientset, re
 
 // handleDeploymentEvent は Deployment の Watch イベントを処理します。
 // container-id ラベルで DB の Container レコードを特定し、ステータスを同期します。
-func handleDeploymentEvent(ctx context.Context, clientset *kubernetes.Clientset, redisClient *redis.Client, event watch.Event) error {
+func handleDeploymentEvent(ctx context.Context, clientset *kubernetes.Clientset, event watch.Event) error {
 	deploy, ok := event.Object.(*appsv1.Deployment)
 	if !ok {
 		return nil
@@ -151,8 +141,6 @@ func handleDeploymentEvent(ctx context.Context, clientset *kubernetes.Clientset,
 		fmt.Printf("[deploy-watcher] status changed: container=%s %s → %s\n",
 			containerID, container.Status, status)
 		model.UpdateContainerStatus(containerID, status)
-		// フロントエンドのキャッシュを無効化
-		database.RedisClient.Del(ctx, fmt.Sprintf("cache:container:%s", containerID))
 	}
 
 	// Pod ステータスを常に同期する
@@ -161,7 +149,7 @@ func handleDeploymentEvent(ctx context.Context, clientset *kubernetes.Clientset,
 	// Running 状態になったら古いログをクリアして Pod ログのストリームを開始
 	if status == "Running" {
 		model.ClearContainerLog(containerID)
-		go streamDeploymentPodLogs(ctx, clientset, redisClient, deploy.Namespace, deploy.Name, containerID)
+		go streamDeploymentPodLogs(ctx, clientset, deploy.Namespace, deploy.Name, containerID)
 	}
 
 	return nil
@@ -269,9 +257,9 @@ func determineDeploymentStatus(deploy *appsv1.Deployment) string {
 	return "Deploying"
 }
 
-// streamDeploymentPodLogs は Deployment に紐づく Pod のログを DB と Redis に配信します。
+// streamDeploymentPodLogs は Deployment に紐づく Pod のログを DB に保存します。
 // 既存の Pod すべてに対してゴルーチンを起動します。
-func streamDeploymentPodLogs(ctx context.Context, clientset *kubernetes.Clientset, redisClient *redis.Client, namespace, deploymentName, containerID string) {
+func streamDeploymentPodLogs(ctx context.Context, clientset *kubernetes.Clientset, namespace, deploymentName, containerID string) {
 	pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("app=%s", deploymentName),
 	})
@@ -281,14 +269,12 @@ func streamDeploymentPodLogs(ctx context.Context, clientset *kubernetes.Clientse
 
 	for i := range pods.Items {
 		pod := &pods.Items[i]
-		redisChannel := fmt.Sprintf("stream:pod:%s:%s", namespace, pod.Name)
-		go streamPodContainerLogs(ctx, clientset, redisClient, namespace, pod.Name, deploymentName, containerID, redisChannel)
+		go streamPodContainerLogs(ctx, clientset, namespace, pod.Name, deploymentName, containerID)
 	}
 }
 
-// streamPodContainerLogs は 1 つの Pod のコンテナログを末尾 100 行から追従して読み込み、
-// DB に追記しつつ Redis チャンネルに Publish します。
-func streamPodContainerLogs(ctx context.Context, clientset *kubernetes.Clientset, redisClient *redis.Client, namespace, podName, containerName, containerID, redisChannel string) {
+// streamPodContainerLogs は 1 つの Pod のコンテナログを末尾 100 行から追従して読み込み、DB に追記します。
+func streamPodContainerLogs(ctx context.Context, clientset *kubernetes.Clientset, namespace, podName, containerName, containerID string) {
 	req := clientset.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
 		Container: containerName,
 		Follow:    true,
@@ -308,17 +294,7 @@ func streamPodContainerLogs(ctx context.Context, clientset *kubernetes.Clientset
 		default:
 		}
 		line := scanner.Text()
-		msg := PodLogMessage{
-			PodName:   podName,
-			Message:   line,
-			Timestamp: time.Now(),
-		}
-		payload, _ := json.Marshal(msg)
-
-		// DB に追記
 		model.AppendContainerLog(containerID, append([]byte(line), '\n'))
-		// Redis に配信
-		redisClient.Publish(ctx, redisChannel, payload)
 	}
 }
 

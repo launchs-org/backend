@@ -2,16 +2,13 @@ package controller
 
 import (
 	"backend/service"
-	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
-	"golang.org/x/net/websocket"
 )
 
-// StreamContainerLogs は WebSocket でコンテナの実行ログをストリーミングします。
-// 接続時に DB の履歴ログを送信し、その後 Redis Pub/Sub でリアルタイム配信します。
-func StreamContainerLogs(ctx *echo.Context) error {
+// GetContainerLogs は DB に蓄積されたコンテナの実行ログをポーリング用に返します。
+func GetContainerLogs(ctx *echo.Context) error {
 	containerID := (*ctx).Param("id")
 	userID, ok := (*ctx).Get("UserID").(string)
 	if !ok {
@@ -21,13 +18,28 @@ func StreamContainerLogs(ctx *echo.Context) error {
 		})
 	}
 
-	websocket.Handler(func(ws *websocket.Conn) {
-		defer ws.Close()
-
-		if err := service.StreamContainerLogs(ws, containerID, userID); err != nil {
-			fmt.Printf("[ws] container logs error container=%s: %v\n", containerID, err)
+	resp, err := service.GetContainerLogs(containerID, userID)
+	if err != nil {
+		switch err {
+		case service.ErrContainerNotFound:
+			return (*ctx).JSON(http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": "コンテナが見つかりません",
+			})
+		case service.ErrForbidden:
+			return (*ctx).JSON(http.StatusForbidden, map[string]string{
+				"code":    "FORBIDDEN",
+				"message": "アクセスが拒否されました",
+			})
+		default:
+			return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR",
+				"message": "ログの取得に失敗しました",
+			})
 		}
-	}).ServeHTTP((*ctx).Response(), (*ctx).Request())
+	}
 
-	return nil
+	return (*ctx).JSON(http.StatusOK, map[string]interface{}{
+		"data": resp,
+	})
 }

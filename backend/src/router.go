@@ -44,7 +44,7 @@ func InitRouter(router *echo.Echo) {
 			containersGroup.POST("/:id/scale", controller.ScaleContainer)
 			containersGroup.DELETE("/:id", controller.DeleteContainer)
 			containersGroup.GET("/:id/build-jobs", controller.ListBuildJobs)
-			containersGroup.GET("/:id/logs", controller.StreamContainerLogs)
+			containersGroup.GET("/:id/logs", controller.GetContainerLogs)
 			containersGroup.PATCH("/:id/service", controller.UpdateService)
 			containersGroup.POST("/:id/ingress", controller.CreateIngress)
 			containersGroup.PATCH("/:id/ingress", controller.UpdateIngress)
