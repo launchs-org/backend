@@ -1,0 +1,101 @@
+name: Update Manifest Versions
+
+on:
+  workflow_run:
+    workflows:
+      - "Build & Push backend"
+      - "Build & Push watcher"
+      - "Build & Push builder"
+      - "Build & Push controller"
+      - "Build & Push frontend"
+    types:
+      - completed
+
+jobs:
+  update-manifest:
+    runs-on: ubuntu-latest
+    # タグプッシュ起因のビルドが成功した場合のみ実行
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check all builds completed successfully
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = context.payload.workflow_run.head_branch;
+            const sha = context.payload.workflow_run.head_sha;
+            const requiredWorkflows = [
+              'Build & Push backend',
+              'Build & Push watcher',
+              'Build & Push builder',
+              'Build & Push controller',
+              'Build & Push frontend',
+            ];
+
+            const runs = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head_sha: sha,
+              per_page: 100,
+            });
+
+            const results = {};
+            for (const run of runs.data.workflow_runs) {
+              if (requiredWorkflows.includes(run.name)) {
+                results[run.name] = run.conclusion;
+              }
+            }
+
+            const allDone = requiredWorkflows.every(
+              (name) => results[name] === 'success'
+            );
+
+            core.setOutput('all_done', allDone ? 'true' : 'false');
+            core.setOutput('version', tag.replace(/^v/, ''));
+            core.info(`Results: ${JSON.stringify(results)}`);
+            core.info(`All done: ${allDone}`);
+
+      - name: Checkout
+        if: steps.check.outputs.all_done == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update image versions in manifests
+        if: steps.check.outputs.all_done == 'true'
+        env:
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          declare -A IMAGE_MAP=(
+            [manifest/pod-backend.yaml]="ghcr.io/launchs-org/backend"
+            [manifest/pod-watcher.yaml]="ghcr.io/launchs-org/watcher"
+            [manifest/pod-builder.yaml]="ghcr.io/launchs-org/builder"
+            [manifest/pod-controller.yaml]="ghcr.io/launchs-org/controller"
+            [manifest/static.yaml]="ghcr.io/launchs-org/frontend"
+          )
+
+          for file in "${!IMAGE_MAP[@]}"; do
+            image="${IMAGE_MAP[$file]}"
+            sed -i "s|image: ${image}:[^ ]*|image: ${image}:${VERSION}|g" "$file"
+            echo "Updated $file -> ${image}:${VERSION}"
+          done
+
+      - name: Commit and push manifest updates
+        if: steps.check.outputs.all_done == 'true'
+        env:
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add manifest/pod-backend.yaml manifest/pod-watcher.yaml \
+                  manifest/pod-builder.yaml manifest/pod-controller.yaml \
+                  manifest/static.yaml
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "chore(manifest): update image versions to ${VERSION}"
+          git push origin HEAD:${{ github.event.workflow_run.head_branch }}
