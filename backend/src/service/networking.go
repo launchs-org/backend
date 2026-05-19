@@ -86,6 +86,10 @@ func CreateIngress(ctx context.Context, containerID, ownerID, customDomain strin
 		return nil, err
 	}
 
+	if container.ContainerType != "" && container.ContainerType != "user" {
+		return nil, errors.New("ingress is not supported for template containers")
+	}
+
 	project, err := model.GetProjectByID(container.ProjectID)
 	if err != nil {
 		return nil, err
@@ -142,6 +146,10 @@ func UpdateIngress(ctx context.Context, containerID, ownerID, customDomain strin
 		return nil, err
 	}
 
+	if container.ContainerType != "" && container.ContainerType != "user" {
+		return nil, errors.New("ingress is not supported for template containers")
+	}
+
 	project, err := model.GetProjectByID(container.ProjectID)
 	if err != nil {
 		return nil, err
@@ -189,6 +197,10 @@ func DeleteIngressRoute(ctx context.Context, containerID, ownerID string) (map[s
 	container, err := model.GetContainerByID(containerID)
 	if err != nil {
 		return nil, err
+	}
+
+	if container.ContainerType != "" && container.ContainerType != "user" {
+		return nil, errors.New("ingress is not supported for template containers")
 	}
 
 	project, err := model.GetProjectByID(container.ProjectID)

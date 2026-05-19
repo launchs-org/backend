@@ -17,9 +17,11 @@ import (
 )
 
 var (
-	ErrContainerAlreadyExists = errors.New("container already exists")
-	ErrContainerNotFound      = errors.New("container not found")
+	ErrContainerAlreadyExists  = errors.New("container already exists")
+	ErrContainerNotFound       = errors.New("container not found")
+	ErrInvalidContainerType    = errors.New("invalid container type")
 )
+
 
 type CreateContainerInput struct {
 	ProjectID     string
@@ -133,6 +135,94 @@ func CreateContainer(ctx context.Context, input CreateContainerInput) (map[strin
 		"data": map[string]interface{}{
 			"container": container,
 			"build_job": buildJob,
+		},
+	}, nil
+}
+
+type CreateTemplateContainerInput struct {
+	ProjectID     string
+	OwnerID       string
+	Name          string
+	ContainerType string
+	EnvVars       string
+}
+
+// CreateTemplateContainer はYAMLテンプレートからコンテナを作成しデプロイします
+func CreateTemplateContainer(ctx context.Context, input CreateTemplateContainerInput) (map[string]interface{}, error) {
+	tmpl, ok := GetTemplateByID(input.ContainerType)
+	if !ok {
+		return nil, ErrInvalidContainerType
+	}
+	imageRef := tmpl.Image
+
+	project, err := model.GetProjectByID(input.ProjectID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrProjectNotFound
+		}
+		return nil, err
+	}
+
+	if project.OwnerID != input.OwnerID {
+		return nil, ErrForbidden
+	}
+
+	existing, err := model.GetContainerCountByProjectIDAndName(input.ProjectID, input.Name)
+	if err != nil {
+		return nil, err
+	}
+	if existing > 0 {
+		return nil, ErrContainerAlreadyExists
+	}
+
+	containerID := "cont-" + uuid.New().String()
+	serviceID := "svc-" + uuid.New().String()
+
+	envVarsStr := input.EnvVars
+	if envVarsStr == "" {
+		envVarsStr = templateEnvVarsJSON(input.ContainerType)
+	}
+
+	defaultPorts := templatePortsJSON(input.ContainerType)
+
+	container := model.Container{
+		ID:            containerID,
+		ProjectID:     project.ID,
+		Name:          input.Name,
+		ImageID:       imageRef,
+		ContainerType: input.ContainerType,
+		EnvVars:       envVarsStr,
+		Resources:     "{}",
+		Replicas:      1,
+		Status:        "Queued",
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+	k8sService := model.Service{
+		ID:          serviceID,
+		ContainerID: containerID,
+		Type:        "LoadBalancer",
+		Ports:       defaultPorts,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	if err := model.CreateTemplateContainerWithService(&container, &k8sService); err != nil {
+		return nil, err
+	}
+
+	if err := job_queue.EnqueueTo(ctx, "controller", jobs.DeployStatefulSetJobArgs{
+		ContainerID:   containerID,
+		ImageRef:      imageRef,
+		Namespace:     project.Namespace,
+		ContainerType: input.ContainerType,
+	}, nil); err != nil {
+		fmt.Printf("[service] failed to enqueue deploy_statefulset task: %v\n", err)
+	}
+
+	return map[string]interface{}{
+		"data": map[string]interface{}{
+			"container": container,
 		},
 	}, nil
 }

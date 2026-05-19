@@ -75,6 +75,80 @@ func CreateContainer(ctx *echo.Context) error {
 	return (*ctx).JSON(http.StatusCreated, res)
 }
 
+// CreateTemplateContainerRequest はテンプレートコンテナ作成のリクエストボディです
+// ListTemplates はYAMLで定義されたテンプレート一覧を返すハンドラーです
+func ListTemplates(ctx *echo.Context) error {
+	return (*ctx).JSON(http.StatusOK, map[string]interface{}{
+		"data": service.ListTemplates(),
+	})
+}
+
+type CreateTemplateContainerRequest struct {
+	Name          string `json:"name"`
+	ContainerType string `json:"container_type"`
+	EnvVars       string `json:"env_vars"`
+}
+
+// CreateTemplateContainer はMySQL/PostgreSQL/Redisなどのテンプレートからコンテナを作成するハンドラーです
+func CreateTemplateContainer(ctx *echo.Context) error {
+	var req CreateTemplateContainerRequest
+	if err := (*ctx).Bind(&req); err != nil {
+		return (*ctx).JSON(http.StatusBadRequest, map[string]string{
+			"code":    "BAD_REQUEST",
+			"message": "リクエストパラメータが不正です",
+		})
+	}
+
+	projectID := (*ctx).Param("id")
+	userID, ok := (*ctx).Get("UserID").(string)
+	if !ok {
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "認証に失敗しました",
+		})
+	}
+
+	res, err := service.CreateTemplateContainer((*ctx).Request().Context(), service.CreateTemplateContainerInput{
+		ProjectID:     projectID,
+		OwnerID:       userID,
+		Name:          req.Name,
+		ContainerType: req.ContainerType,
+		EnvVars:       req.EnvVars,
+	})
+
+	if err != nil {
+		switch err {
+		case service.ErrInvalidContainerType:
+			return (*ctx).JSON(http.StatusBadRequest, map[string]string{
+				"code":    "BAD_REQUEST",
+				"message": "サポートされていないコンテナタイプです",
+			})
+		case service.ErrProjectNotFound:
+			return (*ctx).JSON(http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": "プロジェクトが見つかりません",
+			})
+		case service.ErrForbidden:
+			return (*ctx).JSON(http.StatusForbidden, map[string]string{
+				"code":    "FORBIDDEN",
+				"message": "アクセス権限がありません",
+			})
+		case service.ErrContainerAlreadyExists:
+			return (*ctx).JSON(http.StatusConflict, map[string]string{
+				"code":    "CONFLICT",
+				"message": "コンテナ名が重複しています",
+			})
+		default:
+			return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+				"code":    "INTERNAL_ERROR",
+				"message": err.Error(),
+			})
+		}
+	}
+
+	return (*ctx).JSON(http.StatusCreated, res)
+}
+
 // ListBuildJobs はコンテナのビルド履歴一覧を取得するハンドラーです
 func ListBuildJobs(ctx *echo.Context) error {
 	containerID := (*ctx).Param("id") // note: router specifies /containers/:id/build-jobs
