@@ -10,6 +10,7 @@ import (
 	"launchs/shared/model"
 
 	"github.com/riverqueue/river"
+	appsv1 "k8s.io/api/apps/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -29,7 +30,6 @@ func (w *RolloutRestartWorker) Work(ctx context.Context, job *river.Job[jobs.Rol
 	payload := job.Args
 	fmt.Printf("[redeploy-worker] processing job %d (container_id: %s)\n", job.ID, payload.ContainerID)
 
-	// DB から最新のコンテナ情報を取得
 	container, err := model.GetContainerByID(payload.ContainerID)
 	if err != nil {
 		return fmt.Errorf("container not found: %w", err)
@@ -43,7 +43,6 @@ func (w *RolloutRestartWorker) Work(ctx context.Context, job *river.Job[jobs.Rol
 	clientset := database.K8sClientset.(*kubernetes.Clientset)
 	namespace := project.Namespace
 
-	// 既存の Deployment を削除
 	err = clientset.AppsV1().Deployments(namespace).Delete(ctx, container.Name, metav1.DeleteOptions{})
 	if err != nil && !k8serrors.IsNotFound(err) {
 		model.UpdateContainerStatus(payload.ContainerID, "Failed")
@@ -51,8 +50,13 @@ func (w *RolloutRestartWorker) Work(ctx context.Context, job *river.Job[jobs.Rol
 	}
 	fmt.Printf("[redeploy-worker] deleted deployment %s in %s\n", container.Name, namespace)
 
-	// DB の最新情報から Deployment を再構築して適用
-	deployment, err := buildDeployment(container, namespace, payload.ImageRef)
+	var deployment *appsv1.Deployment
+	// テンプレートコンテナはイメージ名が固定（mysql:8.0 など）なので container.ImageID をそのまま使う
+	if container.ContainerType != "" && container.ContainerType != "user" {
+		deployment, err = buildTemplateDeployment(container, namespace, container.ImageID)
+	} else {
+		deployment, err = buildDeployment(container, namespace, payload.ImageRef)
+	}
 	if err != nil {
 		model.UpdateContainerStatus(payload.ContainerID, "Failed")
 		return fmt.Errorf("failed to build deployment spec: %w", err)
@@ -65,5 +69,13 @@ func (w *RolloutRestartWorker) Work(ctx context.Context, job *river.Job[jobs.Rol
 
 	model.UpdateContainerStatus(payload.ContainerID, "Deploying")
 	fmt.Printf("[redeploy-worker] recreated deployment %s in %s\n", container.Name, namespace)
+
+	// テンプレートコンテナは再デプロイ後にも K8s Service を再作成する
+	if container.ContainerType != "" && container.ContainerType != "user" {
+		if err := enqueueTemplateService(ctx, container, namespace, container.ContainerType); err != nil {
+			fmt.Printf("[redeploy-worker] failed to enqueue service job: %v\n", err)
+		}
+	}
+
 	return nil
 }
