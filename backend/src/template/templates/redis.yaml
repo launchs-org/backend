@@ -1,0 +1,33 @@
+name: redis
+display_name: Redis
+category: cache
+description: Redis 7 インメモリキャッシュ・データストア
+icon: zap
+color: red
+version: "7"
+
+container:
+  image: redis
+  tag: "7-alpine"
+  replicas: 1
+  resources:
+    cpu_request: "100m"
+    cpu_limit: "250m"
+    memory_request: "128Mi"
+    memory_limit: "256Mi"
+  ports:
+    - port: 6379
+      protocol: TCP
+  command: ""
+  args: ""
+
+env_vars: []
+
+volume:
+  required: false
+  mount_path: /data
+  default_size_mb: 2048
+
+ingress:
+  enabled: false
+  http_port: 6379

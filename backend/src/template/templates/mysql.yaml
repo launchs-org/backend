@@ -1,0 +1,54 @@
+name: mysql
+display_name: MySQL
+category: database
+description: MySQL 8.0 リレーショナルデータベース
+icon: database
+color: orange
+version: "8.0"
+
+container:
+  image: mysql
+  tag: "8.0"
+  replicas: 1
+  resources:
+    cpu_request: "250m"
+    cpu_limit: "500m"
+    memory_request: "512Mi"
+    memory_limit: "1Gi"
+  ports:
+    - port: 3306
+      protocol: TCP
+  command: ""
+  args: ""
+
+env_vars:
+  - key: MYSQL_ROOT_PASSWORD
+    required: true
+    description: rootパスワード（必須）
+    auto_generate: true
+    generate_type: password
+    default: ""
+  - key: MYSQL_DATABASE
+    required: false
+    description: 初期データベース名
+    auto_generate: false
+    default: "app"
+  - key: MYSQL_USER
+    required: false
+    description: 非rootユーザー名
+    auto_generate: false
+    default: ""
+  - key: MYSQL_PASSWORD
+    required: false
+    description: 非rootユーザーパスワード
+    auto_generate: false
+    default: ""
+
+volume:
+  required: true
+  mount_path: /var/lib/mysql
+  default_size_mb: 10240
+
+ingress:
+  enabled: false
+  http_port: 3306

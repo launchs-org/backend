@@ -1,0 +1,49 @@
+name: postgresql
+display_name: PostgreSQL
+category: database
+description: PostgreSQL 16 リレーショナルデータベース
+icon: database
+color: blue
+version: "16"
+
+container:
+  image: postgres
+  tag: "16-alpine"
+  replicas: 1
+  resources:
+    cpu_request: "250m"
+    cpu_limit: "500m"
+    memory_request: "512Mi"
+    memory_limit: "1Gi"
+  ports:
+    - port: 5432
+      protocol: TCP
+  command: ""
+  args: ""
+
+env_vars:
+  - key: POSTGRES_PASSWORD
+    required: true
+    description: スーパーユーザーパスワード（必須）
+    auto_generate: true
+    generate_type: password
+    default: ""
+  - key: POSTGRES_DB
+    required: false
+    description: デフォルトデータベース名
+    auto_generate: false
+    default: "app"
+  - key: POSTGRES_USER
+    required: false
+    description: スーパーユーザー名
+    auto_generate: false
+    default: "postgres"
+
+volume:
+  required: true
+  mount_path: /var/lib/postgresql/data/pgdata
+  default_size_mb: 10240
+
+ingress:
+  enabled: false
+  http_port: 5432
