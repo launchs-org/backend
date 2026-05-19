@@ -21,6 +21,8 @@ type Container struct {
 	EnvVars       string    `gorm:"type:text" json:"env_vars"`
 	Resources     string    `gorm:"type:text" json:"resources"`
 	Status        string    `gorm:"default:'Stopped'" json:"status"`
+	ContainerType string    `gorm:"type:varchar(32);default:'app'" json:"container_type"`
+	TemplateName  string    `gorm:"type:varchar(64)" json:"template_name"`
 	ExecLog       []byte    `gorm:"type:bytea" json:"-"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -49,6 +51,30 @@ func CreateContainerWithRelatedRecords(image *Image, container *Container, servi
 		}
 		if err := tx.Create(buildJob).Error; err != nil {
 			return err
+		}
+		return nil
+	})
+}
+
+func CreateTemplateContainer(container *Container, service *Service, volume *Volume, ingress *Ingress) error {
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(container).Error; err != nil {
+			return err
+		}
+		if service != nil {
+			if err := tx.Create(service).Error; err != nil {
+				return err
+			}
+		}
+		if volume != nil {
+			if err := tx.Create(volume).Error; err != nil {
+				return err
+			}
+		}
+		if ingress != nil {
+			if err := tx.Create(ingress).Error; err != nil {
+				return err
+			}
 		}
 		return nil
 	})
