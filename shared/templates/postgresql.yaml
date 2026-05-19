@@ -1,0 +1,42 @@
+id: postgresql
+label: PostgreSQL
+version: "16"
+image: "postgres:16"
+description: "リレーショナルデータベース"
+port: 5432
+default_name: postgres
+
+env_vars:
+  - key: POSTGRES_PASSWORD
+    description: "スーパーユーザーのパスワード"
+    default: ""
+    required: true
+    generate: password
+  - key: POSTGRES_DB
+    description: "作成するデータベース名"
+    default: "mydb"
+    required: false
+  - key: POSTGRES_USER
+    description: "スーパーユーザー名"
+    default: "postgres"
+    required: false
+
+resources:
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
+    cpu: "1000m"
+    memory: "1Gi"
+
+volume:
+  enabled: true
+  size_mb: 5120
+  mount_path: "/var/lib/postgresql/data"
+
+service:
+  type: LoadBalancer
+  ports:
+    - name: postgresql
+      port: 5432
+      protocol: TCP

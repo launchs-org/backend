@@ -1,0 +1,34 @@
+id: redis
+label: Redis
+version: "7"
+image: "redis:7"
+description: "インメモリ KVS"
+port: 6379
+default_name: redis
+
+env_vars:
+  - key: REDIS_PASSWORD
+    description: "接続パスワード（空で認証なし）"
+    default: ""
+    required: false
+    generate: password
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "128Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+volume:
+  enabled: false
+  size_mb: 1024
+  mount_path: "/data"
+
+service:
+  type: LoadBalancer
+  ports:
+    - name: redis
+      port: 6379
+      protocol: TCP

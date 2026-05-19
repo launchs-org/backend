@@ -13,6 +13,7 @@ type Container struct {
 	ProjectID     string    `gorm:"index;type:varchar(255)" json:"project_id"`
 	Name          string    `gorm:"index;type:varchar(255)" json:"name"`
 	ImageID       string    `gorm:"index;type:varchar(255)" json:"image_id"`
+	ContainerType string    `gorm:"type:varchar(32);default:'user'" json:"container_type"`
 	RepositoryURL string    `json:"repository_url"`
 	Branch        string    `gorm:"default:'main'" json:"branch"`
 	Directory     string    `gorm:"default:'/'" json:"directory"`
@@ -48,6 +49,18 @@ func CreateContainerWithRelatedRecords(image *Image, container *Container, servi
 			return err
 		}
 		if err := tx.Create(buildJob).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func CreateTemplateContainerWithService(container *Container, service *Service) error {
+	return database.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(container).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(service).Error; err != nil {
 			return err
 		}
 		return nil

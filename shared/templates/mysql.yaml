@@ -1,0 +1,47 @@
+id: mysql
+label: MySQL
+version: "8.0"
+image: "mysql:8.0"
+description: "リレーショナルデータベース"
+port: 3306
+default_name: mysql
+
+env_vars:
+  - key: MYSQL_ROOT_PASSWORD
+    description: "rootパスワード"
+    default: ""
+    required: true
+    generate: password
+  - key: MYSQL_DATABASE
+    description: "作成するデータベース名"
+    default: "mydb"
+    required: false
+  - key: MYSQL_USER
+    description: "追加ユーザー名"
+    default: ""
+    required: false
+  - key: MYSQL_PASSWORD
+    description: "追加ユーザーのパスワード"
+    default: ""
+    required: false
+    generate: password
+
+resources:
+  requests:
+    cpu: "250m"
+    memory: "256Mi"
+  limits:
+    cpu: "1000m"
+    memory: "1Gi"
+
+volume:
+  enabled: true
+  size_mb: 5120
+  mount_path: "/var/lib/mysql"
+
+service:
+  type: LoadBalancer
+  ports:
+    - name: mysql
+      port: 3306
+      protocol: TCP
