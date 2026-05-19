@@ -8,6 +8,7 @@ import (
 
 	"launchs/shared/job_queue"
 	"launchs/shared/job_queue/jobs"
+	"gorm.io/gorm"
 	"launchs/shared/model"
 
 	"github.com/google/uuid"
@@ -67,7 +68,10 @@ func CreateProject(ctx context.Context, input CreateProjectInput) (*model.Projec
 func GetProjectByID(ctx context.Context, id string, userID string) (*model.Project, error) {
 	project, err := model.GetProjectByID(id)
 	if err != nil {
-		return nil, ErrProjectNotFound
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrProjectNotFound
+		}
+		return nil, err
 	}
 	if project.OwnerID != userID {
 		return nil, ErrForbidden

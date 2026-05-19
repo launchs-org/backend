@@ -13,6 +13,8 @@ func InitRouter(router *echo.Echo) {
 	v1Group.Use(middlewares.RequireAuth)
 
 	{
+		v1Group.GET("/templates", controller.ListTemplates)
+
 		projectsGroup := v1Group.Group("/projects")
 		{
 			projectsGroup.GET("", controller.ListProjects)
@@ -20,6 +22,10 @@ func InitRouter(router *echo.Echo) {
 			projectsGroup.GET("/:id", controller.GetProject)
 			projectsGroup.DELETE("/:id", controller.DeleteProject)
 			projectsGroup.POST("/:id/containers", controller.CreateContainer)
+			projectsGroup.POST("/:id/containers/from-template", controller.DeployFromTemplate)
+
+			projectsGroup.GET("/:id/volumes", controller.ListProjectVolumes)
+			projectsGroup.POST("/:id/volumes", controller.CreateProjectVolume)
 
 			projectsGroup.GET("/:id/histories", func(c *echo.Context) error {
 				return c.JSON(http.StatusOK, map[string]interface{}{

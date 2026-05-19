@@ -359,7 +359,7 @@ var ErrInvalidReplicas = errors.New("replicas must be between 1 and 5")
 
 // ScaleContainer はリビルドなしで Deployment のレプリカ数のみ変更します。
 func ScaleContainer(ctx context.Context, containerID, ownerID string, replicas int) (map[string]interface{}, error) {
-	if replicas < 1 || replicas > 5 {
+	if replicas < 0 || replicas > 5 {
 		return nil, ErrInvalidReplicas
 	}
 

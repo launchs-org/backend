@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"backend/middlewares"
+	tmpl "backend/template"
 	"launchs/shared/database"
 	"launchs/shared/job_queue"
 	"launchs/shared/model"
@@ -30,6 +31,7 @@ func runMigrate() {
 		&model.Ingress{},
 		&model.Volume{},
 		&model.HarborCredential{},
+		&model.PodStatus{},
 	); err != nil {
 		panic("failed to migrate database: " + err.Error())
 	}
@@ -57,11 +59,16 @@ func main() {
 		&model.Ingress{},
 		&model.Volume{},
 		&model.HarborCredential{},
+		&model.PodStatus{},
 	); err != nil {
 		panic("failed to migrate database: " + err.Error())
 	}
 
 	middlewares.Init()
+
+	if err := tmpl.LoadAll(); err != nil {
+		panic("failed to load templates: " + err.Error())
+	}
 
 	router := echo.New()
 	router.Use(middleware.RequestLogger())
