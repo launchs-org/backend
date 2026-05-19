@@ -68,7 +68,7 @@ Project
 Rebuild         → 新 BuildJob → K8s Job → Harbor Push → K8s Deployment 更新
 Redeploy        → K8s Deployment 更新（ビルドなし、現在の image_id を使用）
 
-Service 有効化  → K8s Service 作成/更新（ClusterIP・外部IP を DB に同期）
+Service 有効化  → K8s Service 作成/更新（LoadBalancer・外部IP を DB に同期）
 Service 無効化  → K8s Service 削除
 Ingress 作成    → Traefik IngressRoute 作成
 Ingress 削除    → Traefik IngressRoute 削除

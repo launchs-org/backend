@@ -374,7 +374,7 @@ Body: なし
 4. DB に以下のレコードを順次作成:
    a. Image レコード（type: "user", name: "{project.name}-{container.name}"）
    b. Container レコード（status: "Stopped", image_id: 上記 Image の id）
-   c. Service レコード（type: "ClusterIP", ports: []）
+   c. Service レコード（type: "LoadBalancer", ports: []）
    d. BuildJob レコード（status: "Queued"）
       - repository_url / branch / directory を BuildJob にスナップショット保存
 5. Container + BuildJob をレスポンスとして返す
@@ -696,7 +696,7 @@ Service のポート設定変更（ports 配列を丸ごと差し替え）
 
 ```json
 {
-  "type": "ClusterIP",
+  "type": "LoadBalancer",
   "ports": [
     { "name": "http",    "port": 80,   "target": 3000 },
     { "name": "metrics", "port": 9090, "target": 9090 }
@@ -711,7 +711,7 @@ Service のポート設定変更（ports 配列を丸ごと差し替え）
   "data": {
     "id": "svc_aaa111",
     "container_id": "cont_xyz789",
-    "type": "ClusterIP",
+    "type": "LoadBalancer",
     "ports": [
       { "name": "http",    "port": 80,   "target": 3000 },
       { "name": "metrics", "port": 9090, "target": 9090 }
