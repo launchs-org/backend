@@ -70,6 +70,19 @@ func CreateVolume(ctx context.Context, input CreateVolumeInput) (*model.Volume, 
 	return volume, nil
 }
 
+func ListProjectVolumes(ctx context.Context, projectID string, ownerID string) ([]model.Volume, error) {
+	project, err := model.GetProjectByID(projectID)
+	if err != nil {
+		return nil, ErrProjectNotFound
+	}
+
+	if project.OwnerID != ownerID {
+		return nil, ErrForbidden
+	}
+
+	return model.GetVolumesByProjectID(projectID)
+}
+
 func ListVolumes(ctx context.Context, containerID string, ownerID string) ([]model.Volume, error) {
 	container, err := model.GetContainerByID(containerID)
 	if err != nil {

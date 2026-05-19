@@ -14,6 +14,104 @@ type CreateVolumeRequest struct {
 	MountPath string `json:"mount_path"` // マウントパス
 }
 
+type CreateProjectVolumeRequest struct {
+	Name        string `json:"name"`
+	SizeMB      int    `json:"size_mb"`
+	MountPath   string `json:"mount_path"`
+	ContainerID string `json:"container_id"`
+}
+
+func ListProjectVolumes(ctx *echo.Context) error {
+	projectID := (*ctx).Param("id")
+
+	userID, ok := (*ctx).Get("UserID").(string)
+	if !ok {
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "認証に失敗しました",
+		})
+	}
+
+	volumes, err := service.ListProjectVolumes((*ctx).Request().Context(), projectID, userID)
+	if err != nil {
+		if err == service.ErrProjectNotFound {
+			return (*ctx).JSON(http.StatusNotFound, map[string]string{
+				"code":    "NOT_FOUND",
+				"message": err.Error(),
+			})
+		}
+		if err == service.ErrForbidden {
+			return (*ctx).JSON(http.StatusForbidden, map[string]string{
+				"code":    "FORBIDDEN",
+				"message": err.Error(),
+			})
+		}
+		return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
+			"code":    "INTERNAL_ERROR",
+			"message": err.Error(),
+		})
+	}
+
+	return (*ctx).JSON(http.StatusOK, map[string]interface{}{
+		"data": map[string]interface{}{
+			"items": volumes,
+			"total": len(volumes),
+		},
+	})
+}
+
+func CreateProjectVolume(ctx *echo.Context) error {
+	projectID := (*ctx).Param("id")
+
+	userID, ok := (*ctx).Get("UserID").(string)
+	if !ok {
+		return (*ctx).JSON(http.StatusUnauthorized, map[string]string{
+			"code":    "UNAUTHORIZED",
+			"message": "認証に失敗しました",
+		})
+	}
+
+	var req CreateProjectVolumeRequest
+	if err := (*ctx).Bind(&req); err != nil {
+		return (*ctx).JSON(http.StatusBadRequest, map[string]string{
+			"code":    "BAD_REQUEST",
+			"message": "リクエストパラメータが不正です",
+		})
+	}
+
+	vol, err := service.CreateVolume((*ctx).Request().Context(), service.CreateVolumeInput{
+		ProjectID:   projectID,
+		OwnerID:     userID,
+		ContainerID: req.ContainerID,
+		Name:        req.Name,
+		SizeMB:      req.SizeMB,
+		MountPath:   req.MountPath,
+	})
+
+	if err != nil {
+		status := http.StatusInternalServerError
+		code := "INTERNAL_ERROR"
+		if err == service.ErrVolumeSizeExceeded {
+			status = http.StatusBadRequest
+			code = "BAD_REQUEST"
+		} else if err == service.ErrForbidden {
+			status = http.StatusForbidden
+			code = "FORBIDDEN"
+		} else if err == service.ErrProjectNotFound {
+			status = http.StatusNotFound
+			code = "NOT_FOUND"
+		}
+		return (*ctx).JSON(status, map[string]string{
+			"code":    code,
+			"message": err.Error(),
+		})
+	}
+
+	return (*ctx).JSON(http.StatusCreated, map[string]interface{}{
+		"data": vol,
+	})
+}
+
 // CreateContainerVolume はコンテナに紐づくボリュームを作成するエンドポイントです
 func CreateContainerVolume(ctx *echo.Context) error {
 	// パスパラメータからコンテナIDを取得
