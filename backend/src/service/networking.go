@@ -2,6 +2,7 @@ package service
 
 import (
 	"launchs/shared/database"
+	tmpl "backend/template"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -17,6 +18,8 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+var ErrIngressNotAllowed = errors.New("INGRESS_NOT_ALLOWED")
 
 type ServicePort struct {
 	Name   string `json:"name"`
@@ -97,6 +100,14 @@ func CreateIngress(ctx context.Context, containerID, ownerID, customDomain strin
 	existingIng, _ := model.GetIngressByContainerID(containerID)
 	if existingIng != nil {
 		return nil, errors.New("ingress already exists for this container")
+	}
+
+	// テンプレートコンテナの場合、YAML で ingress.enabled: true のものだけ許可
+	if container.ContainerType == "database" && container.TemplateName != "" {
+		t, ok := tmpl.Get(container.TemplateName)
+		if !ok || t.Ingress == nil || !t.Ingress.Enabled {
+			return nil, ErrIngressNotAllowed
+		}
 	}
 
 	hasher := sha256.Sum256([]byte(fmt.Sprintf("%s-%s", project.ID, container.ID)))

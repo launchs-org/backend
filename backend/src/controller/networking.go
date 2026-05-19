@@ -122,6 +122,12 @@ func CreateIngress(ctx *echo.Context) error {
 				"message": "アクセス権限がありません",
 			})
 		}
+		if err == service.ErrIngressNotAllowed {
+			return (*ctx).JSON(http.StatusForbidden, map[string]string{
+				"code":    "INGRESS_NOT_ALLOWED",
+				"message": "このテンプレートでは外部公開は許可されていません",
+			})
+		}
 		// その他のエラーは500
 		return (*ctx).JSON(http.StatusInternalServerError, map[string]string{
 			"code":    "INTERNAL_ERROR",
