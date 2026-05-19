@@ -123,6 +123,12 @@ func handleDeploymentEvent(ctx context.Context, clientset *kubernetes.Clientset,
 	// ステータス変化時のログ出力
 	logDeploymentEvent(event.Type, deploy, containerID, status)
 
+	// DELETED イベントは再デプロイの一部として Deployment を削除・再作成する際に発生する。
+	// この時点のステータスは削除直前の値（Running など）なので DB に反映しない。
+	if event.Type == watch.Deleted {
+		return nil
+	}
+
 	// DB から Container を取得してステータスを比較
 	container, err := model.GetContainerByID(containerID)
 	if err != nil {
@@ -136,7 +142,7 @@ func handleDeploymentEvent(ctx context.Context, clientset *kubernetes.Clientset,
 		return nil
 	}
 
-	// ステータスが変化した場合のみ DB 更新・キャッシュ削除
+	// ステータスが変化した場合のみ DB 更新
 	if container.Status != status {
 		fmt.Printf("[deploy-watcher] status changed: container=%s %s → %s\n",
 			containerID, container.Status, status)
