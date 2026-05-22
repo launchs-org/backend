@@ -43,7 +43,7 @@ func registryHostEnv() string {
 	if v := os.Getenv("REGISTRY_HOST"); v != "" {
 		return v
 	}
-	return "172.33.0.1"
+	return "harbor.main-harbor"
 }
 
 func registryProjectEnv() string {

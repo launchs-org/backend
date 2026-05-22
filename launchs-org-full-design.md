@@ -103,7 +103,7 @@ UPLOAD_TOKEN=internal-secret-token
 TAR_SAVE_DIR=/tmp/launchs-tar
 
 # ── プライベートレジストリ ────────────────────────────────────
-REGISTRY_HOST=172.33.0.1
+REGISTRY_HOST=harbor.main-harbor
 REGISTRY_PROJECT=launchs
 REGISTRY_USERNAME=robot$launchs+builder
 REGISTRY_PASSWORD=your-registry-password
@@ -1354,7 +1354,7 @@ POST /internal/upload を受信:
        imageName,   // X-Image-Name
        imageTag,    // X-Image-Tag
    )
-   // 例: 172.33.0.1/launchs/frontend:550e8400-e29b-41d4-a716-446655440000
+   // 例: harbor.main-harbor/launchs/frontend:550e8400-e29b-41d4-a716-446655440000
 
    err = crane.Push(image, imageRef, opts...)
 

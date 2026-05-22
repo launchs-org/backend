@@ -300,7 +300,7 @@ func RedeployContainer(ctx context.Context, containerID, ownerID string) (map[st
 
 	registryHost := os.Getenv("REGISTRY_HOST")
 	if registryHost == "" {
-		registryHost = "172.33.0.1"
+		registryHost = "harbor.main-harbor"
 	}
 	imageRef := fmt.Sprintf("%s/%s/%s:%s", registryHost, container.ProjectID, container.ID, container.ImageID)
 

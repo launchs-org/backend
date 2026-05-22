@@ -22,7 +22,7 @@ type BuildConfig struct {
 	ImageTag string
 
 	// ── レジストリ (直接プッシュ) ────────────────────────────
-	// RegistryHost: プッシュ先レジストリホスト (例: "172.33.0.1")
+	// RegistryHost: プッシュ先レジストリホスト (例: "harbor.main-harbor")
 	RegistryHost string
 	// RegistryProject: Harbor のプロジェクト名 (例: "buildkit")
 	RegistryProject string
@@ -94,7 +94,7 @@ func applyDefaults(cfg BuildConfig) BuildConfig {
 		cfg.Resources = DefaultResourceConfig()
 	}
 	if cfg.RegistryHost == "" {
-		cfg.RegistryHost = "172.33.0.1"
+		cfg.RegistryHost = "harbor.main-harbor"
 	}
 	if cfg.RegistryProject == "" {
 		cfg.RegistryProject = "buildkit"

@@ -108,6 +108,8 @@ services:
       - /bin/bash
       - -c
       - "ip route add 172.33.0.0/16 via 172.20.0.1 && exec go tool air -c ./.air.toml"
+    extra_hosts:
+      - "harbor.main-harbor:172.33.0.1"
     depends_on:
       app:
         condition: service_started

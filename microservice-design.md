@@ -336,7 +336,7 @@ FOR UPDATE SKIP LOCKED;
 ```json
 {
   "container_id":  "...",
-  "image_ref":     "172.33.0.1/launchs/{イメージ名}:{イメージタグ}",
+  "image_ref":     "harbor.main-harbor/launchs/{イメージ名}:{イメージタグ}",
   "namespace":     "ns-...",
   "build_job_id":  "..."
 }

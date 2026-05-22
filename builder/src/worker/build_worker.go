@@ -75,7 +75,7 @@ func processBuildTask(ctx context.Context, payload jobs.BuildJobArgs) error {
 
 	registryHost := os.Getenv("REGISTRY_HOST")
 	if registryHost == "" {
-		registryHost = "172.33.0.1"
+		registryHost = "harbor.main-harbor"
 	}
 
 	clientset := database.K8sClientset.(*kubernetes.Clientset)
@@ -146,7 +146,7 @@ func resolveHarborCredential(ctx context.Context, projectID string) (*model.Harb
 
 	harborURL := os.Getenv("HARBOR_URL")
 	if harborURL == "" {
-		harborURL = "https://172.33.0.1"
+		harborURL = "https://harbor.main-harbor"
 	}
 	harborDecodeUser,err := base64.StdEncoding.DecodeString(os.Getenv("HARBOR_USERNAME"))
 

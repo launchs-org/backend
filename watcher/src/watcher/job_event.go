@@ -102,7 +102,7 @@ func syncContainerStatus(buildJobID, jobStatus string) {
 
 	registryHost := os.Getenv("REGISTRY_HOST")
 	if registryHost == "" {
-		registryHost = "172.33.0.1"
+		registryHost = "harbor.main-harbor"
 	}
 
 	container, err := model.GetContainerByID(buildJob.ContainerID)
