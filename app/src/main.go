@@ -98,9 +98,9 @@ func main() {
 	volumeHandler := handler.NewVolumeHandler(volumeServiceImpl)                                                                  // volume ハンドラーを生成する
 
 	// webhook ハンドラーを DI 組み立てする
-	webhookRepo := repository.NewWebhookRepository(repository.Database)                                        // webhook リポジトリを生成する
-	webhookServiceImpl := service.NewWebhookService(webhookRepo, deploymentRepo, projectRepo)                  // webhook サービスを生成する
-	webhookHandler := handler.NewWebhookHandler(webhookServiceImpl)                                            // webhook ハンドラーを生成する
+	webhookRepo := repository.NewWebhookRepository(repository.Database)                                                                              // webhook リポジトリを生成する
+	webhookServiceImpl := service.NewWebhookService(webhookRepo, deploymentRepo, projectRepo, applyServiceImpl)                                       // webhook サービスを生成する
+	webhookHandler := handler.NewWebhookHandler(webhookServiceImpl)                                                                                  // webhook ハンドラーを生成する
 
 	// 各 Watcher をリーダーエレクション経由でバックグラウンドで起動する
 	go leader.RunAsLeader(context.Background(), repository.Database, func(ctx context.Context) { // リーダーになった Pod のみ Watcher を起動する

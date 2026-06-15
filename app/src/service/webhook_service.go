@@ -4,8 +4,13 @@ import (
 	"app/models"
 	"app/repository"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
 )
 
 // WebhookService は Webhook CRUD のビジネスロジックを定義するインターフェース
@@ -13,7 +18,11 @@ type WebhookService interface {
 	CreateWebhook(ctx context.Context, userID string, deploymentID string, req CreateWebhookRequest) (*models.DeploymentWebhook, error) // webhook を作成する
 	GetWebhook(ctx context.Context, userID string, deploymentID string) (*models.DeploymentWebhook, error)                              // webhook を取得する
 	DeleteWebhook(ctx context.Context, userID string, webhookID string) error                                                           // webhook を削除する
+	ReceiveGithubWebhook(ctx context.Context, deploymentID string, signature string, body []byte) error                                 // GitHub push イベントを受信して Apply をトリガーする
 }
+
+// ErrInvalidSignature は HMAC 署名が不正な場合のエラー
+var ErrInvalidSignature = errors.New("invalid signature") // 署名不正エラーを定義する
 
 // CreateWebhookRequest は POST /deployments/:id/webhooks のリクエスト構造体
 type CreateWebhookRequest struct {
@@ -25,6 +34,7 @@ type webhookServiceImpl struct {
 	webhookRepo    repository.WebhookRepository    // webhook リポジトリ
 	deploymentRepo repository.DeploymentRepository // deployment リポジトリ（認可チェックに使用する）
 	projectRepo    repository.ProjectRepository    // project リポジトリ（認可チェックに使用する）
+	applyService   ApplyServiceInterface           // apply サービス（Webhook 経由の Apply 実行に使用する）
 }
 
 // NewWebhookService は WebhookService の実装を返す
@@ -32,11 +42,13 @@ func NewWebhookService(
 	webhookRepo repository.WebhookRepository,
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
+	applyService ApplyServiceInterface,
 ) WebhookService {
 	return &webhookServiceImpl{
 		webhookRepo:    webhookRepo,    // webhook リポジトリを注入する
 		deploymentRepo: deploymentRepo, // deployment リポジトリを注入する
 		projectRepo:    projectRepo,    // project リポジトリを注入する
+		applyService:   applyService,   // apply サービスを注入する
 	}
 }
 
@@ -106,4 +118,62 @@ func (svc *webhookServiceImpl) DeleteWebhook(ctx context.Context, userID string,
 		return err // エラーを返す
 	}
 	return svc.webhookRepo.Delete(ctx, webhookID) // リポジトリ経由で削除する
+}
+
+// GithubPushPayload は GitHub push イベントのペイロード構造体
+type GithubPushPayload struct {
+	Ref        string `json:"ref"`         // refs/heads/{branch} 形式のブランチ参照
+	After      string `json:"after"`       // push 後の commit SHA
+	Repository struct {
+		FullName string `json:"full_name"` // リポジトリのフルネーム（org/repo 形式）
+	} `json:"repository"`
+}
+
+// ReceiveGithubWebhook は GitHub push イベントを受信して HMAC 署名を検証し、ブランチが一致する場合に Apply をトリガーする
+func (svc *webhookServiceImpl) ReceiveGithubWebhook(ctx context.Context, deploymentID string, signature string, body []byte) error {
+	webhookData, err := svc.webhookRepo.FindByDeploymentID(ctx, deploymentID) // deployment に紐づく webhook を取得する
+	if err != nil {
+		return err // 取得エラーを返す
+	}
+
+	// HMAC-SHA256 署名を検証する
+	mac := hmac.New(sha256.New, []byte(webhookData.Secret)) // HMAC を生成する
+	mac.Write(body)                                          // リクエストボディを HMAC に書き込む
+	expectedSig := fmt.Sprintf("sha256=%s", hex.EncodeToString(mac.Sum(nil))) // 期待する署名を生成する
+	if !hmac.Equal([]byte(signature), []byte(expectedSig)) { // 署名が一致しない場合は不正エラーを返す
+		return ErrInvalidSignature // 署名不正エラーを返す
+	}
+
+	// push ペイロードをパースする
+	var pushPayload GithubPushPayload                          // ペイロードを格納する変数を定義する
+	if err := json.Unmarshal(body, &pushPayload); err != nil { // JSON をパースする
+		return fmt.Errorf("ペイロードのパースに失敗しました: %w", err) // パースエラーを返す
+	}
+
+	// deployment の github_branch と push の ref を比較する
+	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得する
+	if err != nil {
+		return err // 取得エラーを返す
+	}
+	expectedRef := fmt.Sprintf("refs/heads/%s", deploymentData.GithubBranch) // 期待する ref を生成する
+	if pushPayload.Ref != expectedRef {                                        // ブランチが一致しない場合はスキップする
+		return nil // apply をトリガーしない
+	}
+
+	// 所有者の userID を取得する
+	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // project を取得する
+	if err != nil {
+		return fmt.Errorf("project の取得に失敗しました: %w", err) // 取得エラーを返す
+	}
+
+	// pending_github_commit_sha を push の commit SHA に更新する
+	if err := svc.deploymentRepo.UpdatePendingGithubCommitSHA(ctx, deploymentID, pushPayload.After); err != nil { // pending commit SHA を更新する
+		return fmt.Errorf("commit SHA の更新に失敗しました: %w", err) // 更新エラーを返す
+	}
+
+	// Apply をトリガーする
+	if _, err := svc.applyService.Apply(ctx, projectData.UserID, deploymentID); err != nil { // Apply をトリガーする
+		return fmt.Errorf("Apply の実行に失敗しました: %w", err) // Apply エラーを返す
+	}
+	return nil // 正常終了を返す
 }

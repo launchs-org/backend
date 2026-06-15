@@ -12,12 +12,13 @@ import (
 
 // mockDeploymentRepository は DeploymentRepository のテスト用モック実装
 type mockDeploymentRepository struct {
-	createFunc              func(ctx context.Context, deployment *models.Deployment) error
-	findByIDFunc            func(ctx context.Context, deploymentID string) (*models.Deployment, error)
-	findByIDForUpdateFunc   func(ctx context.Context, tx *gorm.DB, deploymentID string) (*models.Deployment, error)
-	findAllByProjectIDFunc  func(ctx context.Context, projectID string) ([]models.Deployment, error)
-	saveFunc                func(ctx context.Context, deployment *models.Deployment) error
-	updatesFunc             func(ctx context.Context, tx *gorm.DB, deployment *models.Deployment, values map[string]interface{}) error
+	createFunc                        func(ctx context.Context, deployment *models.Deployment) error
+	findByIDFunc                      func(ctx context.Context, deploymentID string) (*models.Deployment, error)
+	findByIDForUpdateFunc             func(ctx context.Context, tx *gorm.DB, deploymentID string) (*models.Deployment, error)
+	findAllByProjectIDFunc            func(ctx context.Context, projectID string) ([]models.Deployment, error)
+	saveFunc                          func(ctx context.Context, deployment *models.Deployment) error
+	updatesFunc                       func(ctx context.Context, tx *gorm.DB, deployment *models.Deployment, values map[string]interface{}) error
+	updatePendingGithubCommitSHAFunc  func(ctx context.Context, deploymentID string, commitSHA string) error
 }
 
 func (mock *mockDeploymentRepository) Create(ctx context.Context, deployment *models.Deployment) error {
@@ -60,6 +61,13 @@ func (mock *mockDeploymentRepository) UpdateK8sStatus(ctx context.Context, deplo
 
 func (mock *mockDeploymentRepository) UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
+func (mock *mockDeploymentRepository) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error {
+	if mock.updatePendingGithubCommitSHAFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.updatePendingGithubCommitSHAFunc(ctx, deploymentID, commitSHA)
+	}
+	return nil // デフォルトは nil を返す
 }
 
 func (mock *mockDeploymentRepository) Delete(ctx context.Context, deploymentID string) error {

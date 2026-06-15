@@ -34,6 +34,10 @@ func (mock *mockWebhookService) DeleteWebhook(ctx context.Context, userID string
 	return mock.deleteWebhookFunc(ctx, userID, webhookID) // モック関数を呼び出す
 }
 
+func (mock *mockWebhookService) ReceiveGithubWebhook(ctx context.Context, deploymentID string, signature string, body []byte) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 // setupWebhookEchoContext はテスト用の Echo コンテキストを生成するヘルパー関数
 func setupWebhookEchoContext(method, path, body string, params map[string]string) (echo.Context, *httptest.ResponseRecorder) {
 	echoInstance := echo.New()                                            // Echo インスタンスを生成する

@@ -61,6 +61,9 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.GET("/deployments/:id/webhooks", opts.WebhookHandler.GetWebhook)     // webhook 取得エンドポイント
 	apiGroup.DELETE("/webhooks/:id", opts.WebhookHandler.DeleteWebhook)           // webhook 削除エンドポイント
 
+	// 認証不要の Webhook レシーバーを登録する（GitHub からのリクエストには認証ヘッダーがないため）
+	router.POST("/webhooks/:deployment_id/github", opts.WebhookHandler.ReceiveGithubWebhook) // GitHub push イベントレシーバーエンドポイント
+
 	// ingress-route エンドポイントを登録する
 	apiGroup.GET("/deployments/:id/ingress-route", opts.DeploymentHandler.GetIngressRoute)        // ingress-route 設定取得エンドポイント
 	apiGroup.POST("/deployments/:id/ingress-route", opts.DeploymentHandler.CreateIngressRoute)    // ingress-route 作成エンドポイント

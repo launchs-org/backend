@@ -4,6 +4,7 @@ import (
 	"app/middlewares"
 	"app/service"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -114,4 +115,41 @@ func (webhookHandler *WebhookHandler) DeleteWebhook(echoCtx echo.Context) error 
 	return echoCtx.JSON(http.StatusOK, map[string]string{
 		"message": "削除しました",
 	}) // 削除成功を返す
+}
+
+// ReceiveGithubWebhook は POST /webhooks/:deployment_id/github のハンドラー
+func (webhookHandler *WebhookHandler) ReceiveGithubWebhook(echoCtx echo.Context) error {
+	deploymentID := echoCtx.Param("deployment_id")             // パスパラメータから deployment ID を取得する
+	signature := echoCtx.Request().Header.Get("X-Hub-Signature-256") // HMAC 署名ヘッダーを取得する
+
+	body, err := io.ReadAll(echoCtx.Request().Body) // リクエストボディを読み込む
+	if err != nil {
+		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+			"error": "リクエストボディの読み込みに失敗しました",
+		})
+	}
+
+	if err := webhookHandler.webhookService.ReceiveGithubWebhook( // サービスを呼び出して Webhook を処理する
+		echoCtx.Request().Context(),
+		deploymentID,
+		signature,
+		body,
+	); err != nil {
+		if errors.Is(err, service.ErrInvalidSignature) { // 署名不正の場合
+			return echoCtx.JSON(http.StatusUnauthorized, map[string]string{
+				"error": "署名が不正です",
+			})
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが存在しない場合
+			return echoCtx.JSON(http.StatusNotFound, map[string]string{
+				"error": "リソースが見つかりません",
+			})
+		}
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "内部サーバーエラー",
+		})
+	}
+	return echoCtx.JSON(http.StatusOK, map[string]string{
+		"message": "Webhook を受信しました",
+	}) // 受信成功を返す
 }

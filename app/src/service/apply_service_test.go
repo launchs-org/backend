@@ -377,6 +377,10 @@ func (mock *applyHistoryMockDeploymentRepository) UpdatePendingImageURL(ctx cont
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *applyHistoryMockDeploymentRepository) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 func (mock *applyHistoryMockDeploymentRepository) Delete(ctx context.Context, deploymentID string) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
