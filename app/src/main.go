@@ -97,6 +97,11 @@ func main() {
 	volumeServiceImpl := service.NewVolumeService(repository.Database, volumeRepo, volumeMountRepo, deploymentRepo, projectRepo)  // volume サービスを生成する
 	volumeHandler := handler.NewVolumeHandler(volumeServiceImpl)                                                                  // volume ハンドラーを生成する
 
+	// webhook ハンドラーを DI 組み立てする
+	webhookRepo := repository.NewWebhookRepository(repository.Database)                                        // webhook リポジトリを生成する
+	webhookServiceImpl := service.NewWebhookService(webhookRepo, deploymentRepo, projectRepo)                  // webhook サービスを生成する
+	webhookHandler := handler.NewWebhookHandler(webhookServiceImpl)                                            // webhook ハンドラーを生成する
+
 	// 各 Watcher をリーダーエレクション経由でバックグラウンドで起動する
 	go leader.RunAsLeader(context.Background(), repository.Database, func(ctx context.Context) { // リーダーになった Pod のみ Watcher を起動する
 		go k8s.WatchServices(ctx, k8sClient, serviceRepo)                               // k8s Service の状態変化を監視して DB を自動更新する
@@ -115,6 +120,7 @@ func main() {
 		EnvVarHandler:     envVarHandler,     // env_var ハンドラーを注入する
 		VolumeHandler:     volumeHandler,     // volume ハンドラーを注入する
 		BuildHandler:      buildHandler,      // build ハンドラーを注入する
+		WebhookHandler:    webhookHandler,    // webhook ハンドラーを注入する
 	})
 	if err := echoRouter.Start(":" + cfg.GetServerPort()); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("サーバーの起動に失敗しました", "error", err) // サーバー起動失敗時にエラーログを出す

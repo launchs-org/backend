@@ -16,6 +16,7 @@ type RouterOptions struct {
 	EnvVarHandler      *handler.EnvVarHandler      // env_var ハンドラー
 	VolumeHandler      *handler.VolumeHandler      // volume ハンドラー
 	BuildHandler       *handler.BuildHandler       // build ハンドラー
+	WebhookHandler     *handler.WebhookHandler     // webhook ハンドラー
 }
 
 // New はミドルウェアとルーティングを設定した Echo インスタンスを返す
@@ -54,6 +55,11 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.POST("/deployments/:id/build", opts.BuildHandler.TriggerBuild) // ビルドトリガーエンドポイント
 	apiGroup.DELETE("/builds/:id", opts.BuildHandler.CancelBuild)           // ビルドキャンセルエンドポイント
 	apiGroup.GET("/builds/:id/logs", opts.BuildHandler.GetBuildLogs)        // ビルドログ取得エンドポイント
+
+	// webhook エンドポイントを登録する
+	apiGroup.POST("/deployments/:id/webhooks", opts.WebhookHandler.CreateWebhook) // webhook 作成エンドポイント
+	apiGroup.GET("/deployments/:id/webhooks", opts.WebhookHandler.GetWebhook)     // webhook 取得エンドポイント
+	apiGroup.DELETE("/webhooks/:id", opts.WebhookHandler.DeleteWebhook)           // webhook 削除エンドポイント
 
 	// ingress-route エンドポイントを登録する
 	apiGroup.GET("/deployments/:id/ingress-route", opts.DeploymentHandler.GetIngressRoute)        // ingress-route 設定取得エンドポイント
