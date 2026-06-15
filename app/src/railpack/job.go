@@ -35,7 +35,7 @@ func newResources(cpu, memory, disk string) corev1.ResourceRequirements {
 }
 
 // createJob は BuildConfig を元に Kubernetes Job を作成し jobID を返す。
-func createJob(ctx context.Context, cs *kubernetes.Clientset, ns string, cfg BuildConfig) (string, error) {
+func createJob(ctx context.Context, cs kubernetes.Interface, ns string, cfg BuildConfig) (string, error) {
 	r := cfg.Resources
 
 	buildRes := newResources(r.BuildCPU, r.BuildMemory, r.BuildDisk)
@@ -294,7 +294,7 @@ exit 1
 
 // ── Job 管理ヘルパー ────────────────────────────────────────
 
-func deleteJob(ctx context.Context, cs *kubernetes.Clientset, ns, jobID string) error {
+func deleteJob(ctx context.Context, cs kubernetes.Interface, ns, jobID string) error {
 	prop := metav1.DeletePropagationForeground
 	return cs.BatchV1().Jobs(ns).Delete(ctx,
 		"railpack-"+jobID,
@@ -304,12 +304,12 @@ func deleteJob(ctx context.Context, cs *kubernetes.Clientset, ns, jobID string) 
 
 // DeleteJob は K8s Job（railpack-{jobID}）を削除します。
 // 外部パッケージから直接 K8s Job を削除したい場合に使います。
-func DeleteJob(ctx context.Context, cs *kubernetes.Clientset, ns, jobID string) error {
+func DeleteJob(ctx context.Context, cs kubernetes.Interface, ns, jobID string) error {
 	return deleteJob(ctx, cs, ns, jobID)
 }
 
 // getJobStatus は指定した jobID の現在の BuildStatus を返す。
-func getJobStatus(ctx context.Context, cs *kubernetes.Clientset, ns, jobID string) (BuildStatus, error) {
+func getJobStatus(ctx context.Context, cs kubernetes.Interface, ns, jobID string) (BuildStatus, error) {
 	job, err := cs.BatchV1().Jobs(ns).Get(ctx, "railpack-"+jobID, metav1.GetOptions{})
 	if err != nil {
 		return StatusFailed, err
@@ -326,7 +326,7 @@ func getJobStatus(ctx context.Context, cs *kubernetes.Clientset, ns, jobID strin
 	}
 }
 
-func waitForPod(ctx context.Context, cs *kubernetes.Clientset, ns, jobID string) (*corev1.Pod, error) {
+func waitForPod(ctx context.Context, cs kubernetes.Interface, ns, jobID string) (*corev1.Pod, error) {
 	for range make([]struct{}, 30) {
 		pods, err := cs.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{
 			LabelSelector: "build-job-id=" + jobID,

@@ -102,35 +102,18 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 		return nil, err // 作成エラーを返す
 	}
 
-	// 7. push 先のイメージ URL を組み立てる
-	pushedImageURL := fmt.Sprintf("%s/%s/%s:%s",
-		harborCredential.HarborEndpoint, // Harbor エンドポイントを設定する
-		projectData.Name,                // Harbor プロジェクト名を設定する
-		deploymentData.Name,             // リポジトリ名としてデプロイメント名を使う
-		buildData.ID,                    // タグにビルド ID を使う
-	)
-
-	// 8. ビルドタイプに応じた k8s Job を起動する
+	// 7. ビルドタイプに応じた k8s Job を起動する
 	var jobName string
 	switch buildData.BuildType {
 	case models.BuildTypeDockerfile:
-		jobName, err = k8s.CreateBuildJob( // dockerfile は汎用ビルダーを使う
+		jobName, err = k8s.CreateBuildJob( // dockerfile ビルダーは ISSUE-051 で実装予定
 			ctx,
 			svc.k8sClient,
-			buildData,
-			deploymentData,
-			projectData.Namespace,           // namespace を指定する
-			harborCredential.HarborEndpoint, // Harbor エンドポイントを渡す
-			harborCredential.RobotName,      // Harbor robot アカウント名を渡す
-			harborCredential.RobotSecret,    // Harbor robot シークレットを渡す
-			pushedImageURL,                  // push 先イメージ URL を渡す
+			buildData.ID,        // ビルド ID を渡す
+			projectData.Namespace, // namespace を指定する
 		)
 	case models.BuildTypeRailpack:
-		clientset, ok := svc.k8sClient.(*kubernetes.Clientset) // railpack.New は *Clientset を要求するため型アサートする
-		if !ok {
-			return nil, fmt.Errorf("k8s クライアントが *Clientset 型ではありません") // アサート失敗時はエラーを返す
-		}
-		railpackClient, railpackErr := railpack.New(clientset, railpack.BuildConfig{ // railpack クライアントを生成する
+		railpackClient, railpackErr := railpack.New(svc.k8sClient, railpack.BuildConfig{ // railpack クライアントを生成する
 			JobID:            buildData.ID,                      // ビルド ID をジョブ ID に使う
 			GitRepo:          deploymentData.PendingGithubRepoURL, // Git リポジトリ URL を設定する
 			GitBranch:        buildData.Branch,                  // ブランチを設定する
@@ -156,7 +139,7 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 		return nil, err // Job 作成エラーを返す
 	}
 
-	// 9. k8s Job 名をビルドレコードに保存する
+	// 8. k8s Job 名をビルドレコードに保存する
 	buildData.K8sJobName = jobName                                // Job 名を設定する
 	if err := svc.buildRepo.UpdateK8sJobName(ctx, buildData.ID, jobName); err != nil { // Job 名を DB に保存する
 		return nil, err // 保存エラーを返す

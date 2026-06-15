@@ -73,14 +73,14 @@ func TestTriggerBuild_正常系(t *testing.T) {
 	ctx := context.Background() // テスト用コンテキストを生成する
 
 	deploymentData := &models.Deployment{
-		ID:                         "deployment-1",              // デプロイメント ID を設定する
-		ProjectID:                  "project-1",                 // プロジェクト ID を設定する
-		Type:                       models.DeploymentTypeDockerfile, // タイプを設定する
+		ID:                         "deployment-1",             // デプロイメント ID を設定する
+		ProjectID:                  "project-1",                // プロジェクト ID を設定する
+		Type:                       models.DeploymentTypeRailpack, // railpack タイプを設定する
+		Name:                       "my-app",                   // デプロイメント名を設定する
 		PendingGithubRepoURL:       "https://github.com/org/repo",
 		PendingGithubBranch:        "main",
 		PendingGithubCommitSHA:     "abc123",
 		PendingGithubRepoDirectory: "./",
-		PendingDockerfilePath:      "./Dockerfile",
 	}
 
 	projectData := &models.Project{

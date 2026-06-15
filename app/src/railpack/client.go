@@ -32,14 +32,14 @@ import (
 // Client はビルドパイプラインの操作インターフェースです。
 // New() で作成し、Build / Status / StreamLogs / Cancel を呼び出して使います。
 type Client struct {
-	clientset *kubernetes.Clientset
+	clientset kubernetes.Interface // kubernetes.Interface を使うことでテスト時に fake クライアントを注入できる
 	config    BuildConfig
 }
 
 // New は Client を生成します。
 // config には BuildConfig を渡してください。省略可能なフィールドにはデフォルト値が適用されます。
-func New(clientset *kubernetes.Clientset, config BuildConfig) (*Client, error) {
-	if clientset == nil {
+func New(clientset kubernetes.Interface, config BuildConfig) (*Client, error) {
+	if clientset == nil { // nil チェックはインターフェース型でも有効
 		return nil, fmt.Errorf("clientset は必須です")
 	}
 	if config.GitRepo == "" {
@@ -160,7 +160,7 @@ func (client *Client) StreamLogs(ctx context.Context, jobID string) (<-chan stri
 }
 
 // waitForContainerRunning は指定したコンテナが Running または Terminated になるまで待機します。
-func waitForContainerRunning(ctx context.Context, clientset *kubernetes.Clientset, namespace, podName, containerName string) error {
+func waitForContainerRunning(ctx context.Context, clientset kubernetes.Interface, namespace, podName, containerName string) error {
 	for {
 		pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 		if err != nil {
@@ -188,7 +188,7 @@ func waitForContainerRunning(ctx context.Context, clientset *kubernetes.Clientse
 
 // streamContainerLogs は指定したコンテナのログを全行読み取り、logCh へ送信します。
 // コンテナのログが終端に達したら return します。
-func streamContainerLogs(ctx context.Context, clientset *kubernetes.Clientset, namespace, podName, containerName string, logCh chan<- string) error {
+func streamContainerLogs(ctx context.Context, clientset kubernetes.Interface, namespace, podName, containerName string, logCh chan<- string) error {
 	logOptions := &corev1.PodLogOptions{
 		Container: containerName,
 		Follow:    true,
