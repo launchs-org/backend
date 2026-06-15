@@ -17,6 +17,7 @@ type DeploymentBuildRepository interface {
 	UpdateStatus(ctx context.Context, buildID string, status models.BuildStatus) error                                                                                // ビルドのステータスを更新する
 	UpdateK8sJobName(ctx context.Context, buildID string, jobName string) error                                                                                       // k8s Job 名を更新する
 	UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, finishedAt time.Time) error                               // 完了時に status / built_image_url / finished_at を一括更新する
+	DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error                                                                                           // deploymentID に紐づくビルドを全件削除する
 }
 
 // deploymentBuildRepositoryImpl は DeploymentBuildRepository の GORM 実装
@@ -83,6 +84,11 @@ func (repo *deploymentBuildRepositoryImpl) FindAllBuilding(ctx context.Context) 
 		return nil, err // 取得エラーを返す
 	}
 	return buildList, nil // ビルド一覧を返す
+}
+
+// DeleteAllByDeploymentID は deploymentID に紐づくビルドレコードを全件削除する
+func (repo *deploymentBuildRepositoryImpl) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error {
+	return repo.db.WithContext(ctx).Where("deployment_id = ?", deploymentID).Delete(&models.DeploymentBuild{}).Error // 全件削除する
 }
 
 // UpdateBuildResult は buildID に対応するビルドの status / built_image_url / finished_at を一括更新する

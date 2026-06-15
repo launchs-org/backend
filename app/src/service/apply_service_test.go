@@ -449,6 +449,10 @@ func (mock *applyHistoryMockRepository) FindAllByDeploymentID(ctx context.Contex
 	return nil, nil // Apply テストでは使用しない
 }
 
+func (mock *applyHistoryMockRepository) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error {
+	return nil // Apply テストでは使用しない
+}
+
 // TestApplyService_Apply_k8sapply失敗時にapplyHistorystatusがfailedになる は k8s apply 失敗時の挙動を確認する
 func TestApplyService_Apply_k8sapply失敗時にapplyHistorystatusがfailedになる(t *testing.T) {
 	db := setupApplyTestDB(t)                                    // テスト用 DB を準備する
@@ -555,6 +559,10 @@ func (mock *listApplyHistoriesMockRepository) UpdateStatus(ctx context.Context, 
 
 func (mock *listApplyHistoriesMockRepository) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.ApplyHistory, error) {
 	return mock.historyList, nil // 設定した履歴一覧を返す
+}
+
+func (mock *listApplyHistoriesMockRepository) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error {
+	return nil // テストでは使用しない
 }
 
 // TestApplyService_ListApplyHistories_正常に履歴一覧が取得できる は正常系で履歴一覧が返ることを確認する

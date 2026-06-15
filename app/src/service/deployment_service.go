@@ -1,12 +1,15 @@
 package service
 
 import (
+	"app/k8s"
 	"app/models"
 	"app/repository"
 	"context"
 	"errors"
 
 	"gorm.io/gorm"
+	k8sclient "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/dynamic"
 )
 
 // DeploymentService は Deployment CRUD のビジネスロジックを定義するインターフェース
@@ -81,15 +84,32 @@ type deploymentServiceImpl struct {
 	serviceRepo      repository.ServiceRepository      // service リポジトリ
 	projectRepo      repository.ProjectRepository      // project リポジトリ（所有権チェック用）
 	ingressRouteRepo repository.IngressRouteRepository // ingress_route リポジトリ
+	envVarMountRepo  repository.EnvVarMountRepository  // env_var_mount リポジトリ
+	volumeMountRepo  repository.VolumeMountRepository  // volume_mount リポジトリ
+	k8sClient        k8sclient.Interface               // k8s クライアント（リソース削除用）
+	dynamicClient    dynamic.Interface                 // dynamic クライアント（IngressRoute 削除用）
 }
 
 // NewDeploymentService は DeploymentService の実装を返す
-func NewDeploymentService(deploymentRepo repository.DeploymentRepository, serviceRepo repository.ServiceRepository, projectRepo repository.ProjectRepository, ingressRouteRepo repository.IngressRouteRepository) DeploymentService {
+func NewDeploymentService(
+	deploymentRepo repository.DeploymentRepository,
+	serviceRepo repository.ServiceRepository,
+	projectRepo repository.ProjectRepository,
+	ingressRouteRepo repository.IngressRouteRepository,
+	envVarMountRepo repository.EnvVarMountRepository,
+	volumeMountRepo repository.VolumeMountRepository,
+	k8sClient k8sclient.Interface,
+	dynamicClient dynamic.Interface,
+) DeploymentService {
 	return &deploymentServiceImpl{
 		deploymentRepo:   deploymentRepo,   // deployment リポジトリを注入する
 		serviceRepo:      serviceRepo,      // service リポジトリを注入する
 		projectRepo:      projectRepo,      // project リポジトリを注入する
 		ingressRouteRepo: ingressRouteRepo, // ingress_route リポジトリを注入する
+		envVarMountRepo:  envVarMountRepo,  // env_var_mount リポジトリを注入する
+		volumeMountRepo:  volumeMountRepo,  // volume_mount リポジトリを注入する
+		k8sClient:        k8sClient,        // k8s クライアントを注入する
+		dynamicClient:    dynamicClient,    // dynamic クライアントを注入する
 	}
 }
 
@@ -208,7 +228,7 @@ func (svc *deploymentServiceImpl) UpdateDeployment(ctx context.Context, userID s
 	return deploymentData, nil // 更新後の deployment を返す
 }
 
-// DeleteDeployment は deployment のステータスを deleting に変更する
+// DeleteDeployment は deployment のステータスを deleting に変更し、k8s リソースを削除する
 func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error) {
 	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // リポジトリ経由で取得する
 	if err != nil {
@@ -218,10 +238,39 @@ func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID s
 		return nil, err
 	}
 
-	deploymentData.Status = models.DeploymentStatusDeleting                       // ステータスを deleting に変更する
-	if err := svc.deploymentRepo.Save(ctx, deploymentData); err != nil { // リポジトリ経由で保存する
+	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // namespace 解決のために project を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	namespace := projectData.Namespace // namespace を取得する
+
+	deploymentData.Status = models.DeploymentStatusDeleting                    // ステータスを deleting に変更する
+	if err := svc.deploymentRepo.Save(ctx, deploymentData); err != nil {       // リポジトリ経由で保存する
 		return nil, err // 保存エラーを返す
 	}
+
+	// k8s リソースを順に削除する（エラーは警告ログとして記録し処理を継続する）
+	if k8sErr := k8s.DeleteDeployment(ctx, svc.k8sClient, namespace, deploymentData.Name); k8sErr != nil { // k8s Deployment を削除する
+		_ = k8sErr // k8s 上に存在しない場合もあるため無視して継続する
+	}
+	if k8sErr := k8s.DeleteService(ctx, svc.k8sClient, namespace, deploymentData.Name); k8sErr != nil { // k8s Service を削除する
+		_ = k8sErr // k8s 上に存在しない場合もあるため無視して継続する
+	}
+	if k8sErr := k8s.DeleteConfigMap(ctx, svc.k8sClient, namespace, deploymentData.Name); k8sErr != nil { // k8s ConfigMap を削除する
+		_ = k8sErr // k8s 上に存在しない場合もあるため無視して継続する
+	}
+	if k8sErr := k8s.DeleteSecret(ctx, svc.k8sClient, namespace, deploymentData.Name); k8sErr != nil { // k8s Secret を削除する
+		_ = k8sErr // k8s 上に存在しない場合もあるため無視して継続する
+	}
+
+	// IngressRoute が存在する場合は削除する
+	ingressRouteData, ingressRouteErr := svc.ingressRouteRepo.FindByDeploymentID(ctx, deploymentID) // IngressRoute を取得する
+	if ingressRouteErr == nil && ingressRouteData != nil {                                            // IngressRoute が存在する場合
+		if k8sErr := k8s.DeleteIngressRoute(ctx, svc.dynamicClient, namespace, ingressRouteData.ID); k8sErr != nil { // k8s IngressRoute を削除する
+			_ = k8sErr // k8s 上に存在しない場合もあるため無視して継続する
+		}
+	}
+
 	return deploymentData, nil // 更新後の deployment を返す
 }
 

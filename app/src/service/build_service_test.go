@@ -58,6 +58,10 @@ func (mock *mockDeploymentBuildRepository) UpdateBuildResult(ctx context.Context
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *mockDeploymentBuildRepository) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 // mockBuildLogChunkRepository は BuildLogChunkRepository のテスト用モック実装
 type mockBuildLogChunkRepository struct {
 	findByBuildIDFunc      func(ctx context.Context, buildID string) ([]models.BuildLogChunk, error)

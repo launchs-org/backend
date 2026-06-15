@@ -34,7 +34,7 @@ func DeleteDeployment(ctx context.Context, client kubernetes.Interface, namespac
 }
 
 // WatchDeployments は全 Namespace の Deployment 変化を監視して DB を自動更新する
-func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository) {
+func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository) {
 	for {
 		if ctx.Err() != nil { // コンテキストがキャンセルされた場合は終了する
 			return
@@ -50,14 +50,14 @@ func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deplo
 
 		logger.Println("WatchDeployments: 監視を開始しました") // 監視開始ログを出力する
 
-		watchLoop(ctx, watcher, deploymentRepo) // イベントループを実行する
+		watchLoop(ctx, watcher, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo) // イベントループを実行する
 
 		logger.Println("WatchDeployments: Watch チャネルが終了しました。再接続します") // 再接続ログを出力する
 	}
 }
 
 // watchLoop は Watch イベントチャネルを処理するループ
-func watchLoop(ctx context.Context, watcher watch.Interface, deploymentRepo repository.DeploymentRepository) {
+func watchLoop(ctx context.Context, watcher watch.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository) {
 	defer watcher.Stop() // 終了時に Watch を停止する
 
 	for {
@@ -68,13 +68,13 @@ func watchLoop(ctx context.Context, watcher watch.Interface, deploymentRepo repo
 			if !ok { // チャネルが閉じられた場合はループを抜ける
 				return
 			}
-			handleDeploymentEvent(ctx, event, deploymentRepo) // イベントを処理する
+			handleDeploymentEvent(ctx, event, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo) // イベントを処理する
 		}
 	}
 }
 
 // handleDeploymentEvent は Deployment の Watch イベントを処理する
-func handleDeploymentEvent(ctx context.Context, event watch.Event, deploymentRepo repository.DeploymentRepository) {
+func handleDeploymentEvent(ctx context.Context, event watch.Event, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository) {
 	k8sDeployment, ok := event.Object.(*appsv1.Deployment) // イベントオブジェクトを Deployment にキャストする
 	if !ok {                                                 // キャストに失敗した場合はスキップする
 		return
@@ -86,11 +86,56 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, deploymentRep
 	}
 
 	switch event.Type {
-	case watch.Deleted: // Deleted イベントの場合は DB レコードを削除する
-		if err := deploymentRepo.Delete(ctx, deploymentID); err != nil { // deployment を削除する
-			logger.PrintErr("WatchDeployments: Deployment 削除に失敗しました: " + err.Error()) // エラーをログ出力する
+	case watch.Deleted: // Deleted イベントの場合は DB の status を確認して処理を分岐する
+		deploymentData, err := deploymentRepo.FindByID(ctx, deploymentID) // DB から deployment を取得して status を確認する
+		if err != nil {
+			logger.PrintErr("WatchDeployments: Deployment 取得に失敗しました: " + err.Error()) // エラーをログ出力する
+			return
 		}
-		logger.Println("WatchDeployments: Deployment を削除しました: " + deploymentID) // 削除ログを出力する
+
+		if deploymentData.Status == models.DeploymentStatusDeleting { // status が deleting の場合のみ連鎖削除する
+			// EnvVarMount を全件削除する
+			envVarMountList, envVarMountErr := envVarMountRepo.FindAllByDeploymentID(ctx, deploymentID) // EnvVarMount 一覧を取得する
+			if envVarMountErr == nil {
+				for _, mountData := range envVarMountList { // 各マウント設定を削除する
+					if err := envVarMountRepo.Delete(ctx, nil, mountData); err != nil { // EnvVarMount を削除する
+						logger.PrintErr("WatchDeployments: EnvVarMount 削除に失敗しました: " + err.Error()) // エラーをログ出力する
+					}
+				}
+			}
+
+			// VolumeMount を全件削除する
+			volumeMountList, volumeMountErr := volumeMountRepo.FindAllByDeploymentID(ctx, deploymentID) // VolumeMount 一覧を取得する
+			if volumeMountErr == nil {
+				for _, mountData := range volumeMountList { // 各マウント設定を削除する
+					if err := volumeMountRepo.Delete(ctx, nil, mountData); err != nil { // VolumeMount を削除する
+						logger.PrintErr("WatchDeployments: VolumeMount 削除に失敗しました: " + err.Error()) // エラーをログ出力する
+					}
+				}
+			}
+
+			// ApplyHistory を全件削除する
+			if err := applyHistoryRepo.DeleteAllByDeploymentID(ctx, deploymentID); err != nil { // ApplyHistory を削除する
+				logger.PrintErr("WatchDeployments: ApplyHistory 削除に失敗しました: " + err.Error()) // エラーをログ出力する
+			}
+
+			// DeploymentBuild を全件削除する
+			if err := buildRepo.DeleteAllByDeploymentID(ctx, deploymentID); err != nil { // DeploymentBuild を削除する
+				logger.PrintErr("WatchDeployments: DeploymentBuild 削除に失敗しました: " + err.Error()) // エラーをログ出力する
+			}
+
+			// Deployment レコード本体を削除する
+			if err := deploymentRepo.Delete(ctx, deploymentID); err != nil { // deployment を削除する
+				logger.PrintErr("WatchDeployments: Deployment 削除に失敗しました: " + err.Error()) // エラーをログ出力する
+			}
+			logger.Println("WatchDeployments: Deployment を削除しました: " + deploymentID) // 削除ログを出力する
+		} else { // status が deleting 以外（意図しない削除）の場合は k8s_status を deleted に更新する
+			deletedStatusJSON := datatypes.JSON([]byte(`{"deleted":true}`))                            // deleted 状態を表す JSON を生成する
+			if err := deploymentRepo.UpdateK8sStatus(ctx, deploymentID, deletedStatusJSON); err != nil { // k8s_status を更新する
+				logger.PrintErr("WatchDeployments: k8s_status 更新に失敗しました: " + err.Error()) // エラーをログ出力する
+			}
+			logger.Println("WatchDeployments: k8s_status を deleted に更新しました: " + deploymentID) // 更新ログを出力する
+		}
 
 	case watch.Added, watch.Modified: // Added/Modified イベントの場合は app_status と k8s_status を更新する
 		appStatus := calcAppStatus(k8sDeployment) // app_status を計算する

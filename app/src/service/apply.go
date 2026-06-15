@@ -107,6 +107,11 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 			return ErrAlreadyApplying
 		}
 
+		// 削除中の deployment への apply を防ぐ
+		if deploymentData.Status == models.DeploymentStatusDeleting { // 削除中の場合は競合エラーを返す
+			return ErrAlreadyApplying
+		}
+
 		// 2. Project を取得する（namespace 解決のため）
 		projectData, err := applyService.ProjectRepository.FindByID(ctx, tx, deploymentData.ProjectID) // ProjectRepository 経由で project を取得する
 		if err != nil {
