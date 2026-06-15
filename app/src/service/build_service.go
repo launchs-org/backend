@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"k8s.io/client-go/kubernetes"
 )
@@ -22,6 +24,7 @@ var ErrBuildNotCancellable = errors.New("build is not cancellable")
 type BuildService interface {
 	TriggerBuild(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error) // ビルドをトリガーする
 	CancelBuild(ctx context.Context, userID string, buildID string) error                                  // ビルドをキャンセルする
+	GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, error)     // ビルドログを取得する
 }
 
 // TriggerBuildRequest は TriggerBuild のリクエスト構造体（現時点では deploymentID のみ）
@@ -32,6 +35,7 @@ type buildServiceImpl struct {
 	buildRepo            repository.DeploymentBuildRepository  // build リポジトリ
 	projectRepo          repository.ProjectRepository          // project リポジトリ（所有権チェック用）
 	harborCredentialRepo repository.HarborCredentialRepository // harbor credential リポジトリ
+	logChunkRepo         repository.BuildLogChunkRepository    // ログチャンクリポジトリ
 	k8sClient            kubernetes.Interface                  // k8s クライアント
 }
 
@@ -41,6 +45,7 @@ func NewBuildService(
 	buildRepo repository.DeploymentBuildRepository,
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
+	logChunkRepo repository.BuildLogChunkRepository,
 	k8sClient kubernetes.Interface,
 ) BuildService {
 	return &buildServiceImpl{
@@ -48,6 +53,7 @@ func NewBuildService(
 		buildRepo:            buildRepo,            // build リポジトリを注入する
 		projectRepo:          projectRepo,          // project リポジトリを注入する
 		harborCredentialRepo: harborCredentialRepo, // harbor credential リポジトリを注入する
+		logChunkRepo:         logChunkRepo,         // ログチャンクリポジトリを注入する
 		k8sClient:            k8sClient,            // k8s クライアントを注入する
 	}
 }
@@ -191,6 +197,46 @@ func (svc *buildServiceImpl) CancelBuild(ctx context.Context, userID string, bui
 	}
 
 	return nil // キャンセル成功
+}
+
+// GetBuildLogs はビルドIDに紐づくログを取得して結合した文字列を返す
+func (svc *buildServiceImpl) GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, error) {
+	// 1. ビルドレコードを取得する
+	buildData, err := svc.buildRepo.FindByID(ctx, buildID) // ビルドレコードを取得する
+	if err != nil {
+		return "", err // 取得エラーを返す
+	}
+
+	// 2. 所有権チェック（Build → Deployment → Project → UserID を辿る）
+	deploymentData, err := svc.deploymentRepo.FindByID(ctx, buildData.DeploymentID) // deployment を取得する
+	if err != nil {
+		return "", err // 取得エラーを返す
+	}
+	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // project を取得する
+	if err != nil {
+		return "", err // 取得エラーを返す
+	}
+	if projectData.UserID != userID { // UserID が一致しない場合は禁止エラーを返す
+		return "", ErrForbidden
+	}
+
+	// 3. ログチャンクを取得する（since 指定あり／なしで分岐する）
+	var chunkList []models.BuildLogChunk
+	if since != nil { // since パラメータが指定されている場合は差分を取得する
+		chunkList, err = svc.logChunkRepo.FindByBuildIDSince(ctx, buildID, *since) // since より後のチャンクを取得する
+	} else {
+		chunkList, err = svc.logChunkRepo.FindByBuildID(ctx, buildID) // 全チャンクを取得する
+	}
+	if err != nil {
+		return "", err // 取得エラーを返す
+	}
+
+	// 4. チャンクを結合して返す
+	var logBuilder strings.Builder                      // ログ文字列ビルダーを生成する
+	for _, chunk := range chunkList {                   // 各チャンクを結合する
+		logBuilder.WriteString(chunk.Content)           // チャンクの内容を追記する
+	}
+	return logBuilder.String(), nil // 結合したログ文字列を返す
 }
 
 // resolveBuildType は DeploymentType からビルドタイプを解決する

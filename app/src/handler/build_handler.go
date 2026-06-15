@@ -4,6 +4,7 @@ import (
 	"app/service"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"gorm.io/gorm"
@@ -78,5 +79,43 @@ func (buildHandler *BuildHandler) CancelBuild(echoCtx echo.Context) error {
 	}
 	return echoCtx.JSON(http.StatusOK, map[string]string{ // キャンセル成功を返す
 		"message": "ビルドをキャンセルしました",
+	})
+}
+
+// GetBuildLogs は GET /api/v1/builds/:id/logs のハンドラー
+func (buildHandler *BuildHandler) GetBuildLogs(echoCtx echo.Context) error {
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
+	buildID := echoCtx.Param("id")           // パスパラメータからビルド ID を取得する
+
+	var sinceTime *time.Time                          // since パラメータを格納する変数を定義する
+	sinceParam := echoCtx.QueryParam("since")        // クエリパラメータ since を取得する
+	if sinceParam != "" {                             // since が指定されている場合はパースする
+		parsedTime, parseErr := time.Parse(time.RFC3339, sinceParam) // RFC3339 形式でパースする
+		if parseErr != nil {                                          // パースエラーの場合は 400 を返す
+			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "since パラメータの形式が不正です（RFC3339 形式で指定してください）",
+			})
+		}
+		sinceTime = &parsedTime // パース結果を設定する
+	}
+
+	logContent, err := buildHandler.buildService.GetBuildLogs(echoCtx.Request().Context(), userID, buildID, sinceTime) // サービスを呼び出してビルドログを取得する
+	if err != nil {
+		if errors.Is(err, service.ErrForbidden) { // 所有権エラーの場合は 403 を返す
+			return echoCtx.JSON(http.StatusForbidden, map[string]string{
+				"error": "アクセス権限がありません",
+			})
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが見つからない場合は 404 を返す
+			return echoCtx.JSON(http.StatusNotFound, map[string]string{
+				"error": "リソースが見つかりません",
+			})
+		}
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{ // その他のエラーは 500 を返す
+			"error": "内部サーバーエラー",
+		})
+	}
+	return echoCtx.JSON(http.StatusOK, map[string]string{ // ログ文字列を返す
+		"logs": logContent,
 	})
 }

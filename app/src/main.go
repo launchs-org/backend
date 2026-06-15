@@ -83,7 +83,7 @@ func main() {
 	// build ハンドラーを DI 組み立てする
 	buildRepo := repository.NewDeploymentBuildRepository(repository.Database)                                                                            // build リポジトリを生成する
 	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)                                                                           // build ログチャンクリポジトリを生成する
-	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, k8sClient)                                 // build サービスを生成する
+	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient)                  // build サービスを生成する
 	buildHandler := handler.NewBuildHandler(buildServiceImpl)                                                                                            // build ハンドラーを生成する
 
 	// env_var ハンドラーを DI 組み立てする
