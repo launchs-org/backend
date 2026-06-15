@@ -12,9 +12,17 @@ const (
 	BuildStatusCancelled BuildStatus = "cancelled"
 )
 
+type BuildType string
+
+const (
+	BuildTypeDockerfile BuildType = "dockerfile" // Dockerfile を使ったビルド
+	BuildTypeRailpack   BuildType = "railpack"   // Railpack を使ったビルド
+)
+
 type DeploymentBuild struct {
 	ID           string      `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
 	DeploymentID string      `gorm:"type:uuid;not null;index"`
+	BuildType    BuildType   `gorm:"type:varchar(32);not null"`           // ビルドタイプ（dockerfile / railpack）
 	Status       BuildStatus `gorm:"type:varchar(32);not null;default:'pending'"`
 
 	K8sJobName string `gorm:"type:varchar(63)"` // k8s Job 名。キャンセル時に Job を削除するために使用
