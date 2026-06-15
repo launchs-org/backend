@@ -52,6 +52,7 @@ func New(opts RouterOptions) *echo.Echo {
 
 	// build エンドポイントを登録する
 	apiGroup.POST("/deployments/:id/build", opts.BuildHandler.TriggerBuild) // ビルドトリガーエンドポイント
+	apiGroup.DELETE("/builds/:id", opts.BuildHandler.CancelBuild)           // ビルドキャンセルエンドポイント
 
 	// ingress-route エンドポイントを登録する
 	apiGroup.GET("/deployments/:id/ingress-route", opts.DeploymentHandler.GetIngressRoute)        // ingress-route 設定取得エンドポイント

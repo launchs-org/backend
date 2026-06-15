@@ -49,3 +49,34 @@ func (buildHandler *BuildHandler) TriggerBuild(echoCtx echo.Context) error {
 	}
 	return echoCtx.JSON(http.StatusCreated, buildData) // 作成したビルドレコードを返す
 }
+
+// CancelBuild は DELETE /api/v1/builds/:id のハンドラー
+func (buildHandler *BuildHandler) CancelBuild(echoCtx echo.Context) error {
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
+	buildID := echoCtx.Param("id")           // パスパラメータからビルド ID を取得する
+
+	err := buildHandler.buildService.CancelBuild(echoCtx.Request().Context(), userID, buildID) // サービスを呼び出してビルドをキャンセルする
+	if err != nil {
+		if errors.Is(err, service.ErrForbidden) { // 所有権エラーの場合は 403 を返す
+			return echoCtx.JSON(http.StatusForbidden, map[string]string{
+				"error": "アクセス権限がありません",
+			})
+		}
+		if errors.Is(err, service.ErrBuildNotCancellable) { // キャンセル不可の場合は 409 を返す
+			return echoCtx.JSON(http.StatusConflict, map[string]string{
+				"error": "ビルドはキャンセルできない状態です",
+			})
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが見つからない場合は 404 を返す
+			return echoCtx.JSON(http.StatusNotFound, map[string]string{
+				"error": "リソースが見つかりません",
+			})
+		}
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{ // その他のエラーは 500 を返す
+			"error": "内部サーバーエラー",
+		})
+	}
+	return echoCtx.JSON(http.StatusOK, map[string]string{ // キャンセル成功を返す
+		"message": "ビルドをキャンセルしました",
+	})
+}

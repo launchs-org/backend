@@ -15,9 +15,13 @@ import (
 // ErrBuildConflict はビルドが既に進行中の場合のエラー
 var ErrBuildConflict = errors.New("build already in progress")
 
+// ErrBuildNotCancellable はビルドがキャンセル不可能な状態の場合のエラー
+var ErrBuildNotCancellable = errors.New("build is not cancellable")
+
 // BuildService はビルドトリガーのビジネスロジックを定義するインターフェース
 type BuildService interface {
 	TriggerBuild(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error) // ビルドをトリガーする
+	CancelBuild(ctx context.Context, userID string, buildID string) error                                  // ビルドをキャンセルする
 }
 
 // TriggerBuildRequest は TriggerBuild のリクエスト構造体（現時点では deploymentID のみ）
@@ -146,6 +150,47 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 	}
 
 	return buildData, nil // 作成したビルドレコードを返す
+}
+
+// CancelBuild は実行中のビルドをキャンセルする
+func (svc *buildServiceImpl) CancelBuild(ctx context.Context, userID string, buildID string) error {
+	// 1. ビルドレコードを取得する
+	buildData, err := svc.buildRepo.FindByID(ctx, buildID) // ビルドレコードを取得する
+	if err != nil {
+		return err // 取得エラーを返す
+	}
+
+	// 2. 所有権チェック（Build → Deployment → Project → UserID を辿る）
+	deploymentData, err := svc.deploymentRepo.FindByID(ctx, buildData.DeploymentID) // deployment を取得する
+	if err != nil {
+		return err // 取得エラーを返す
+	}
+	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // project を取得する
+	if err != nil {
+		return err // 取得エラーを返す
+	}
+	if projectData.UserID != userID { // UserID が一致しない場合は禁止エラーを返す
+		return ErrForbidden
+	}
+
+	// 3. キャンセル可能なステータスか確認する（pending / building のみキャンセル可能）
+	if buildData.Status != models.BuildStatusPending && buildData.Status != models.BuildStatusBuilding { // 完了済み・失敗済みはキャンセル不可
+		return ErrBuildNotCancellable
+	}
+
+	// 4. k8s Job を削除する（Job 名が設定されている場合のみ）
+	if buildData.K8sJobName != "" { // Job 名が空の場合は pending 状態で Job 未作成なのでスキップする
+		if err := k8s.DeleteBuildJob(ctx, svc.k8sClient, projectData.Namespace, buildData.K8sJobName); err != nil { // k8s Job を削除する
+			return fmt.Errorf("k8s Job の削除に失敗しました: %w", err) // 削除エラーを返す
+		}
+	}
+
+	// 5. ビルドステータスを cancelled に更新する
+	if err := svc.buildRepo.UpdateStatus(ctx, buildID, models.BuildStatusCancelled); err != nil { // ステータスを更新する
+		return err // 更新エラーを返す
+	}
+
+	return nil // キャンセル成功
 }
 
 // resolveBuildType は DeploymentType からビルドタイプを解決する
