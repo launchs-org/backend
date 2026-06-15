@@ -57,6 +57,10 @@ func (mock *mockBuildRepo) UpdateBuildResult(ctx context.Context, buildID string
 	return nil // デフォルトは正常終了を返す
 }
 
+func (mock *mockBuildRepo) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 // mockLogChunkRepo は BuildLogChunkRepository のテスト用モック
 type mockLogChunkRepo struct {
 	createFn func(ctx context.Context, chunk *models.BuildLogChunk) error

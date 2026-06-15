@@ -63,25 +63,29 @@ func main() {
 		cfg.GetHarborRobotSecret(), // 管理用 robot アカウントのシークレットを設定する
 	)
 
+	// リポジトリを生成する（project・deployment ハンドラーで共有する）
+	projectRepo := repository.NewProjectRepository(repository.Database)             // project リポジトリを生成する
+	harborCredentialRepo := repository.NewHarborCredentialRepository(repository.Database) // harbor credential リポジトリを生成する
+	deploymentRepo := repository.NewDeploymentRepository(repository.Database)       // deployment リポジトリを生成する
+	ingressRouteRepo := repository.NewIngressRouteRepository(repository.Database)   // ingress_route リポジトリを生成する
+
 	// project ハンドラーを DI 組み立てする
-	projectRepo := repository.NewProjectRepository(repository.Database)                                          // project リポジトリを生成する
-	harborCredentialRepo := repository.NewHarborCredentialRepository(repository.Database)                        // harbor credential リポジトリを生成する
-	projectServiceImpl := service.NewProjectService(repository.Database, projectRepo, harborCredentialRepo, k8sClient, harborClient) // project サービスを生成する
-	projectHandler := handler.NewProjectHandler(projectServiceImpl)                                              // project ハンドラーを生成する
+	projectServiceImpl := service.NewProjectService(repository.Database, projectRepo, harborCredentialRepo, deploymentRepo, ingressRouteRepo, k8sClient, dynamicClient, harborClient) // project サービスを生成する
+	projectHandler := handler.NewProjectHandler(projectServiceImpl)                 // project ハンドラーを生成する
 
 	// deployment ハンドラーを DI 組み立てする
-	deploymentRepo := repository.NewDeploymentRepository(repository.Database)                                              // deployment リポジトリを生成する
 	serviceRepo := repository.NewServiceRepository(repository.Database)                                                    // service リポジトリを生成する
-	ingressRouteRepo := repository.NewIngressRouteRepository(repository.Database)                                          // ingress_route リポジトリを生成する
 	envVarRepo := repository.NewEnvVarRepository(repository.Database)                                                      // env_var リポジトリを生成する
 	envVarMountRepo := repository.NewEnvVarMountRepository(repository.Database)                                            // env_var_mount リポジトリを生成する
-	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo)      // deployment サービスを生成する
 	applyHistoryRepo := repository.NewApplyHistoryRepository(repository.Database)                                          // apply_history リポジトリを生成する
-	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, envVarRepo, envVarMountRepo, repository.NewVolumeRepository(repository.Database), repository.NewVolumeMountRepository(repository.Database)) // apply サービスを生成する
+	volumeRepo := repository.NewVolumeRepository(repository.Database)                                                      // volume リポジトリを生成する
+	volumeMountRepo := repository.NewVolumeMountRepository(repository.Database)                                            // volume_mount リポジトリを生成する
+	buildRepo := repository.NewDeploymentBuildRepository(repository.Database)                                              // build リポジトリを生成する
+	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, envVarMountRepo, volumeMountRepo, k8sClient, dynamicClient) // deployment サービスを生成する
+	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, envVarRepo, envVarMountRepo, volumeRepo, volumeMountRepo) // apply サービスを生成する
 	deploymentHandler := handler.NewDeploymentHandler(deploymentServiceImpl, applyServiceImpl)                             // deployment ハンドラーを生成する
 
 	// build ハンドラーを DI 組み立てする
-	buildRepo := repository.NewDeploymentBuildRepository(repository.Database)                                                                            // build リポジトリを生成する
 	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)                                                                           // build ログチャンクリポジトリを生成する
 	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient)                  // build サービスを生成する
 	buildHandler := handler.NewBuildHandler(buildServiceImpl)                                                                                            // build ハンドラーを生成する
@@ -92,8 +96,6 @@ func main() {
 	envVarHandler := handler.NewEnvVarHandler(envVarServiceImpl, envVarMountServiceImpl)                                                       // env_var ハンドラーを生成する
 
 	// volume ハンドラーを DI 組み立てする
-	volumeRepo := repository.NewVolumeRepository(repository.Database)                                                              // volume リポジトリを生成する
-	volumeMountRepo := repository.NewVolumeMountRepository(repository.Database)                                                   // volume_mount リポジトリを生成する
 	volumeServiceImpl := service.NewVolumeService(repository.Database, volumeRepo, volumeMountRepo, deploymentRepo, projectRepo)  // volume サービスを生成する
 	volumeHandler := handler.NewVolumeHandler(volumeServiceImpl)                                                                  // volume ハンドラーを生成する
 
@@ -109,7 +111,7 @@ func main() {
 		go k8s.WatchPVCs(ctx, k8sClient, volumeRepo)                                    // PVC の Bound 状態を監視して DB を自動更新する
 		go k8s.WatchNamespaces(ctx, k8sClient, projectRepo)                             // Namespace の削除イベントを監視して DB の Project レコードを削除する
 		go k8s.WatchBuildJobs(ctx, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo) // Build Job の完了・失敗を監視して DB を自動更新する
-		k8s.WatchDeployments(ctx, k8sClient, deploymentRepo)                            // k8s Deployment の状態変化を監視して DB を自動更新する
+		k8s.WatchDeployments(ctx, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo) // k8s Deployment の状態変化を監視して DB を自動更新する
 	})
 
 	// ルーターを生成してサーバーを起動する

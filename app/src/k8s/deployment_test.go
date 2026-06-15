@@ -1,12 +1,18 @@
 package k8s
 
 import (
+	"app/models"
+	"app/repository"
 	"context"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes/fake"
+	"gorm.io/datatypes"
+	"gorm.io/gorm"
+	"time"
 )
 
 // テスト用の Deployment manifest を生成するヘルパー関数
@@ -94,5 +100,241 @@ func TestDeleteDeployment_正常にDeploymentが削除される(t *testing.T) {
 	_, err = fakeClient.AppsV1().Deployments("test-namespace").Get(ctx, "delete-deploy", metav1.GetOptions{}) // 削除後に取得を試みる
 	if err == nil {
 		t.Fatal("削除後も Deployment が存在しています") // 削除後に取得できた場合はテスト失敗とする
+	}
+}
+
+// mockDeploymentRepo は DeploymentRepository のテスト用モック
+type mockDeploymentRepo struct {
+	deletedIDs       []string                                                                     // 削除された deployment ID を記録する
+	findByIDFunc     func(ctx context.Context, deploymentID string) (*models.Deployment, error)   // FindByID のモック関数
+	updatedK8sStatus datatypes.JSON                                                               // UpdateK8sStatus で更新された値を記録する
+}
+
+func (mock *mockDeploymentRepo) Create(ctx context.Context, deployment *models.Deployment) error {
+	return nil // 使用しない
+}
+func (mock *mockDeploymentRepo) FindByID(ctx context.Context, deploymentID string) (*models.Deployment, error) {
+	if mock.findByIDFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.findByIDFunc(ctx, deploymentID)
+	}
+	return &models.Deployment{ID: deploymentID, Status: models.DeploymentStatusRunning}, nil // デフォルトは running を返す
+}
+func (mock *mockDeploymentRepo) FindByIDForUpdate(ctx context.Context, tx *gorm.DB, deploymentID string) (*models.Deployment, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockDeploymentRepo) FindAllByProjectID(ctx context.Context, projectID string) ([]models.Deployment, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockDeploymentRepo) Save(ctx context.Context, deployment *models.Deployment) error {
+	return nil // 使用しない
+}
+func (mock *mockDeploymentRepo) Updates(ctx context.Context, tx *gorm.DB, deployment *models.Deployment, values map[string]interface{}) error {
+	return nil // 使用しない
+}
+func (mock *mockDeploymentRepo) UpdateAppStatus(ctx context.Context, deploymentID string, appStatus models.AppStatus) error {
+	return nil // 使用しない
+}
+func (mock *mockDeploymentRepo) UpdateK8sStatus(ctx context.Context, deploymentID string, k8sStatus datatypes.JSON) error {
+	mock.updatedK8sStatus = k8sStatus // 更新された k8s_status を記録する
+	return nil
+}
+func (mock *mockDeploymentRepo) UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error {
+	return nil // 使用しない
+}
+func (mock *mockDeploymentRepo) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error {
+	return nil // 使用しない
+}
+func (mock *mockDeploymentRepo) Delete(ctx context.Context, deploymentID string) error {
+	mock.deletedIDs = append(mock.deletedIDs, deploymentID) // 削除 ID を記録する
+	return nil
+}
+
+// mockEnvVarMountRepoForDeployment は EnvVarMountRepository のテスト用モック
+type mockEnvVarMountRepoForDeployment struct {
+	findAllFunc func(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error)
+	deletedIDs  []string // 削除されたマウント ID を記録する
+}
+
+func (mock *mockEnvVarMountRepoForDeployment) Create(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error {
+	return nil // 使用しない
+}
+func (mock *mockEnvVarMountRepoForDeployment) FindByID(ctx context.Context, mountID string) (*models.EnvVarMount, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockEnvVarMountRepoForDeployment) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error) {
+	if mock.findAllFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.findAllFunc(ctx, deploymentID)
+	}
+	return []*models.EnvVarMount{}, nil // デフォルトは空スライスを返す
+}
+func (mock *mockEnvVarMountRepoForDeployment) FindByDeploymentIDAndEnvVarID(ctx context.Context, deploymentID string, envVarID string) (*models.EnvVarMount, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockEnvVarMountRepoForDeployment) Delete(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error {
+	mock.deletedIDs = append(mock.deletedIDs, mount.ID) // 削除 ID を記録する
+	return nil
+}
+
+// mockVolumeMountRepoForDeployment は VolumeMountRepository のテスト用モック
+type mockVolumeMountRepoForDeployment struct{}
+
+func (mock *mockVolumeMountRepoForDeployment) Create(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount) error {
+	return nil // 使用しない
+}
+func (mock *mockVolumeMountRepoForDeployment) FindByID(ctx context.Context, mountID string) (*models.VolumeMount, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockVolumeMountRepoForDeployment) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.VolumeMount, error) {
+	return []*models.VolumeMount{}, nil // 空スライスを返す
+}
+func (mock *mockVolumeMountRepoForDeployment) FindByDeploymentIDAndMountPath(ctx context.Context, deploymentID string, mountPath string) (*models.VolumeMount, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockVolumeMountRepoForDeployment) UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount, status models.VolumeMountStatus) error {
+	return nil // 使用しない
+}
+func (mock *mockVolumeMountRepoForDeployment) Delete(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount) error {
+	return nil // 使用しない
+}
+
+// mockApplyHistoryRepoForDeployment は ApplyHistoryRepository のテスト用モック
+type mockApplyHistoryRepoForDeployment struct {
+	deletedDeploymentIDs []string // DeleteAllByDeploymentID で削除された ID を記録する
+}
+
+func (mock *mockApplyHistoryRepoForDeployment) Create(ctx context.Context, tx *gorm.DB, history *models.ApplyHistory) error {
+	return nil // 使用しない
+}
+func (mock *mockApplyHistoryRepoForDeployment) UpdateStatus(ctx context.Context, tx *gorm.DB, history *models.ApplyHistory, status models.ApplyStatus) error {
+	return nil // 使用しない
+}
+func (mock *mockApplyHistoryRepoForDeployment) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.ApplyHistory, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockApplyHistoryRepoForDeployment) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error {
+	mock.deletedDeploymentIDs = append(mock.deletedDeploymentIDs, deploymentID) // 削除 ID を記録する
+	return nil
+}
+
+// mockBuildRepoForDeployment は DeploymentBuildRepository のテスト用モック
+type mockBuildRepoForDeployment struct {
+	deletedDeploymentIDs []string // DeleteAllByDeploymentID で削除された ID を記録する
+}
+
+func (mock *mockBuildRepoForDeployment) Create(ctx context.Context, build *models.DeploymentBuild) error {
+	return nil // 使用しない
+}
+func (mock *mockBuildRepoForDeployment) FindByID(ctx context.Context, buildID string) (*models.DeploymentBuild, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockBuildRepoForDeployment) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]models.DeploymentBuild, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockBuildRepoForDeployment) FindAllBuilding(ctx context.Context) ([]models.DeploymentBuild, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockBuildRepoForDeployment) UpdateStatus(ctx context.Context, buildID string, status models.BuildStatus) error {
+	return nil // 使用しない
+}
+func (mock *mockBuildRepoForDeployment) UpdateK8sJobName(ctx context.Context, buildID string, jobName string) error {
+	return nil // 使用しない
+}
+func (mock *mockBuildRepoForDeployment) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, finishedAt time.Time) error {
+	return nil // 使用しない
+}
+func (mock *mockBuildRepoForDeployment) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error {
+	mock.deletedDeploymentIDs = append(mock.deletedDeploymentIDs, deploymentID) // 削除 ID を記録する
+	return nil
+}
+
+// 型アサーションで interface を実装していることを確認する
+var _ repository.DeploymentRepository = &mockDeploymentRepo{}
+var _ repository.EnvVarMountRepository = &mockEnvVarMountRepoForDeployment{}
+var _ repository.VolumeMountRepository = &mockVolumeMountRepoForDeployment{}
+var _ repository.ApplyHistoryRepository = &mockApplyHistoryRepoForDeployment{}
+var _ repository.DeploymentBuildRepository = &mockBuildRepoForDeployment{}
+
+// TestHandleDeploymentEvent_statusがdeletingの場合に連鎖削除される はDB status が deleting の時にDeletedイベントで連鎖削除されることを確認する
+func TestHandleDeploymentEvent_statusがdeletingの場合に連鎖削除される(t *testing.T) {
+	deploymentID := "test-deployment-id" // テスト対象の deployment ID を定義する
+	deploymentRepo := &mockDeploymentRepo{
+		findByIDFunc: func(ctx context.Context, id string) (*models.Deployment, error) {
+			return &models.Deployment{ID: id, Status: models.DeploymentStatusDeleting}, nil // status が deleting の deployment を返す
+		},
+	}
+	envVarMountMount := &models.EnvVarMount{ID: "mount-1"}        // テスト用の EnvVarMount を用意する
+	envVarMountRepo := &mockEnvVarMountRepoForDeployment{          // env_var_mount リポジトリのモックを生成する
+		findAllFunc: func(ctx context.Context, id string) ([]*models.EnvVarMount, error) {
+			return []*models.EnvVarMount{envVarMountMount}, nil // 1件の EnvVarMount を返す
+		},
+	}
+	volumeMountRepo := &mockVolumeMountRepoForDeployment{}         // volume_mount リポジトリのモックを生成する
+	applyHistoryRepo := &mockApplyHistoryRepoForDeployment{}       // apply_history リポジトリのモックを生成する
+	buildRepo := &mockBuildRepoForDeployment{}                     // build リポジトリのモックを生成する
+
+	k8sDeployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "test-deploy",
+			Labels: map[string]string{"launchs.org/deployment-id": deploymentID}, // deployment-id ラベルを設定する
+		},
+	}
+	event := watch.Event{Type: watch.Deleted, Object: k8sDeployment} // Deleted イベントを生成する
+
+	ctx := context.Background()                                                                                              // テスト用コンテキストを生成する
+	handleDeploymentEvent(ctx, event, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo) // イベントを処理する
+
+	// Deployment レコードが削除されたことを確認する
+	if len(deploymentRepo.deletedIDs) != 1 || deploymentRepo.deletedIDs[0] != deploymentID {
+		t.Errorf("期待する削除 deploymentID: %s, 実際: %v", deploymentID, deploymentRepo.deletedIDs)
+	}
+	// EnvVarMount レコードが削除されたことを確認する
+	if len(envVarMountRepo.deletedIDs) != 1 || envVarMountRepo.deletedIDs[0] != "mount-1" {
+		t.Errorf("期待する削除 EnvVarMount ID: mount-1, 実際: %v", envVarMountRepo.deletedIDs)
+	}
+	// ApplyHistory が全件削除されたことを確認する
+	if len(applyHistoryRepo.deletedDeploymentIDs) != 1 || applyHistoryRepo.deletedDeploymentIDs[0] != deploymentID {
+		t.Errorf("期待する削除 deploymentID: %s, 実際: %v", deploymentID, applyHistoryRepo.deletedDeploymentIDs)
+	}
+	// DeploymentBuild が全件削除されたことを確認する
+	if len(buildRepo.deletedDeploymentIDs) != 1 || buildRepo.deletedDeploymentIDs[0] != deploymentID {
+		t.Errorf("期待する削除 deploymentID: %s, 実際: %v", deploymentID, buildRepo.deletedDeploymentIDs)
+	}
+}
+
+// TestHandleDeploymentEvent_statusがdeletingでない場合はk8sStatusをdeletedに更新する はDB status が deleting 以外の時にk8s_statusのみ更新されることを確認する
+func TestHandleDeploymentEvent_statusがdeletingでない場合はk8sStatusをdeletedに更新する(t *testing.T) {
+	deploymentID := "test-deployment-id-2" // テスト対象の deployment ID を定義する
+	deploymentRepo := &mockDeploymentRepo{
+		findByIDFunc: func(ctx context.Context, id string) (*models.Deployment, error) {
+			return &models.Deployment{ID: id, Status: models.DeploymentStatusRunning}, nil // status が running の deployment を返す（意図しない削除）
+		},
+	}
+	envVarMountRepo := &mockEnvVarMountRepoForDeployment{} // env_var_mount リポジトリのモックを生成する
+	volumeMountRepo := &mockVolumeMountRepoForDeployment{} // volume_mount リポジトリのモックを生成する
+	applyHistoryRepo := &mockApplyHistoryRepoForDeployment{} // apply_history リポジトリのモックを生成する
+	buildRepo := &mockBuildRepoForDeployment{}               // build リポジトリのモックを生成する
+
+	k8sDeployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "test-deploy-2",
+			Labels: map[string]string{"launchs.org/deployment-id": deploymentID}, // deployment-id ラベルを設定する
+		},
+	}
+	event := watch.Event{Type: watch.Deleted, Object: k8sDeployment} // Deleted イベントを生成する
+
+	ctx := context.Background()                                                                                              // テスト用コンテキストを生成する
+	handleDeploymentEvent(ctx, event, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo) // イベントを処理する
+
+	// Deployment レコードが削除されていないことを確認する
+	if len(deploymentRepo.deletedIDs) != 0 {
+		t.Errorf("Deployment が削除されるべきではありませんが削除されました: %v", deploymentRepo.deletedIDs)
+	}
+	// k8s_status が {"deleted":true} に更新されていることを確認する
+	if string(deploymentRepo.updatedK8sStatus) != `{"deleted":true}` {
+		t.Errorf("期待する k8s_status: {\"deleted\":true}, 実際: %s", string(deploymentRepo.updatedK8sStatus))
+	}
+	// 連鎖削除が実行されていないことを確認する
+	if len(applyHistoryRepo.deletedDeploymentIDs) != 0 {
+		t.Errorf("ApplyHistory が削除されるべきではありませんが削除されました: %v", applyHistoryRepo.deletedDeploymentIDs)
 	}
 }
