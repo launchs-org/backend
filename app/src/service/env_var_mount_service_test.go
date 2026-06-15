@@ -97,6 +97,10 @@ func (mock *mockDeploymentRepositoryForMount) UpdatePendingImageURL(ctx context.
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *mockDeploymentRepositoryForMount) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 func (mock *mockDeploymentRepositoryForMount) Delete(ctx context.Context, deploymentID string) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
 }

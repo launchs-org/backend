@@ -19,6 +19,7 @@ type DeploymentRepository interface {
 	UpdateAppStatus(ctx context.Context, deploymentID string, appStatus models.AppStatus) error                   // app_status を更新する
 	UpdateK8sStatus(ctx context.Context, deploymentID string, k8sStatus datatypes.JSON) error                     // k8s_status を更新する
 	UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error                        // ビルド成功時に pending_image_url を更新する
+	UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error               // GitHub push 時に pending_github_commit_sha を更新する
 	Delete(ctx context.Context, deploymentID string) error                                                        // deployment を削除する
 }
 
@@ -102,6 +103,18 @@ func (repo *deploymentRepositoryImpl) UpdateK8sStatus(ctx context.Context, deplo
 func (repo *deploymentRepositoryImpl) UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error {
 	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Update("pending_image_url", imageURL) // pending_image_url を更新する
 	if result.Error != nil {                                                                                                             // エラーが発生した場合
+		return result.Error // エラーを返す
+	}
+	if result.RowsAffected == 0 { // 更新対象が存在しない場合
+		return gorm.ErrRecordNotFound // レコードなしエラーを返す
+	}
+	return nil // 正常終了
+}
+
+// UpdatePendingGithubCommitSHA は deploymentID に対応する deployment の pending_github_commit_sha を更新する
+func (repo *deploymentRepositoryImpl) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error {
+	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Update("pending_github_commit_sha", commitSHA) // pending_github_commit_sha を更新する
+	if result.Error != nil {                                                                                                                       // エラーが発生した場合
 		return result.Error // エラーを返す
 	}
 	if result.RowsAffected == 0 { // 更新対象が存在しない場合
