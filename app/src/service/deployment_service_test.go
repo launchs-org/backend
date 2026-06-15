@@ -77,6 +77,10 @@ func (mock *mockDeploymentRepository) Delete(ctx context.Context, deploymentID s
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *mockDeploymentRepository) FindAllRunning(ctx context.Context) ([]models.Deployment, error) {
+	return nil, nil // テストでは使用しないためデフォルト nil を返す
+}
+
 // mockIngressRouteRepository は IngressRouteRepository のテスト用モック実装
 type mockIngressRouteRepository struct {
 	createFunc              func(ctx context.Context, ingressRoute *models.IngressRoute) error

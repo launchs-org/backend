@@ -4,7 +4,9 @@ import (
 	"app/models"
 	"app/repository"
 	"context"
+	"sync"
 	"testing"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,7 +14,6 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
-	"time"
 )
 
 // テスト用の Deployment manifest を生成するヘルパー関数
@@ -124,6 +125,9 @@ func (mock *mockDeploymentRepo) FindByIDForUpdate(ctx context.Context, tx *gorm.
 }
 func (mock *mockDeploymentRepo) FindAllByProjectID(ctx context.Context, projectID string) ([]models.Deployment, error) {
 	return nil, nil // 使用しない
+}
+func (mock *mockDeploymentRepo) FindAllRunning(ctx context.Context) ([]models.Deployment, error) {
+	return nil, nil // テストでは使用しない
 }
 func (mock *mockDeploymentRepo) Save(ctx context.Context, deployment *models.Deployment) error {
 	return nil // 使用しない
@@ -247,30 +251,97 @@ func (mock *mockBuildRepoForDeployment) DeleteAllByDeploymentID(ctx context.Cont
 	return nil
 }
 
+// mockPodLogChunkRepoForDeployment は PodLogChunkRepository のテスト用モック
+type mockPodLogChunkRepoForDeployment struct{}
+
+func (mock *mockPodLogChunkRepoForDeployment) Create(ctx context.Context, chunk *models.PodLogChunk) error {
+	return nil // 使用しない
+}
+func (mock *mockPodLogChunkRepoForDeployment) FindByDeploymentID(ctx context.Context, deploymentID string) ([]models.PodLogChunk, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockPodLogChunkRepoForDeployment) FindByDeploymentIDSince(ctx context.Context, deploymentID string, since time.Time) ([]models.PodLogChunk, error) {
+	return nil, nil // 使用しない
+}
+
+// mockProjectRepoForDeployment は ProjectRepository のテスト用モック
+type mockProjectRepoForDeployment struct{}
+
+func (mock *mockProjectRepoForDeployment) Create(ctx context.Context, tx *gorm.DB, project *models.Project) error {
+	return nil // 使用しない
+}
+func (mock *mockProjectRepoForDeployment) FindByID(ctx context.Context, tx *gorm.DB, projectID string) (*models.Project, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockProjectRepoForDeployment) FindByIDNoTx(ctx context.Context, projectID string) (*models.Project, error) {
+	return &models.Project{ID: projectID, Namespace: "test-namespace"}, nil // テスト用 project を返す
+}
+func (mock *mockProjectRepoForDeployment) FindAllByUserID(ctx context.Context, userID string) ([]*models.Project, error) {
+	return nil, nil // 使用しない
+}
+func (mock *mockProjectRepoForDeployment) UpdateStatus(ctx context.Context, tx *gorm.DB, project *models.Project, status models.ProjectStatus) error {
+	return nil // 使用しない
+}
+func (mock *mockProjectRepoForDeployment) Save(ctx context.Context, project *models.Project) error {
+	return nil // 使用しない
+}
+func (mock *mockProjectRepoForDeployment) Delete(ctx context.Context, tx *gorm.DB, project *models.Project) error {
+	return nil // 使用しない
+}
+func (mock *mockProjectRepoForDeployment) DeleteNoTx(ctx context.Context, project *models.Project) error {
+	return nil // 使用しない
+}
+func (mock *mockProjectRepoForDeployment) FindByNamespace(ctx context.Context, namespace string) (*models.Project, error) {
+	return nil, nil // 使用しない
+}
+
 // 型アサーションで interface を実装していることを確認する
 var _ repository.DeploymentRepository = &mockDeploymentRepo{}
 var _ repository.EnvVarMountRepository = &mockEnvVarMountRepoForDeployment{}
 var _ repository.VolumeMountRepository = &mockVolumeMountRepoForDeployment{}
 var _ repository.ApplyHistoryRepository = &mockApplyHistoryRepoForDeployment{}
 var _ repository.DeploymentBuildRepository = &mockBuildRepoForDeployment{}
+var _ repository.PodLogChunkRepository = &mockPodLogChunkRepoForDeployment{}
+var _ repository.ProjectRepository = &mockProjectRepoForDeployment{}
+
+// newTestHandleDeploymentEventArgs はテスト用のデフォルト引数を返すヘルパー関数
+func newTestHandleDeploymentEventArgs() (
+	fakeK8sClient *fake.Clientset,
+	deploymentRepo *mockDeploymentRepo,
+	envVarMountRepo *mockEnvVarMountRepoForDeployment,
+	volumeMountRepo *mockVolumeMountRepoForDeployment,
+	applyHistoryRepo *mockApplyHistoryRepoForDeployment,
+	buildRepo *mockBuildRepoForDeployment,
+	podLogChunkRepo *mockPodLogChunkRepoForDeployment,
+	projectRepo *mockProjectRepoForDeployment,
+	streamCancelMap map[string]context.CancelFunc,
+	streamCancelMu *sync.Mutex,
+) {
+	fakeK8sClient = fake.NewSimpleClientset()               // fake k8s クライアントを生成する
+	deploymentRepo = &mockDeploymentRepo{}                  // deployment リポジトリのモックを生成する
+	envVarMountRepo = &mockEnvVarMountRepoForDeployment{}   // env_var_mount リポジトリのモックを生成する
+	volumeMountRepo = &mockVolumeMountRepoForDeployment{}   // volume_mount リポジトリのモックを生成する
+	applyHistoryRepo = &mockApplyHistoryRepoForDeployment{} // apply_history リポジトリのモックを生成する
+	buildRepo = &mockBuildRepoForDeployment{}               // build リポジトリのモックを生成する
+	podLogChunkRepo = &mockPodLogChunkRepoForDeployment{}   // pod_log_chunk リポジトリのモックを生成する
+	projectRepo = &mockProjectRepoForDeployment{}           // project リポジトリのモックを生成する
+	streamCancelMap = make(map[string]context.CancelFunc)   // ストリームキャンセルマップを生成する
+	streamCancelMu = &sync.Mutex{}                          // ミューテックスを生成する
+	return
+}
 
 // TestHandleDeploymentEvent_statusがdeletingの場合に連鎖削除される はDB status が deleting の時にDeletedイベントで連鎖削除されることを確認する
 func TestHandleDeploymentEvent_statusがdeletingの場合に連鎖削除される(t *testing.T) {
 	deploymentID := "test-deployment-id" // テスト対象の deployment ID を定義する
-	deploymentRepo := &mockDeploymentRepo{
-		findByIDFunc: func(ctx context.Context, id string) (*models.Deployment, error) {
-			return &models.Deployment{ID: id, Status: models.DeploymentStatusDeleting}, nil // status が deleting の deployment を返す
-		},
+	fakeK8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, podLogChunkRepo, projectRepo, streamCancelMap, streamCancelMu := newTestHandleDeploymentEventArgs()
+
+	deploymentRepo.findByIDFunc = func(ctx context.Context, id string) (*models.Deployment, error) {
+		return &models.Deployment{ID: id, Status: models.DeploymentStatusDeleting}, nil // status が deleting の deployment を返す
 	}
-	envVarMountMount := &models.EnvVarMount{ID: "mount-1"}        // テスト用の EnvVarMount を用意する
-	envVarMountRepo := &mockEnvVarMountRepoForDeployment{          // env_var_mount リポジトリのモックを生成する
-		findAllFunc: func(ctx context.Context, id string) ([]*models.EnvVarMount, error) {
-			return []*models.EnvVarMount{envVarMountMount}, nil // 1件の EnvVarMount を返す
-		},
+	envVarMountMount := &models.EnvVarMount{ID: "mount-1"} // テスト用の EnvVarMount を用意する
+	envVarMountRepo.findAllFunc = func(ctx context.Context, id string) ([]*models.EnvVarMount, error) {
+		return []*models.EnvVarMount{envVarMountMount}, nil // 1件の EnvVarMount を返す
 	}
-	volumeMountRepo := &mockVolumeMountRepoForDeployment{}         // volume_mount リポジトリのモックを生成する
-	applyHistoryRepo := &mockApplyHistoryRepoForDeployment{}       // apply_history リポジトリのモックを生成する
-	buildRepo := &mockBuildRepoForDeployment{}                     // build リポジトリのモックを生成する
 
 	k8sDeployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -280,8 +351,8 @@ func TestHandleDeploymentEvent_statusがdeletingの場合に連鎖削除され�
 	}
 	event := watch.Event{Type: watch.Deleted, Object: k8sDeployment} // Deleted イベントを生成する
 
-	ctx := context.Background()                                                                                              // テスト用コンテキストを生成する
-	handleDeploymentEvent(ctx, event, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo) // イベントを処理する
+	ctx := context.Background()                                                                                                                                                                                                         // テスト用コンテキストを生成する
+	handleDeploymentEvent(ctx, event, fakeK8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, podLogChunkRepo, projectRepo, streamCancelMap, streamCancelMu) // イベントを処理する
 
 	// Deployment レコードが削除されたことを確認する
 	if len(deploymentRepo.deletedIDs) != 1 || deploymentRepo.deletedIDs[0] != deploymentID {
@@ -304,15 +375,11 @@ func TestHandleDeploymentEvent_statusがdeletingの場合に連鎖削除され�
 // TestHandleDeploymentEvent_statusがdeletingでない場合はk8sStatusをdeletedに更新する はDB status が deleting 以外の時にk8s_statusのみ更新されることを確認する
 func TestHandleDeploymentEvent_statusがdeletingでない場合はk8sStatusをdeletedに更新する(t *testing.T) {
 	deploymentID := "test-deployment-id-2" // テスト対象の deployment ID を定義する
-	deploymentRepo := &mockDeploymentRepo{
-		findByIDFunc: func(ctx context.Context, id string) (*models.Deployment, error) {
-			return &models.Deployment{ID: id, Status: models.DeploymentStatusRunning}, nil // status が running の deployment を返す（意図しない削除）
-		},
+	fakeK8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, podLogChunkRepo, projectRepo, streamCancelMap, streamCancelMu := newTestHandleDeploymentEventArgs()
+
+	deploymentRepo.findByIDFunc = func(ctx context.Context, id string) (*models.Deployment, error) {
+		return &models.Deployment{ID: id, Status: models.DeploymentStatusRunning}, nil // status が running の deployment を返す（意図しない削除）
 	}
-	envVarMountRepo := &mockEnvVarMountRepoForDeployment{} // env_var_mount リポジトリのモックを生成する
-	volumeMountRepo := &mockVolumeMountRepoForDeployment{} // volume_mount リポジトリのモックを生成する
-	applyHistoryRepo := &mockApplyHistoryRepoForDeployment{} // apply_history リポジトリのモックを生成する
-	buildRepo := &mockBuildRepoForDeployment{}               // build リポジトリのモックを生成する
 
 	k8sDeployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -322,8 +389,8 @@ func TestHandleDeploymentEvent_statusがdeletingでない場合はk8sStatusをde
 	}
 	event := watch.Event{Type: watch.Deleted, Object: k8sDeployment} // Deleted イベントを生成する
 
-	ctx := context.Background()                                                                                              // テスト用コンテキストを生成する
-	handleDeploymentEvent(ctx, event, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo) // イベントを処理する
+	ctx := context.Background()                                                                                                                                                                                                         // テスト用コンテキストを生成する
+	handleDeploymentEvent(ctx, event, fakeK8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, podLogChunkRepo, projectRepo, streamCancelMap, streamCancelMu) // イベントを処理する
 
 	// Deployment レコードが削除されていないことを確認する
 	if len(deploymentRepo.deletedIDs) != 0 {

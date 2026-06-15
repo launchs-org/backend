@@ -4,10 +4,15 @@ import (
 	"app/logger"
 	"app/models"
 	"app/repository"
+	"bufio"
 	"context"
 	"encoding/json"
+	"strings"
+	"sync"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -34,7 +39,32 @@ func DeleteDeployment(ctx context.Context, client kubernetes.Interface, namespac
 }
 
 // WatchDeployments は全 Namespace の Deployment 変化を監視して DB を自動更新する
-func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository) {
+func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository) {
+	// 実行中のログストリームを管理するマップ（deploymentID → cancelFunc）
+	streamCancelMap := make(map[string]context.CancelFunc) // ストリームキャンセル関数を管理するマップ
+	var streamCancelMu sync.Mutex                          // マップへの排他アクセスのためのミューテックス
+
+	// 起動時リカバリ: running 状態の Deployment に対してログストリームを再開する
+	runningList, recoveryErr := deploymentRepo.FindAllRunning(ctx) // running 状態の deployment を全件取得する
+	if recoveryErr != nil {
+		logger.PrintErr("WatchDeployments: running Deployment の取得に失敗しました: " + recoveryErr.Error()) // エラーをログ出力する
+	} else {
+		for deploymentIndex := range runningList { // 各 Deployment に対してログストリームを再開する
+			deploymentData := &runningList[deploymentIndex]                                            // ポインタを取得する
+			projectData, projectErr := projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID)        // プロジェクトを取得して namespace を解決する
+			if projectErr != nil {
+				logger.PrintErr("WatchDeployments: namespace 解決に失敗しました（deploymentID=" + deploymentData.ID + "）: " + projectErr.Error()) // エラーをログ出力する
+				continue                                                                                                                        // 次の Deployment に進む
+			}
+			streamCtx, streamCancel := context.WithCancel(ctx)      // ストリームのコンテキストを生成する
+			streamCancelMu.Lock()                                    // マップへの排他アクセスを開始する
+			streamCancelMap[deploymentData.ID] = streamCancel        // キャンセル関数をマップに登録する
+			streamCancelMu.Unlock()                                  // マップへの排他アクセスを終了する
+			go streamAndSavePodLogs(streamCtx, k8sClient, podLogChunkRepo, deploymentData.ID, projectData.Namespace, deploymentData.Name) // ログストリームを goroutine で再開する
+			logger.Println("WatchDeployments: 起動時リカバリでログストリームを再開しました: " + deploymentData.ID)                                            // リカバリログを出力する
+		}
+	}
+
 	for {
 		if ctx.Err() != nil { // コンテキストがキャンセルされた場合は終了する
 			return
@@ -50,14 +80,14 @@ func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deplo
 
 		logger.Println("WatchDeployments: 監視を開始しました") // 監視開始ログを出力する
 
-		watchLoop(ctx, watcher, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo) // イベントループを実行する
+		watchLoop(ctx, watcher, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, podLogChunkRepo, projectRepo, streamCancelMap, &streamCancelMu) // イベントループを実行する
 
 		logger.Println("WatchDeployments: Watch チャネルが終了しました。再接続します") // 再接続ログを出力する
 	}
 }
 
 // watchLoop は Watch イベントチャネルを処理するループ
-func watchLoop(ctx context.Context, watcher watch.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository) {
+func watchLoop(ctx context.Context, watcher watch.Interface, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]context.CancelFunc, streamCancelMu *sync.Mutex) {
 	defer watcher.Stop() // 終了時に Watch を停止する
 
 	for {
@@ -68,13 +98,13 @@ func watchLoop(ctx context.Context, watcher watch.Interface, deploymentRepo repo
 			if !ok { // チャネルが閉じられた場合はループを抜ける
 				return
 			}
-			handleDeploymentEvent(ctx, event, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo) // イベントを処理する
+			handleDeploymentEvent(ctx, event, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, podLogChunkRepo, projectRepo, streamCancelMap, streamCancelMu) // イベントを処理する
 		}
 	}
 }
 
 // handleDeploymentEvent は Deployment の Watch イベントを処理する
-func handleDeploymentEvent(ctx context.Context, event watch.Event, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository) {
+func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]context.CancelFunc, streamCancelMu *sync.Mutex) {
 	k8sDeployment, ok := event.Object.(*appsv1.Deployment) // イベントオブジェクトを Deployment にキャストする
 	if !ok {                                                 // キャストに失敗した場合はスキップする
 		return
@@ -87,6 +117,14 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, deploymentRep
 
 	switch event.Type {
 	case watch.Deleted: // Deleted イベントの場合は DB の status を確認して処理を分岐する
+		// 実行中のログストリームをキャンセルする
+		streamCancelMu.Lock()                              // マップへの排他アクセスを開始する
+		if streamCancel, streamExists := streamCancelMap[deploymentID]; streamExists { // ストリームが実行中の場合
+			streamCancel()                     // ストリームをキャンセルする
+			delete(streamCancelMap, deploymentID) // マップから削除する
+		}
+		streamCancelMu.Unlock() // マップへの排他アクセスを終了する
+
 		deploymentData, err := deploymentRepo.FindByID(ctx, deploymentID) // DB から deployment を取得して status を確認する
 		if err != nil {
 			logger.PrintErr("WatchDeployments: Deployment 取得に失敗しました: " + err.Error()) // エラーをログ出力する
@@ -156,7 +194,163 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, deploymentRep
 			return
 		}
 		logger.Println("WatchDeployments: app_status と k8s_status を更新しました: " + deploymentID) // 更新ログを出力する
+
+		if appStatus == models.AppStatusRunning { // app_status が running の場合はログストリームを開始または継続する
+			streamCancelMu.Lock()                                       // マップへの排他アクセスを開始する
+			_, streamRunning := streamCancelMap[deploymentID]           // ストリームが既に実行中か確認する
+			streamCancelMu.Unlock()                                     // マップへの排他アクセスを終了する
+
+			if !streamRunning { // ストリームが未起動の場合のみ開始する
+				deploymentData, deploymentErr := deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得して projectID を解決する
+				if deploymentErr != nil {
+					logger.PrintErr("WatchDeployments: Deployment 取得に失敗しました（deploymentID=" + deploymentID + "）: " + deploymentErr.Error()) // エラーをログ出力する
+					return
+				}
+				projectData, projectErr := projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // project を取得して namespace を解決する
+				if projectErr != nil {
+					logger.PrintErr("WatchDeployments: Project 取得に失敗しました（deploymentID=" + deploymentID + "）: " + projectErr.Error()) // エラーをログ出力する
+					return
+				}
+				streamCtx, streamCancel := context.WithCancel(ctx)      // ストリームのコンテキストを生成する
+				streamCancelMu.Lock()                                    // マップへの排他アクセスを開始する
+				streamCancelMap[deploymentID] = streamCancel             // キャンセル関数をマップに登録する
+				streamCancelMu.Unlock()                                  // マップへの排他アクセスを終了する
+				go streamAndSavePodLogs(streamCtx, k8sClient, podLogChunkRepo, deploymentID, projectData.Namespace, k8sDeployment.Name) // ログストリームを goroutine で開始する
+				logger.Println("WatchDeployments: Podログストリームを開始しました: " + deploymentID)                                               // 開始ログを出力する
+			}
+		} else { // running 以外の場合は実行中のログストリームをキャンセルする
+			streamCancelMu.Lock()                                               // マップへの排他アクセスを開始する
+			if streamCancel, streamExists := streamCancelMap[deploymentID]; streamExists { // ストリームが実行中の場合
+				streamCancel()                        // ストリームをキャンセルする
+				delete(streamCancelMap, deploymentID) // マップから削除する
+				logger.Println("WatchDeployments: Podログストリームを停止しました: " + deploymentID) // 停止ログを出力する
+			}
+			streamCancelMu.Unlock() // マップへの排他アクセスを終了する
+		}
 	}
+}
+
+// streamAndSavePodLogs は app=deploymentName ラベルの Pod のログをリアルタイムで取得し、chunk 単位で DB に保存する
+func streamAndSavePodLogs(ctx context.Context, k8sClient kubernetes.Interface, podLogChunkRepo repository.PodLogChunkRepository, deploymentID, namespace, deploymentName string) {
+	logCh := collectDeploymentPodLogs(ctx, k8sClient, namespace, deploymentName) // Pod のログをチャンネルで取得する
+
+	ticker := time.NewTicker(3 * time.Second) // 3秒ごとにバッファをフラッシュするタイマーを生成する
+	defer ticker.Stop()                       // 終了時にタイマーを停止する
+
+	var buf strings.Builder // ログバッファを生成する
+
+	flush := func() { // バッファをフラッシュして DB に保存する関数
+		if buf.Len() == 0 { // バッファが空の場合はスキップする
+			return
+		}
+		chunk := &models.PodLogChunk{ // ログチャンクレコードを生成する
+			DeploymentID: deploymentID, // デプロイメントIDを設定する
+			Content:      buf.String(), // バッファの内容を設定する
+		}
+		if err := podLogChunkRepo.Create(ctx, chunk); err != nil { // DB に保存する
+			logger.PrintErr("WatchDeployments: Podログチャンク保存に失敗しました（deploymentID=" + deploymentID + "）: " + err.Error()) // エラーをログ出力する
+		}
+		buf.Reset() // バッファをリセットする
+	}
+
+	for {
+		select {
+		case line, ok := <-logCh: // ログ行を受信する
+			if !ok { // チャネルが閉じられた場合はフラッシュして終了する
+				flush()
+				return
+			}
+			buf.WriteString(line + "\n") // ログ行をバッファに追記する
+			if buf.Len() > 4096 {        // バッファが 4096 バイトを超えたら即時フラッシュする
+				flush()
+			}
+		case <-ticker.C: // 3秒タイマーが発火したらフラッシュする
+			flush()
+		case <-ctx.Done(): // コンテキストがキャンセルされた場合は終了する
+			return
+		}
+	}
+}
+
+// collectDeploymentPodLogs は app=deploymentName ラベルの Pod を取得し、全コンテナのログをチャンネルで返す
+func collectDeploymentPodLogs(ctx context.Context, k8sClient kubernetes.Interface, namespace, deploymentName string) <-chan string {
+	logCh := make(chan string, 100) // ログ行を送るチャンネルを生成する
+
+	go func() {
+		defer close(logCh) // 終了時にチャンネルをクローズする
+
+		podList, err := waitForDeploymentPod(ctx, k8sClient, namespace, deploymentName) // Pod が起動するまで待機する
+		if err != nil {
+			if ctx.Err() == nil { // コンテキストキャンセル以外のエラーをログ出力する
+				logger.PrintErr("WatchDeployments: Pod 取得に失敗しました（deploymentName=" + deploymentName + "）: " + err.Error()) // エラーをログ出力する
+			}
+			return
+		}
+
+		for podIndex := range podList { // 各 Pod のログを取得する
+			pod := &podList[podIndex]
+
+			containerNames := make([]string, 0) // コンテナ名一覧を初期化する
+			for containerIndex := range pod.Spec.Containers {
+				containerNames = append(containerNames, pod.Spec.Containers[containerIndex].Name) // container 名を追加する
+			}
+
+			for _, containerName := range containerNames { // 各コンテナのログをストリームする
+				if err := streamPodContainerLog(ctx, k8sClient, namespace, pod.Name, containerName, logCh); err != nil { // コンテナのログをストリームする
+					if ctx.Err() == nil { // コンテキストキャンセル以外のエラーをログ出力する
+						logger.PrintErr("WatchDeployments: コンテナログ取得に失敗しました（pod=" + pod.Name + ", container=" + containerName + "）: " + err.Error()) // エラーをログ出力する
+					}
+				}
+			}
+		}
+	}()
+
+	return logCh // チャンネルを返す
+}
+
+// waitForDeploymentPod は app=deploymentName ラベルの Pod が少なくとも1つ起動するまで最大 60 秒待機して返す
+func waitForDeploymentPod(ctx context.Context, k8sClient kubernetes.Interface, namespace, deploymentName string) ([]corev1.Pod, error) {
+	labelSelector := "app=" + deploymentName // app ラベルでフィルタするセレクタを生成する
+	for retryIndex := range make([]struct{}, 60) { // 最大 60 回リトライする
+		_ = retryIndex
+		podList, err := k8sClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: labelSelector, // app ラベルで Pod を絞り込む
+		}) // Pod 一覧を取得する
+		if err == nil && len(podList.Items) > 0 { // Pod が1つ以上存在する場合は返す
+			return podList.Items, nil
+		}
+		select {
+		case <-ctx.Done(): // コンテキストがキャンセルされた場合は終了する
+			return nil, ctx.Err()
+		case <-time.After(time.Second): // 1秒待機してリトライする
+		}
+	}
+	return nil, nil // タイムアウトしても nil を返して呼び出し元に任せる（Pod なしは正常系として扱う）
+}
+
+// streamPodContainerLog は指定した Pod/コンテナのログを Follow で読み取り、logCh へ送信する
+func streamPodContainerLog(ctx context.Context, k8sClient kubernetes.Interface, namespace, podName, containerName string, logCh chan<- string) error {
+	logOptions := &corev1.PodLogOptions{
+		Container: containerName, // 対象コンテナ名を設定する
+		Follow:    true,          // ログをリアルタイムで追従する
+	}
+	req := k8sClient.CoreV1().Pods(namespace).GetLogs(podName, logOptions) // ログ取得リクエストを生成する
+	stream, err := req.Stream(ctx)                                          // ログストリームを開始する
+	if err != nil {
+		return err // ストリーム開始エラーを返す
+	}
+	defer stream.Close() // 終了時にストリームをクローズする
+
+	scanner := bufio.NewScanner(stream) // スキャナを生成する
+	for scanner.Scan() {                // ログを1行ずつ読み取る
+		line := scanner.Text() // ログ行を取得する
+		select {
+		case logCh <- line: // ログ行をチャンネルへ送信する
+		case <-ctx.Done(): // コンテキストがキャンセルされた場合は終了する
+			return ctx.Err()
+		}
+	}
+	return nil // 正常終了を返す
 }
 
 // marshalDeploymentStatus は appsv1.DeploymentStatus を datatypes.JSON にシリアライズする

@@ -105,6 +105,10 @@ func (mock *mockDeploymentRepositoryForMount) Delete(ctx context.Context, deploy
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *mockDeploymentRepositoryForMount) FindAllRunning(ctx context.Context) ([]models.Deployment, error) {
+	return nil, nil // テストでは使用しないためデフォルト nil を返す
+}
+
 // TestListEnvVarMounts_正常に一覧が取得される は ListEnvVarMounts がマウント設定一覧を返すことを確認する
 func TestListEnvVarMounts_正常に一覧が取得される(t *testing.T) {
 	expectedList := []*models.EnvVarMount{
