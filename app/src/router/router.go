@@ -15,6 +15,7 @@ type RouterOptions struct {
 	DeploymentHandler  *handler.DeploymentHandler  // deployment ハンドラー
 	EnvVarHandler      *handler.EnvVarHandler      // env_var ハンドラー
 	VolumeHandler      *handler.VolumeHandler      // volume ハンドラー
+	BuildHandler       *handler.BuildHandler       // build ハンドラー
 }
 
 // New はミドルウェアとルーティングを設定した Echo インスタンスを返す
@@ -48,6 +49,11 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.GET("/deployments/:id/apply-histories", opts.DeploymentHandler.ListApplyHistories)   // apply 履歴一覧取得エンドポイント
 	apiGroup.GET("/deployments/:id/service", opts.DeploymentHandler.GetService)                   // service 設定取得エンドポイント
 	apiGroup.PUT("/deployments/:id/service", opts.DeploymentHandler.UpdateService)                // service 設定更新エンドポイント
+
+	// build エンドポイントを登録する
+	apiGroup.POST("/deployments/:id/build", opts.BuildHandler.TriggerBuild) // ビルドトリガーエンドポイント
+	apiGroup.DELETE("/builds/:id", opts.BuildHandler.CancelBuild)           // ビルドキャンセルエンドポイント
+	apiGroup.GET("/builds/:id/logs", opts.BuildHandler.GetBuildLogs)        // ビルドログ取得エンドポイント
 
 	// ingress-route エンドポイントを登録する
 	apiGroup.GET("/deployments/:id/ingress-route", opts.DeploymentHandler.GetIngressRoute)        // ingress-route 設定取得エンドポイント

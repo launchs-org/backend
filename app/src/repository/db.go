@@ -66,6 +66,7 @@ func AutoMigrate() error {
 		&models.HarborCredential{},
 		&models.Deployment{},
 		&models.DeploymentBuild{},
+		&models.BuildLogChunk{}, // ビルドログをchunk単位で保存するテーブル
 		&models.ApplyHistory{},
 		&models.DeploymentWebhook{},
 		&models.Service{},
