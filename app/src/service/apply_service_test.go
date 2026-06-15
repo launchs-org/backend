@@ -373,6 +373,10 @@ func (mock *applyHistoryMockDeploymentRepository) UpdateK8sStatus(ctx context.Co
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *applyHistoryMockDeploymentRepository) UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 func (mock *applyHistoryMockDeploymentRepository) Delete(ctx context.Context, deploymentID string) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
 }

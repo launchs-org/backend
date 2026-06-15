@@ -93,6 +93,10 @@ func (mock *mockDeploymentRepositoryForMount) UpdateK8sStatus(ctx context.Contex
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *mockDeploymentRepositoryForMount) UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 func (mock *mockDeploymentRepositoryForMount) Delete(ctx context.Context, deploymentID string) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
 }

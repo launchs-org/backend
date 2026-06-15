@@ -4,6 +4,7 @@ import (
 	"app/models"
 	"context"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 	batchv1 "k8s.io/api/batch/v1"
@@ -47,6 +48,14 @@ func (mock *mockDeploymentBuildRepository) UpdateK8sJobName(ctx context.Context,
 		return mock.updateK8sJobNameFunc(ctx, buildID, jobName)
 	}
 	return nil // デフォルトは nil を返す
+}
+
+func (mock *mockDeploymentBuildRepository) FindAllBuilding(ctx context.Context) ([]models.DeploymentBuild, error) {
+	return nil, nil // テストでは使用しないためデフォルト nil を返す
+}
+
+func (mock *mockDeploymentBuildRepository) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, finishedAt time.Time) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
 // mockHarborCredentialRepository は HarborCredentialRepository のテスト用モック実装（build service テスト用）

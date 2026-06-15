@@ -18,6 +18,7 @@ type DeploymentRepository interface {
 	Updates(ctx context.Context, tx *gorm.DB, deployment *models.Deployment, values map[string]interface{}) error // deployment を map で部分更新する
 	UpdateAppStatus(ctx context.Context, deploymentID string, appStatus models.AppStatus) error                   // app_status を更新する
 	UpdateK8sStatus(ctx context.Context, deploymentID string, k8sStatus datatypes.JSON) error                     // k8s_status を更新する
+	UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error                        // ビルド成功時に pending_image_url を更新する
 	Delete(ctx context.Context, deploymentID string) error                                                        // deployment を削除する
 }
 
@@ -89,6 +90,18 @@ func (repo *deploymentRepositoryImpl) UpdateAppStatus(ctx context.Context, deplo
 func (repo *deploymentRepositoryImpl) UpdateK8sStatus(ctx context.Context, deploymentID string, k8sStatus datatypes.JSON) error {
 	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Update("k8s_status", k8sStatus) // k8s_status を更新する
 	if result.Error != nil {                                                                                                       // エラーが発生した場合
+		return result.Error // エラーを返す
+	}
+	if result.RowsAffected == 0 { // 更新対象が存在しない場合
+		return gorm.ErrRecordNotFound // レコードなしエラーを返す
+	}
+	return nil // 正常終了
+}
+
+// UpdatePendingImageURL は deploymentID に対応する deployment の pending_image_url を更新する
+func (repo *deploymentRepositoryImpl) UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error {
+	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Update("pending_image_url", imageURL) // pending_image_url を更新する
+	if result.Error != nil {                                                                                                             // エラーが発生した場合
 		return result.Error // エラーを返す
 	}
 	if result.RowsAffected == 0 { // 更新対象が存在しない場合
