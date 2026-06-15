@@ -2,12 +2,15 @@ package service
 
 import (
 	"app/k8s"
+	"app/logger"
 	"app/models"
 	"app/repository"
 	"context"
 	"fmt"
+	"sync"
 
 	k8sclient "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/dynamic"
 
 	"gorm.io/gorm"
 )
@@ -33,11 +36,14 @@ type UpdateProjectRequest struct {
 
 // projectServiceImpl は ProjectService の実装
 type projectServiceImpl struct {
-	db                          *gorm.DB                                   // データベース接続（トランザクション開始に使用する）
-	projectRepo                 repository.ProjectRepository               // project リポジトリ
-	harborCredentialRepo        repository.HarborCredentialRepository      // harbor credential リポジトリ
-	k8sClient                   k8sclient.Interface                        // k8s クライアント
-	harborClient                *k8s.HarborClient                          // Harbor API クライアント（管理用 robot）
+	db                   *gorm.DB                              // データベース接続（トランザクション開始に使用する）
+	projectRepo          repository.ProjectRepository          // project リポジトリ
+	harborCredentialRepo repository.HarborCredentialRepository // harbor credential リポジトリ
+	deploymentRepo       repository.DeploymentRepository       // deployment リポジトリ
+	ingressRouteRepo     repository.IngressRouteRepository     // ingress_route リポジトリ
+	k8sClient            k8sclient.Interface                   // k8s クライアント
+	dynamicClient        dynamic.Interface                     // dynamic クライアント（IngressRoute 削除用）
+	harborClient         *k8s.HarborClient                     // Harbor API クライアント（管理用 robot）
 }
 
 // NewProjectService は ProjectService の実装を返す
@@ -45,14 +51,20 @@ func NewProjectService(
 	db *gorm.DB,
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
+	deploymentRepo repository.DeploymentRepository,
+	ingressRouteRepo repository.IngressRouteRepository,
 	k8sClient k8sclient.Interface,
+	dynamicClient dynamic.Interface,
 	harborClient *k8s.HarborClient,
 ) ProjectService {
 	return &projectServiceImpl{
 		db:                   db,                   // DB 接続を注入する
 		projectRepo:          projectRepo,          // project リポジトリを注入する
 		harborCredentialRepo: harborCredentialRepo, // harbor credential リポジトリを注入する
+		deploymentRepo:       deploymentRepo,       // deployment リポジトリを注入する
+		ingressRouteRepo:     ingressRouteRepo,     // ingress_route リポジトリを注入する
 		k8sClient:            k8sClient,            // k8s クライアントを注入する
+		dynamicClient:        dynamicClient,        // dynamic クライアントを注入する
 		harborClient:         harborClient,         // Harbor クライアントを注入する
 	}
 }
@@ -150,50 +162,122 @@ func (svc *projectServiceImpl) UpdateProject(ctx context.Context, projectID stri
 	return projectData, nil // 更新後の project を返す
 }
 
-// DeleteProject は project を deleting 状態にし、Harbor project 削除・k8s namespace 削除・DB 削除を実行する
+// DeleteProject は project を deleting 状態にし、配下の全 Deployment を削除してから k8s Namespace を削除する
+// Namespace 削除後は WatchNamespaces goroutine が Project レコードを DB から削除する
 func (svc *projectServiceImpl) DeleteProject(ctx context.Context, projectID string) error {
-	// DB トランザクションを開始する
-	return svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var projectData *models.Project                                           // goroutine に渡すため外側で宣言する
+	var deploymentList []models.Deployment                                    // goroutine に渡すため外側で宣言する
+	var credentialData *models.HarborCredential                               // goroutine に渡すため外側で宣言する
+
+	// トランザクション内で project status を deleting に更新し、全 Deployment を deleting に変更する
+	err := svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// project を取得する
-		projectData, err := svc.projectRepo.FindByID(ctx, tx, projectID)
+		fetchedProject, err := svc.projectRepo.FindByID(ctx, tx, projectID)
 		if err != nil {
 			return fmt.Errorf("project の取得に失敗しました: %w", err)
 		}
+		projectData = fetchedProject // 外側の変数に格納する
 
-		// status を deleting に更新する
+		// project status を deleting に更新する
 		if err := svc.projectRepo.UpdateStatus(ctx, tx, projectData, models.ProjectStatusDeleting); err != nil {
 			return fmt.Errorf("project ステータスの更新に失敗しました: %w", err)
 		}
 
-		// DB から project 専用の Harbor 認証情報を取得する
-		credentialData, err := svc.harborCredentialRepo.FindByProjectID(ctx, tx, projectID)
+		// 配下の全 Deployment を取得する
+		fetchedDeployments, err := svc.deploymentRepo.FindAllByProjectID(ctx, projectID)
+		if err != nil {
+			return fmt.Errorf("deployment 一覧の取得に失敗しました: %w", err)
+		}
+		deploymentList = fetchedDeployments // 外側の変数に格納する
+
+		// 全 Deployment の status を deleting に更新する
+		for deploymentIndex := range deploymentList {
+			deploymentList[deploymentIndex].Status = models.DeploymentStatusDeleting // ステータスを deleting に変更する
+			if err := svc.deploymentRepo.Save(ctx, &deploymentList[deploymentIndex]); err != nil {
+				return fmt.Errorf("deployment ステータスの更新に失敗しました (id=%s): %w", deploymentList[deploymentIndex].ID, err)
+			}
+		}
+
+		// Harbor 認証情報を取得する（goroutine 内で Harbor project 削除に使用する）
+		fetchedCredential, err := svc.harborCredentialRepo.FindByProjectID(ctx, tx, projectID)
 		if err != nil {
 			return fmt.Errorf("harbor credential の取得に失敗しました: %w", err)
 		}
-
-		// project 作成時に生成した専用 robot の認証情報で Harbor project を削除する
-		if err := svc.harborClient.DeleteHarborProject(ctx, projectData.Name, k8s.HarborRobotCredential{
-			Name:   credentialData.RobotName,   // DB に保存した robot 名を使う
-			Secret: credentialData.RobotSecret, // DB に保存したシークレットを使う
-		}); err != nil {
-			return fmt.Errorf("harbor project の削除に失敗しました: %w", err)
-		}
-
-		// k8s namespace を削除する
-		if err := k8s.DeleteNamespace(ctx, svc.k8sClient, projectData.Namespace); err != nil {
-			return fmt.Errorf("k8s namespace の削除に失敗しました: %w", err)
-		}
-
-		// HarborCredential レコードを削除する
-		if err := svc.harborCredentialRepo.DeleteByProjectID(ctx, tx, projectID); err != nil {
-			return fmt.Errorf("harbor credential レコードの削除に失敗しました: %w", err)
-		}
-
-		// Project レコードを削除する
-		if err := svc.projectRepo.Delete(ctx, tx, projectData); err != nil {
-			return fmt.Errorf("project レコードの削除に失敗しました: %w", err)
-		}
+		credentialData = fetchedCredential // 外側の変数に格納する
 
 		return nil
 	})
+	if err != nil {
+		return err // トランザクションエラーを返す
+	}
+
+	// 全 Deployment の k8s リソース削除と Namespace 削除を goroutine で非同期に実行する
+	// Namespace 削除後は WatchNamespaces が Project レコードを DB から削除する
+	go svc.deleteProjectResources(projectData, deploymentList, credentialData)
+
+	return nil // HTTP レスポンスはここで返し、削除処理はバックグラウンドで継続する
+}
+
+// deleteProjectResources は全 Deployment の k8s リソースを削除し、完了後に k8s Namespace を削除する
+func (svc *projectServiceImpl) deleteProjectResources(projectData *models.Project, deploymentList []models.Deployment, credentialData *models.HarborCredential) {
+	bgCtx := context.Background() // HTTP リクエストのコンテキストとは独立した context を使う
+
+	// 全 Deployment の k8s リソースを並行削除する
+	var waitGroup sync.WaitGroup // 全 Deployment 削除完了を待つ WaitGroup
+	for deploymentIndex := range deploymentList {
+		waitGroup.Add(1)
+		go func(deploymentData models.Deployment) {
+			defer waitGroup.Done()
+			svc.deleteDeploymentK8sResources(bgCtx, projectData.Namespace, deploymentData) // k8s リソースを削除する
+		}(deploymentList[deploymentIndex])
+	}
+	waitGroup.Wait() // 全 Deployment の k8s リソース削除完了を待つ
+
+	// Harbor project を削除する
+	if err := svc.harborClient.DeleteHarborProject(bgCtx, projectData.Name, k8s.HarborRobotCredential{
+		Name:   credentialData.RobotName,   // DB に保存した robot 名を使う
+		Secret: credentialData.RobotSecret, // DB に保存したシークレットを使う
+	}); err != nil {
+		logger.PrintErr("deleteProjectResources: harbor project の削除に失敗しました: " + err.Error())
+	}
+
+	// HarborCredential レコードを削除する
+	if err := svc.harborCredentialRepo.DeleteByProjectID(bgCtx, svc.db, projectData.ID); err != nil {
+		logger.PrintErr("deleteProjectResources: harbor credential レコードの削除に失敗しました: " + err.Error())
+	}
+
+	// k8s Namespace を削除する（削除後は WatchNamespaces goroutine が Project レコードを DB から削除する）
+	if err := k8s.DeleteNamespace(bgCtx, svc.k8sClient, projectData.Namespace); err != nil {
+		logger.PrintErr("deleteProjectResources: k8s namespace の削除に失敗しました: " + err.Error())
+	}
+
+	logger.Println("deleteProjectResources: namespace 削除完了 (projectID=" + projectData.ID + ", namespace=" + projectData.Namespace + ")")
+}
+
+// deleteDeploymentK8sResources は 1 つの Deployment に紐づく k8s リソースをすべて削除する
+func (svc *projectServiceImpl) deleteDeploymentK8sResources(ctx context.Context, namespace string, deploymentData models.Deployment) {
+	// k8s Deployment リソースを削除する（存在しない場合もあるため無視して継続する）
+	if err := k8s.DeleteDeployment(ctx, svc.k8sClient, namespace, deploymentData.Name); err != nil {
+		_ = err
+	}
+	// k8s Service リソースを削除する
+	if err := k8s.DeleteService(ctx, svc.k8sClient, namespace, deploymentData.Name); err != nil {
+		_ = err
+	}
+	// k8s ConfigMap を削除する
+	if err := k8s.DeleteConfigMap(ctx, svc.k8sClient, namespace, deploymentData.Name); err != nil {
+		_ = err
+	}
+	// k8s Secret を削除する
+	if err := k8s.DeleteSecret(ctx, svc.k8sClient, namespace, deploymentData.Name); err != nil {
+		_ = err
+	}
+	// IngressRoute が存在する場合は削除する
+	ingressRouteData, ingressRouteErr := svc.ingressRouteRepo.FindByDeploymentID(ctx, deploymentData.ID)
+	if ingressRouteErr == nil && ingressRouteData != nil {
+		if err := k8s.DeleteIngressRoute(ctx, svc.dynamicClient, namespace, ingressRouteData.ID); err != nil { // k8s IngressRoute を削除する
+			_ = err
+		}
+	}
+
 }

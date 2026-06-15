@@ -63,16 +63,18 @@ func main() {
 		cfg.GetHarborRobotSecret(), // 管理用 robot アカウントのシークレットを設定する
 	)
 
+	// リポジトリを生成する（project・deployment ハンドラーで共有する）
+	projectRepo := repository.NewProjectRepository(repository.Database)             // project リポジトリを生成する
+	harborCredentialRepo := repository.NewHarborCredentialRepository(repository.Database) // harbor credential リポジトリを生成する
+	deploymentRepo := repository.NewDeploymentRepository(repository.Database)       // deployment リポジトリを生成する
+	ingressRouteRepo := repository.NewIngressRouteRepository(repository.Database)   // ingress_route リポジトリを生成する
+
 	// project ハンドラーを DI 組み立てする
-	projectRepo := repository.NewProjectRepository(repository.Database)                                          // project リポジトリを生成する
-	harborCredentialRepo := repository.NewHarborCredentialRepository(repository.Database)                        // harbor credential リポジトリを生成する
-	projectServiceImpl := service.NewProjectService(repository.Database, projectRepo, harborCredentialRepo, k8sClient, harborClient) // project サービスを生成する
-	projectHandler := handler.NewProjectHandler(projectServiceImpl)                                              // project ハンドラーを生成する
+	projectServiceImpl := service.NewProjectService(repository.Database, projectRepo, harborCredentialRepo, deploymentRepo, ingressRouteRepo, k8sClient, dynamicClient, harborClient) // project サービスを生成する
+	projectHandler := handler.NewProjectHandler(projectServiceImpl)                 // project ハンドラーを生成する
 
 	// deployment ハンドラーを DI 組み立てする
-	deploymentRepo := repository.NewDeploymentRepository(repository.Database)                                              // deployment リポジトリを生成する
 	serviceRepo := repository.NewServiceRepository(repository.Database)                                                    // service リポジトリを生成する
-	ingressRouteRepo := repository.NewIngressRouteRepository(repository.Database)                                          // ingress_route リポジトリを生成する
 	envVarRepo := repository.NewEnvVarRepository(repository.Database)                                                      // env_var リポジトリを生成する
 	envVarMountRepo := repository.NewEnvVarMountRepository(repository.Database)                                            // env_var_mount リポジトリを生成する
 	applyHistoryRepo := repository.NewApplyHistoryRepository(repository.Database)                                          // apply_history リポジトリを生成する
