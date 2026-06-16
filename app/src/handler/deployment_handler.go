@@ -51,6 +51,11 @@ func (deploymentHandler *DeploymentHandler) CreateDeployment(echoCtx echo.Contex
 
 	deploymentData, err := deploymentHandler.deploymentService.CreateDeployment(echoCtx.Request().Context(), requestBody) // サービスを呼び出して deployment を作成する
 	if err != nil {                                                                                                         // エラーが発生した場合
+		if errors.Is(err, service.ErrDeploymentQuotaExceeded) { // デプロイメント数が上限に達している場合は 400 を返す
+			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "デプロイメント数の上限に達しています",
+			})
+		}
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -99,6 +104,11 @@ func (deploymentHandler *DeploymentHandler) UpdateDeployment(echoCtx echo.Contex
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが禁止されています",
+			})
+		}
+		if errors.Is(err, service.ErrReplicasQuotaExceeded) { // レプリカ数が上限を超えている場合は 400 を返す
+			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "レプリカ数の上限を超えています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
@@ -317,6 +327,11 @@ func (deploymentHandler *DeploymentHandler) ApplyDeployment(echoCtx echo.Context
 		if errors.Is(err, service.ErrAlreadyApplying) { // apply 中の場合は 409 を返す
 			return echoCtx.JSON(http.StatusConflict, map[string]string{
 				"error": "apply が実行中です",
+			})
+		}
+		if errors.Is(err, service.ErrReplicasQuotaExceeded) { // レプリカ数が上限を超えている場合は 400 を返す
+			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "レプリカ数の上限を超えています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // deployment が存在しない場合は 404 を返す

@@ -41,6 +41,7 @@ type projectServiceImpl struct {
 	harborCredentialRepo repository.HarborCredentialRepository // harbor credential リポジトリ
 	deploymentRepo       repository.DeploymentRepository       // deployment リポジトリ
 	ingressRouteRepo     repository.IngressRouteRepository     // ingress_route リポジトリ
+	userQuotaRepo        repository.UserQuotaRepository        // user_quota リポジトリ（Quotaチェック用）
 	k8sClient            k8sclient.Interface                   // k8s クライアント
 	dynamicClient        dynamic.Interface                     // dynamic クライアント（IngressRoute 削除用）
 	harborClient         *k8s.HarborClient                     // Harbor API クライアント（管理用 robot）
@@ -53,6 +54,7 @@ func NewProjectService(
 	harborCredentialRepo repository.HarborCredentialRepository,
 	deploymentRepo repository.DeploymentRepository,
 	ingressRouteRepo repository.IngressRouteRepository,
+	userQuotaRepo repository.UserQuotaRepository,
 	k8sClient k8sclient.Interface,
 	dynamicClient dynamic.Interface,
 	harborClient *k8s.HarborClient,
@@ -63,6 +65,7 @@ func NewProjectService(
 		harborCredentialRepo: harborCredentialRepo, // harbor credential リポジトリを注入する
 		deploymentRepo:       deploymentRepo,       // deployment リポジトリを注入する
 		ingressRouteRepo:     ingressRouteRepo,     // ingress_route リポジトリを注入する
+		userQuotaRepo:        userQuotaRepo,        // user_quota リポジトリを注入する
 		k8sClient:            k8sClient,            // k8s クライアントを注入する
 		dynamicClient:        dynamicClient,        // dynamic クライアントを注入する
 		harborClient:         harborClient,         // Harbor クライアントを注入する
@@ -72,6 +75,10 @@ func NewProjectService(
 // CreateProject は Project を作成し、Harbor project・robot account と k8s namespace を同時に作成する
 // 外部リソース作成失敗時は補償処理で作成済みリソースを削除する
 func (svc *projectServiceImpl) CreateProject(ctx context.Context, userID string, req CreateProjectRequest) (*models.Project, error) {
+	if err := CheckProjectQuota(ctx, svc.userQuotaRepo, userID); err != nil { // プロジェクト数のQuotaチェックを行う
+		return nil, err // Quota超過エラーを返す
+	}
+
 	var createdProject *models.Project
 
 	// DB トランザクションを開始する

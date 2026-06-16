@@ -86,6 +86,7 @@ type deploymentServiceImpl struct {
 	ingressRouteRepo repository.IngressRouteRepository // ingress_route リポジトリ
 	envVarMountRepo  repository.EnvVarMountRepository  // env_var_mount リポジトリ
 	volumeMountRepo  repository.VolumeMountRepository  // volume_mount リポジトリ
+	userQuotaRepo    repository.UserQuotaRepository    // user_quota リポジトリ（Quotaチェック用）
 	k8sClient        k8sclient.Interface               // k8s クライアント（リソース削除用）
 	dynamicClient    dynamic.Interface                 // dynamic クライアント（IngressRoute 削除用）
 }
@@ -98,6 +99,7 @@ func NewDeploymentService(
 	ingressRouteRepo repository.IngressRouteRepository,
 	envVarMountRepo repository.EnvVarMountRepository,
 	volumeMountRepo repository.VolumeMountRepository,
+	userQuotaRepo repository.UserQuotaRepository,
 	k8sClient k8sclient.Interface,
 	dynamicClient dynamic.Interface,
 ) DeploymentService {
@@ -108,6 +110,7 @@ func NewDeploymentService(
 		ingressRouteRepo: ingressRouteRepo, // ingress_route リポジトリを注入する
 		envVarMountRepo:  envVarMountRepo,  // env_var_mount リポジトリを注入する
 		volumeMountRepo:  volumeMountRepo,  // volume_mount リポジトリを注入する
+		userQuotaRepo:    userQuotaRepo,    // user_quota リポジトリを注入する
 		k8sClient:        k8sClient,        // k8s クライアントを注入する
 		dynamicClient:    dynamicClient,    // dynamic クライアントを注入する
 	}
@@ -120,6 +123,14 @@ func (svc *deploymentServiceImpl) ListDeployments(ctx context.Context, projectID
 
 // CreateDeployment は Deployment レコードと Service レコードを作成する
 func (svc *deploymentServiceImpl) CreateDeployment(ctx context.Context, req CreateDeploymentRequest) (*models.Deployment, error) {
+	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, req.ProjectID) // project を取得してuserIDを解決する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	if err := CheckDeploymentQuota(ctx, svc.userQuotaRepo, projectData.UserID); err != nil { // デプロイメント数のQuotaチェックを行う
+		return nil, err // Quota超過エラーを返す
+	}
+
 	// デフォルト値を設定する
 	if req.InstanceSize == "" {
 		req.InstanceSize = "small" // インスタンスサイズのデフォルトを設定する
@@ -188,6 +199,12 @@ func (svc *deploymentServiceImpl) UpdateDeployment(ctx context.Context, userID s
 	}
 	if err := svc.checkOwnership(ctx, userID, deploymentData.ProjectID); err != nil { // 所有権を確認する
 		return nil, err
+	}
+
+	if req.Replicas != nil { // replicas が指定されている場合のみQuotaチェックを行う
+		if err := CheckReplicasQuota(ctx, svc.userQuotaRepo, userID, *req.Replicas); err != nil { // レプリカ数のQuotaチェックを行う
+			return nil, err // Quota超過エラーを返す
+		}
 	}
 
 	// 送られてきたフィールドのみ pending_*** に書き込む

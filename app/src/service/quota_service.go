@@ -4,7 +4,21 @@ import (
 	"app/models"
 	"app/repository"
 	"context"
+	"errors"
+	"fmt"
 )
+
+// ErrProjectQuotaExceeded はプロジェクト数が上限に達している場合のエラー
+var ErrProjectQuotaExceeded = errors.New("project quota exceeded")
+
+// ErrDeploymentQuotaExceeded はデプロイメント数が上限に達している場合のエラー
+var ErrDeploymentQuotaExceeded = errors.New("deployment quota exceeded")
+
+// ErrReplicasQuotaExceeded はレプリカ数が上限を超えている場合のエラー
+var ErrReplicasQuotaExceeded = errors.New("replicas quota exceeded")
+
+// ErrVolumeQuotaExceeded はボリューム容量が上限に達している場合のエラー
+var ErrVolumeQuotaExceeded = errors.New("volume quota exceeded")
 
 // QuotaService は quota 取得・更新のビジネスロジックを定義するインターフェース
 type QuotaService interface {
@@ -126,4 +140,64 @@ func buildUpdateMap(req UpdateQuotaRequest) map[string]interface{} {
 		updates["max_volume_mb"] = *req.MaxVolumeMB // ボリューム上限を更新対象に追加する
 	}
 	return updates // 更新マップを返す
+}
+
+// CheckProjectQuota はユーザーのプロジェクト数が上限に達していないか確認する
+func CheckProjectQuota(ctx context.Context, userQuotaRepo repository.UserQuotaRepository, userID string) error {
+	quotaData, err := userQuotaRepo.GetOrCreate(ctx, userID) // quota を取得する
+	if err != nil {
+		return fmt.Errorf("quota 取得エラー: %w", err) // 取得エラーを返す
+	}
+	currentProjects, err := userQuotaRepo.CountProjects(ctx, userID) // 現在のプロジェクト数を集計する
+	if err != nil {
+		return fmt.Errorf("プロジェクト数集計エラー: %w", err) // 集計エラーを返す
+	}
+	if currentProjects >= quotaData.MaxProjects { // 上限に達している場合はエラーを返す
+		return ErrProjectQuotaExceeded // プロジェクト数超過エラーを返す
+	}
+	return nil // チェック通過を返す
+}
+
+// CheckDeploymentQuota はユーザーのデプロイメント数が上限に達していないか確認する
+func CheckDeploymentQuota(ctx context.Context, userQuotaRepo repository.UserQuotaRepository, userID string) error {
+	quotaData, err := userQuotaRepo.GetOrCreate(ctx, userID) // quota を取得する
+	if err != nil {
+		return fmt.Errorf("quota 取得エラー: %w", err) // 取得エラーを返す
+	}
+	currentDeployments, err := userQuotaRepo.CountDeployments(ctx, userID) // 現在のデプロイメント数を集計する
+	if err != nil {
+		return fmt.Errorf("デプロイメント数集計エラー: %w", err) // 集計エラーを返す
+	}
+	if currentDeployments >= quotaData.MaxDeployments { // 上限に達している場合はエラーを返す
+		return ErrDeploymentQuotaExceeded // デプロイメント数超過エラーを返す
+	}
+	return nil // チェック通過を返す
+}
+
+// CheckReplicasQuota はレプリカ数が上限を超えていないか確認する
+func CheckReplicasQuota(ctx context.Context, userQuotaRepo repository.UserQuotaRepository, userID string, replicas int32) error {
+	quotaData, err := userQuotaRepo.GetOrCreate(ctx, userID) // quota を取得する
+	if err != nil {
+		return fmt.Errorf("quota 取得エラー: %w", err) // 取得エラーを返す
+	}
+	if int(replicas) > quotaData.MaxReplicasPerDeployment { // 上限を超えている場合はエラーを返す
+		return ErrReplicasQuotaExceeded // レプリカ数超過エラーを返す
+	}
+	return nil // チェック通過を返す
+}
+
+// CheckVolumeQuota はユーザーのボリューム使用量が上限に達していないか確認する
+func CheckVolumeQuota(ctx context.Context, userQuotaRepo repository.UserQuotaRepository, userID string, additionalMB int) error {
+	quotaData, err := userQuotaRepo.GetOrCreate(ctx, userID) // quota を取得する
+	if err != nil {
+		return fmt.Errorf("quota 取得エラー: %w", err) // 取得エラーを返す
+	}
+	currentVolumeMB, err := userQuotaRepo.SumVolumeMB(ctx, userID) // 現在のボリューム使用量を集計する
+	if err != nil {
+		return fmt.Errorf("ボリューム使用量集計エラー: %w", err) // 集計エラーを返す
+	}
+	if currentVolumeMB+additionalMB > quotaData.MaxVolumeMB { // 追加後に上限を超える場合はエラーを返す
+		return ErrVolumeQuotaExceeded // ボリューム容量超過エラーを返す
+	}
+	return nil // チェック通過を返す
 }

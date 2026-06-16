@@ -116,7 +116,7 @@ func TestListVolumes_正常に一覧が取得される_service(t *testing.T) {
 		},
 	}
 
-	svc := NewVolumeService(nil, volumeRepo, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo) // サービスを生成する（db は未使用）
+	svc := NewVolumeService(nil, volumeRepo, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}) // サービスを生成する（db は未使用）
 
 	result, err := svc.ListVolumes(context.Background(), "test-user-id", "project-id-1") // 一覧を取得する
 	if err != nil {
@@ -136,7 +136,7 @@ func TestListVolumes_他ユーザーはErrForbiddenを返す_service(t *testing.
 		},
 	}
 
-	svc := NewVolumeService(nil, volumeRepo, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo) // サービスを生成する
+	svc := NewVolumeService(nil, volumeRepo, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}) // サービスを生成する
 
 	_, err := svc.ListVolumes(context.Background(), "other-user-id", "project-id-1") // 他ユーザーとして一覧を取得する
 	if err != ErrForbidden {                                                           // ErrForbidden であることを確認する
@@ -162,7 +162,7 @@ func TestCreateVolume_正常にvolumeが作成される_service(t *testing.T) {
 	}
 
 	db := setupApplyTestDB(t)                                                                                    // テスト用 DB を準備する
-	svc := NewVolumeService(db, volumeRepo, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo) // サービスを生成する
+	svc := NewVolumeService(db, volumeRepo, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}) // サービスを生成する
 
 	req := CreateVolumeRequest{Name: "my-volume", SizeMB: 512} // リクエストを定義する
 	result, err := svc.CreateVolume(context.Background(), "test-user-id", "project-id-1", req) // volume を作成する
@@ -195,7 +195,7 @@ func TestCreateVolume_他ユーザーはErrForbiddenを返す_service(t *testing
 		},
 	}
 
-	svc := NewVolumeService(nil, volumeRepo, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo) // サービスを生成する
+	svc := NewVolumeService(nil, volumeRepo, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}) // サービスを生成する
 
 	req := CreateVolumeRequest{Name: "vol", SizeMB: 512} // リクエストを定義する
 	_, err := svc.CreateVolume(context.Background(), "other-user-id", "project-id-1", req) // 他ユーザーとして作成する
@@ -217,7 +217,7 @@ func TestDeleteVolume_他ユーザーはErrForbiddenを返す_service(t *testing
 		},
 	}
 
-	svc := NewVolumeService(nil, volumeRepo, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo) // サービスを生成する
+	svc := NewVolumeService(nil, volumeRepo, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}) // サービスを生成する
 
 	err := svc.DeleteVolume(context.Background(), "other-user-id", "volume-id-1") // 他ユーザーとして削除する
 	if err != ErrForbidden {                                                        // ErrForbidden であることを確認する
@@ -248,7 +248,7 @@ func TestListVolumeMounts_正常に一覧が取得される_service(t *testing.T
 		},
 	}
 
-	svc := NewVolumeService(nil, &mockVolumeRepository{}, volumeMountRepo, deploymentRepo, projectRepo) // サービスを生成する
+	svc := NewVolumeService(nil, &mockVolumeRepository{}, volumeMountRepo, deploymentRepo, projectRepo, &noopUserQuotaRepository{}) // サービスを生成する
 
 	result, err := svc.ListVolumeMounts(context.Background(), "test-user-id", "deployment-id-1") // 一覧を取得する
 	if err != nil {
@@ -272,7 +272,7 @@ func TestListVolumeMounts_他ユーザーはErrForbiddenを返す_service(t *tes
 		},
 	}
 
-	svc := NewVolumeService(nil, &mockVolumeRepository{}, &mockVolumeMountRepository{}, deploymentRepo, projectRepo) // サービスを生成する
+	svc := NewVolumeService(nil, &mockVolumeRepository{}, &mockVolumeMountRepository{}, deploymentRepo, projectRepo, &noopUserQuotaRepository{}) // サービスを生成する
 
 	_, err := svc.ListVolumeMounts(context.Background(), "other-user-id", "deployment-id-1") // 他ユーザーとして一覧を取得する
 	if err != ErrForbidden {                                                                   // ErrForbidden であることを確認する
@@ -303,7 +303,7 @@ func TestCreateVolumeMount_正常にマウント設定が作成される_service
 	}
 
 	db := setupApplyTestDB(t)                                                                                      // テスト用 DB を準備する
-	svc := NewVolumeService(db, &mockVolumeRepository{}, volumeMountRepo, deploymentRepo, projectRepo)             // サービスを生成する
+	svc := NewVolumeService(db, &mockVolumeRepository{}, volumeMountRepo, deploymentRepo, projectRepo, &noopUserQuotaRepository{})             // サービスを生成する
 
 	req := CreateVolumeMountRequest{VolumeID: "volume-id-1", MountPath: "/data"} // リクエストを定義する
 	result, err := svc.CreateVolumeMount(context.Background(), "test-user-id", "deployment-id-1", req)            // マウント設定を作成する
@@ -342,7 +342,7 @@ func TestCreateVolumeMount_重複MountPathはErrDuplicateVolumeMountを返す_se
 		},
 	}
 
-	svc := NewVolumeService(nil, &mockVolumeRepository{}, volumeMountRepo, deploymentRepo, projectRepo) // サービスを生成する
+	svc := NewVolumeService(nil, &mockVolumeRepository{}, volumeMountRepo, deploymentRepo, projectRepo, &noopUserQuotaRepository{}) // サービスを生成する
 
 	req := CreateVolumeMountRequest{VolumeID: "volume-id-1", MountPath: "/data"} // リクエストを定義する
 	_, err := svc.CreateVolumeMount(context.Background(), "test-user-id", "deployment-id-1", req) // 重複マウントパスで作成する
@@ -364,7 +364,7 @@ func TestCreateVolumeMount_他ユーザーはErrForbiddenを返す_service(t *te
 		},
 	}
 
-	svc := NewVolumeService(nil, &mockVolumeRepository{}, &mockVolumeMountRepository{}, deploymentRepo, projectRepo) // サービスを生成する
+	svc := NewVolumeService(nil, &mockVolumeRepository{}, &mockVolumeMountRepository{}, deploymentRepo, projectRepo, &noopUserQuotaRepository{}) // サービスを生成する
 
 	req := CreateVolumeMountRequest{VolumeID: "volume-id-1", MountPath: "/data"} // リクエストを定義する
 	_, err := svc.CreateVolumeMount(context.Background(), "other-user-id", "deployment-id-1", req) // 他ユーザーとして作成する
@@ -391,7 +391,7 @@ func TestDeleteVolumeMount_他ユーザーはErrForbiddenを返す_service(t *te
 		},
 	}
 
-	svc := NewVolumeService(nil, &mockVolumeRepository{}, volumeMountRepo, deploymentRepo, projectRepo) // サービスを生成する
+	svc := NewVolumeService(nil, &mockVolumeRepository{}, volumeMountRepo, deploymentRepo, projectRepo, &noopUserQuotaRepository{}) // サービスを生成する
 
 	err := svc.DeleteVolumeMount(context.Background(), "other-user-id", "mount-id-1") // 他ユーザーとして削除する
 	if err != ErrForbidden {                                                            // ErrForbidden であることを確認する

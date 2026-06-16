@@ -42,6 +42,7 @@ type ApplyService struct {
 	EnvVarMountRepo    repository.EnvVarMountRepository    // env_var_mount リポジトリ
 	VolumeRepo         repository.VolumeRepository         // volume リポジトリ
 	VolumeMountRepo    repository.VolumeMountRepository    // volume_mount リポジトリ
+	UserQuotaRepo      repository.UserQuotaRepository      // user_quota リポジトリ（Quotaチェック用）
 }
 
 // ApplyResult は Apply 処理の結果を表す構造体
@@ -65,6 +66,7 @@ func NewApplyService(
 	envVarMountRepo repository.EnvVarMountRepository,
 	volumeRepo repository.VolumeRepository,
 	volumeMountRepo repository.VolumeMountRepository,
+	userQuotaRepo repository.UserQuotaRepository,
 ) *ApplyService {
 	return &ApplyService{ // 依存を注入して返す
 		DB:                db,
@@ -79,6 +81,7 @@ func NewApplyService(
 		EnvVarMountRepo:   envVarMountRepo,
 		VolumeRepo:        volumeRepo,
 		VolumeMountRepo:   volumeMountRepo,
+		UserQuotaRepo:     userQuotaRepo, // user_quota リポジトリを注入する
 	}
 }
 
@@ -135,6 +138,10 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 		}
 		if replicas == 0 { // current も 0 の場合はデフォルト値を設定する
 			replicas = 1
+		}
+
+		if err := CheckReplicasQuota(ctx, applyService.UserQuotaRepo, userID, replicas); err != nil { // レプリカ数のQuotaチェックを行う
+			return err // Quota超過エラーを返す
 		}
 
 		command := deploymentData.PendingCommand // pending の command を使う

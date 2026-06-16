@@ -41,6 +41,7 @@ type volumeServiceImpl struct {
 	volumeMountRepo  repository.VolumeMountRepository    // volume_mount リポジトリ
 	deploymentRepo   repository.DeploymentRepository     // deployment リポジトリ（認可チェックに使用する）
 	projectRepo      repository.ProjectRepository        // project リポジトリ（認可チェックに使用する）
+	userQuotaRepo    repository.UserQuotaRepository      // user_quota リポジトリ（Quotaチェック用）
 }
 
 // NewVolumeService は VolumeService の実装を返す
@@ -50,6 +51,7 @@ func NewVolumeService(
 	volumeMountRepo repository.VolumeMountRepository,
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
+	userQuotaRepo repository.UserQuotaRepository,
 ) VolumeService {
 	return &volumeServiceImpl{
 		db:              db,              // DB 接続を注入する
@@ -57,6 +59,7 @@ func NewVolumeService(
 		volumeMountRepo: volumeMountRepo, // volume_mount リポジトリを注入する
 		deploymentRepo:  deploymentRepo,  // deployment リポジトリを注入する
 		projectRepo:     projectRepo,     // project リポジトリを注入する
+		userQuotaRepo:   userQuotaRepo,   // user_quota リポジトリを注入する
 	}
 }
 
@@ -84,6 +87,9 @@ func (svc *volumeServiceImpl) ListVolumes(ctx context.Context, userID string, pr
 func (svc *volumeServiceImpl) CreateVolume(ctx context.Context, userID string, projectID string, req CreateVolumeRequest) (*models.Volume, error) {
 	if err := svc.checkProjectOwner(ctx, userID, projectID); err != nil { // 認可チェックを行う
 		return nil, err // エラーを返す
+	}
+	if err := CheckVolumeQuota(ctx, svc.userQuotaRepo, userID, req.SizeMB); err != nil { // ボリューム容量のQuotaチェックを行う
+		return nil, err // Quota超過エラーを返す
 	}
 
 	var createdVolume *models.Volume                                             // 結果格納用変数を宣言する

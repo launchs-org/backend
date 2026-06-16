@@ -215,7 +215,7 @@ func (mock *mockProjectRepository) DeleteNoTx(ctx context.Context, project *mode
 func newTestDeploymentService(deploymentRepo *mockDeploymentRepository, serviceRepo *mockServiceRepository, projectRepo *mockProjectRepository, ingressRouteRepo *mockIngressRouteRepository) DeploymentService {
 	fakeK8sClient := k8sfake.NewSimpleClientset()                                                                          // fake k8s クライアントを生成する
 	fakeDynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())                                            // fake dynamic クライアントを生成する
-	return NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, fakeK8sClient, fakeDynamicClient) // サービスを生成する
+	return NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, fakeDynamicClient) // サービスを生成する
 }
 
 // TestCreateDeployment_正常に作成されpendingフィールドに値が入る は POST で全フィールドが pending_*** に入ることを確認する
@@ -528,7 +528,7 @@ func TestDeleteDeployment_k8sリソースが削除される(t *testing.T) {
 
 	fakeK8sClient := k8sfake.NewSimpleClientset()                             // fake k8s クライアントを生成する
 	fakeDynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()) // fake dynamic クライアントを生成する
-	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, fakeK8sClient, fakeDynamicClient) // サービスを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, fakeDynamicClient) // サービスを生成する
 
 	result, err := deploymentSvc.DeleteDeployment(context.Background(), "test-user-id", "deployment-id-k8s") // サービスを実行する
 	if err != nil {
