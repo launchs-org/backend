@@ -90,6 +90,11 @@ func main() {
 	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient)                  // build サービスを生成する
 	buildHandler := handler.NewBuildHandler(buildServiceImpl)                                                                                            // build ハンドラーを生成する
 
+	// log ハンドラーを DI 組み立てする
+	podLogChunkRepo := repository.NewPodLogChunkRepository(repository.Database)                                       // pod ログチャンクリポジトリを生成する
+	logServiceImpl := service.NewLogService(deploymentRepo, projectRepo, podLogChunkRepo)                             // log サービスを生成する
+	logHandler := handler.NewLogHandler(logServiceImpl)                                                               // log ハンドラーを生成する
+
 	// env_var ハンドラーを DI 組み立てする
 	envVarServiceImpl := service.NewEnvVarService(repository.Database, envVarRepo, projectRepo)                                                // env_var サービスを生成する
 	envVarMountServiceImpl := service.NewEnvVarMountService(repository.Database, envVarMountRepo, deploymentRepo, projectRepo)                 // env_var_mount サービスを生成する
@@ -111,7 +116,7 @@ func main() {
 		go k8s.WatchPVCs(ctx, k8sClient, volumeRepo)                                    // PVC の Bound 状態を監視して DB を自動更新する
 		go k8s.WatchNamespaces(ctx, k8sClient, projectRepo)                             // Namespace の削除イベントを監視して DB の Project レコードを削除する
 		go k8s.WatchBuildJobs(ctx, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo) // Build Job の完了・失敗を監視して DB を自動更新する
-		k8s.WatchDeployments(ctx, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo) // k8s Deployment の状態変化を監視して DB を自動更新する
+		k8s.WatchDeployments(ctx, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, podLogChunkRepo, projectRepo) // k8s Deployment の状態変化を監視して DB を自動更新する
 	})
 
 	// ルーターを生成してサーバーを起動する
@@ -123,6 +128,7 @@ func main() {
 		VolumeHandler:     volumeHandler,     // volume ハンドラーを注入する
 		BuildHandler:      buildHandler,      // build ハンドラーを注入する
 		WebhookHandler:    webhookHandler,    // webhook ハンドラーを注入する
+		LogHandler:        logHandler,        // log ハンドラーを注入する
 	})
 	if err := echoRouter.Start(":" + cfg.GetServerPort()); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("サーバーの起動に失敗しました", "error", err) // サーバー起動失敗時にエラーログを出す

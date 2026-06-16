@@ -385,6 +385,10 @@ func (mock *applyHistoryMockDeploymentRepository) Delete(ctx context.Context, de
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *applyHistoryMockDeploymentRepository) FindAllRunning(ctx context.Context) ([]models.Deployment, error) {
+	return nil, nil // テストでは使用しないためデフォルト nil を返す
+}
+
 // applyHistoryMockProjectRepository は Apply テスト専用の ProjectRepository モック
 type applyHistoryMockProjectRepository struct {
 	projectData *models.Project // 返す project データ

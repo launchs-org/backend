@@ -14,6 +14,7 @@ type DeploymentRepository interface {
 	FindByID(ctx context.Context, deploymentID string) (*models.Deployment, error)                                // deployment を ID で取得する
 	FindByIDForUpdate(ctx context.Context, tx *gorm.DB, deploymentID string) (*models.Deployment, error)          // SELECT FOR UPDATE で deployment を取得する
 	FindAllByProjectID(ctx context.Context, projectID string) ([]models.Deployment, error)                        // projectID に紐づく deployment 一覧を取得する
+	FindAllRunning(ctx context.Context) ([]models.Deployment, error)                                              // status=running の deployment を全件取得する（watcher 起動時復旧用）
 	Save(ctx context.Context, deployment *models.Deployment) error                                                // deployment を保存する
 	Updates(ctx context.Context, tx *gorm.DB, deployment *models.Deployment, values map[string]interface{}) error // deployment を map で部分更新する
 	UpdateAppStatus(ctx context.Context, deploymentID string, appStatus models.AppStatus) error                   // app_status を更新する
@@ -51,6 +52,15 @@ func (repo *deploymentRepositoryImpl) FindByID(ctx context.Context, deploymentID
 func (repo *deploymentRepositoryImpl) FindAllByProjectID(ctx context.Context, projectID string) ([]models.Deployment, error) {
 	var deploymentList []models.Deployment                                                                              // deployment 一覧を格納するスライスを定義する
 	if err := repo.db.WithContext(ctx).Where("project_id = ?", projectID).Find(&deploymentList).Error; err != nil { // db から deployment 一覧を取得する
+		return nil, err // 取得エラーを返す
+	}
+	return deploymentList, nil // deployment 一覧を返す
+}
+
+// FindAllRunning は status=running の deployment を全件返す
+func (repo *deploymentRepositoryImpl) FindAllRunning(ctx context.Context) ([]models.Deployment, error) {
+	var deploymentList []models.Deployment                                                                                           // deployment 一覧を格納するスライスを定義する
+	if err := repo.db.WithContext(ctx).Where("status = ?", models.DeploymentStatusRunning).Find(&deploymentList).Error; err != nil { // status=running の deployment を全件取得する
 		return nil, err // 取得エラーを返す
 	}
 	return deploymentList, nil // deployment 一覧を返す
