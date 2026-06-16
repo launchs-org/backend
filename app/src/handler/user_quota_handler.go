@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"app/logger"
 	"app/service"
 	"net/http"
 
@@ -25,6 +26,7 @@ func (handler *UserQuotaHandler) GetQuota(echoCtx echo.Context) error {
 
 	quotaResponse, err := handler.quotaService.GetQuota(echoCtx.Request().Context(), userID) // サービスを呼び出して quota を取得する
 	if err != nil {
+		logger.PrintHandlerError("UserQuotaHandler", "GetQuota", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー", // 500 エラーメッセージ
 		})
@@ -39,6 +41,7 @@ func (handler *UserQuotaHandler) UpdateQuota(echoCtx echo.Context) error {
 
 	var requestBody service.UpdateQuotaRequest                      // リクエストボディの構造体を定義する
 	if err := echoCtx.Bind(&requestBody); err != nil {             // リクエストをバインドする
+		logger.PrintHandlerError("UserQuotaHandler", "UpdateQuota", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です", // バインドエラーメッセージ
 		})
@@ -46,6 +49,7 @@ func (handler *UserQuotaHandler) UpdateQuota(echoCtx echo.Context) error {
 
 	quotaResponse, err := handler.quotaService.UpdateQuota(echoCtx.Request().Context(), userID, requestBody) // サービスを呼び出して quota を更新する
 	if err != nil {
+		logger.PrintHandlerError("UserQuotaHandler", "UpdateQuota", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー", // 500 エラーメッセージ
 		})

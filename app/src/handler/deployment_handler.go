@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"app/logger"
 	"app/service"
 	"errors"
 	"net/http"
@@ -30,6 +31,7 @@ func (deploymentHandler *DeploymentHandler) ListDeployments(echoCtx echo.Context
 
 	deploymentList, err := deploymentHandler.deploymentService.ListDeployments(echoCtx.Request().Context(), projectID) // サービスを呼び出して一覧を取得する
 	if err != nil {                                                                                                      // エラーが発生した場合
+		logger.PrintHandlerError("DeploymentHandler", "ListDeployments", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -43,6 +45,7 @@ func (deploymentHandler *DeploymentHandler) CreateDeployment(echoCtx echo.Contex
 
 	var requestBody service.CreateDeploymentRequest             // リクエストボディの構造体を定義する
 	if err := echoCtx.Bind(&requestBody); err != nil {         // リクエストをバインドする
+		logger.PrintHandlerError("DeploymentHandler", "CreateDeployment", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
 		})
@@ -52,10 +55,12 @@ func (deploymentHandler *DeploymentHandler) CreateDeployment(echoCtx echo.Contex
 	deploymentData, err := deploymentHandler.deploymentService.CreateDeployment(echoCtx.Request().Context(), requestBody) // サービスを呼び出して deployment を作成する
 	if err != nil {                                                                                                         // エラーが発生した場合
 		if errors.Is(err, service.ErrDeploymentQuotaExceeded) { // デプロイメント数が上限に達している場合は 400 を返す
+			logger.PrintHandlerError("DeploymentHandler", "CreateDeployment", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 				"error": "デプロイメント数の上限に達しています",
 			})
 		}
+		logger.PrintHandlerError("DeploymentHandler", "CreateDeployment", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -71,15 +76,18 @@ func (deploymentHandler *DeploymentHandler) GetDeployment(echoCtx echo.Context) 
 	deploymentData, err := deploymentHandler.deploymentService.GetDeployment(echoCtx.Request().Context(), userID, deploymentID) // サービスを呼び出して deployment を取得する
 	if err != nil {                                                                                                               // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("DeploymentHandler", "GetDeployment", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが禁止されています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("DeploymentHandler", "GetDeployment", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("DeploymentHandler", "GetDeployment", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -94,6 +102,7 @@ func (deploymentHandler *DeploymentHandler) UpdateDeployment(echoCtx echo.Contex
 
 	var requestBody service.UpdateDeploymentRequest             // リクエストボディの構造体を定義する
 	if err := echoCtx.Bind(&requestBody); err != nil {         // リクエストをバインドする
+		logger.PrintHandlerError("DeploymentHandler", "UpdateDeployment", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
 		})
@@ -102,20 +111,24 @@ func (deploymentHandler *DeploymentHandler) UpdateDeployment(echoCtx echo.Contex
 	deploymentData, err := deploymentHandler.deploymentService.UpdateDeployment(echoCtx.Request().Context(), userID, deploymentID, requestBody) // サービスを呼び出して deployment を更新する
 	if err != nil {                                                                                                                               // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("DeploymentHandler", "UpdateDeployment", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが禁止されています",
 			})
 		}
 		if errors.Is(err, service.ErrReplicasQuotaExceeded) { // レプリカ数が上限を超えている場合は 400 を返す
+			logger.PrintHandlerError("DeploymentHandler", "UpdateDeployment", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 				"error": "レプリカ数の上限を超えています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("DeploymentHandler", "UpdateDeployment", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("DeploymentHandler", "UpdateDeployment", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -131,15 +144,18 @@ func (deploymentHandler *DeploymentHandler) DeleteDeployment(echoCtx echo.Contex
 	deploymentData, err := deploymentHandler.deploymentService.DeleteDeployment(echoCtx.Request().Context(), userID, deploymentID) // サービスを呼び出して deployment を削除する
 	if err != nil {                                                                                                                   // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("DeploymentHandler", "DeleteDeployment", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが禁止されています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("DeploymentHandler", "DeleteDeployment", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("DeploymentHandler", "DeleteDeployment", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -155,15 +171,18 @@ func (deploymentHandler *DeploymentHandler) ListApplyHistories(echoCtx echo.Cont
 	historyList, err := deploymentHandler.applyService.ListApplyHistories(echoCtx.Request().Context(), userID, deploymentID) // apply 履歴一覧を取得する
 	if err != nil {                                                                                                           // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("DeploymentHandler", "ListApplyHistories", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが禁止されています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // deployment が存在しない場合は 404 を返す
+			logger.PrintHandlerError("DeploymentHandler", "ListApplyHistories", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("DeploymentHandler", "ListApplyHistories", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -179,15 +198,18 @@ func (deploymentHandler *DeploymentHandler) GetService(echoCtx echo.Context) err
 	serviceData, err := deploymentHandler.deploymentService.GetService(echoCtx.Request().Context(), userID, deploymentID) // サービスを呼び出して service 設定を取得する
 	if err != nil {                                                                                                         // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("DeploymentHandler", "GetService", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが禁止されています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("DeploymentHandler", "GetService", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("DeploymentHandler", "GetService", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -202,6 +224,7 @@ func (deploymentHandler *DeploymentHandler) UpdateService(echoCtx echo.Context) 
 
 	var requestBody service.UpdateServiceRequest             // リクエストボディの構造体を定義する
 	if err := echoCtx.Bind(&requestBody); err != nil {      // リクエストをバインドする
+		logger.PrintHandlerError("DeploymentHandler", "UpdateService", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
 		})
@@ -210,15 +233,18 @@ func (deploymentHandler *DeploymentHandler) UpdateService(echoCtx echo.Context) 
 	serviceData, err := deploymentHandler.deploymentService.UpdateService(echoCtx.Request().Context(), userID, deploymentID, requestBody) // サービスを呼び出して service を更新する
 	if err != nil {                                                                                                                         // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("DeploymentHandler", "UpdateService", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが禁止されています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("DeploymentHandler", "UpdateService", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("DeploymentHandler", "UpdateService", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -234,15 +260,18 @@ func (deploymentHandler *DeploymentHandler) GetIngressRoute(echoCtx echo.Context
 	ingressRouteData, err := deploymentHandler.deploymentService.GetIngressRoute(echoCtx.Request().Context(), userID, deploymentID) // サービスを呼び出して ingress_route 設定を取得する
 	if err != nil {                                                                                                                   // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("DeploymentHandler", "GetIngressRoute", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが禁止されています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("DeploymentHandler", "GetIngressRoute", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("DeploymentHandler", "GetIngressRoute", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -257,6 +286,7 @@ func (deploymentHandler *DeploymentHandler) CreateIngressRoute(echoCtx echo.Cont
 
 	var requestBody service.CreateIngressRouteRequest             // リクエストボディの構造体を定義する
 	if err := echoCtx.Bind(&requestBody); err != nil {           // リクエストをバインドする
+		logger.PrintHandlerError("DeploymentHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
 		})
@@ -265,15 +295,18 @@ func (deploymentHandler *DeploymentHandler) CreateIngressRoute(echoCtx echo.Cont
 	ingressRouteData, err := deploymentHandler.deploymentService.CreateIngressRoute(echoCtx.Request().Context(), userID, deploymentID, requestBody) // サービスを呼び出して ingress_route を作成する
 	if err != nil {                                                                                                                                    // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("DeploymentHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが禁止されています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // deployment が存在しない場合は 404 を返す
+			logger.PrintHandlerError("DeploymentHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("DeploymentHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -288,6 +321,7 @@ func (deploymentHandler *DeploymentHandler) UpdateIngressRoute(echoCtx echo.Cont
 
 	var requestBody service.UpdateIngressRouteRequest             // リクエストボディの構造体を定義する
 	if err := echoCtx.Bind(&requestBody); err != nil {           // リクエストをバインドする
+		logger.PrintHandlerError("DeploymentHandler", "UpdateIngressRoute", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
 		})
@@ -296,15 +330,18 @@ func (deploymentHandler *DeploymentHandler) UpdateIngressRoute(echoCtx echo.Cont
 	ingressRouteData, err := deploymentHandler.deploymentService.UpdateIngressRoute(echoCtx.Request().Context(), userID, deploymentID, requestBody) // サービスを呼び出して ingress_route を更新する
 	if err != nil {                                                                                                                                   // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("DeploymentHandler", "UpdateIngressRoute", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが禁止されています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("DeploymentHandler", "UpdateIngressRoute", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("DeploymentHandler", "UpdateIngressRoute", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -320,25 +357,30 @@ func (deploymentHandler *DeploymentHandler) ApplyDeployment(echoCtx echo.Context
 	applyResult, err := deploymentHandler.applyService.Apply(echoCtx.Request().Context(), userID, deploymentID) // apply サービスを呼び出す
 	if err != nil {                                                                                               // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("DeploymentHandler", "ApplyDeployment", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが禁止されています",
 			})
 		}
 		if errors.Is(err, service.ErrAlreadyApplying) { // apply 中の場合は 409 を返す
+			logger.PrintHandlerError("DeploymentHandler", "ApplyDeployment", echoCtx.Request().URL.Path, http.StatusConflict, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusConflict, map[string]string{
 				"error": "apply が実行中です",
 			})
 		}
 		if errors.Is(err, service.ErrReplicasQuotaExceeded) { // レプリカ数が上限を超えている場合は 400 を返す
+			logger.PrintHandlerError("DeploymentHandler", "ApplyDeployment", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 				"error": "レプリカ数の上限を超えています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // deployment が存在しない場合は 404 を返す
+			logger.PrintHandlerError("DeploymentHandler", "ApplyDeployment", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("DeploymentHandler", "ApplyDeployment", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})

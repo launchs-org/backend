@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"app/logger"
 	"app/middlewares"
 	"app/service"
 	"errors"
@@ -30,6 +31,7 @@ func (webhookHandler *WebhookHandler) CreateWebhook(echoCtx echo.Context) error 
 
 	var requestBody service.CreateWebhookRequest             // リクエストボディの構造体を定義する
 	if err := echoCtx.Bind(&requestBody); err != nil {      // リクエストをバインドする
+		logger.PrintHandlerError("WebhookHandler", "CreateWebhook", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
 		})
@@ -43,15 +45,18 @@ func (webhookHandler *WebhookHandler) CreateWebhook(echoCtx echo.Context) error 
 	)
 	if err != nil { // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 認可エラーの場合
+			logger.PrintHandlerError("WebhookHandler", "CreateWebhook", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが存在しない場合
+			logger.PrintHandlerError("WebhookHandler", "CreateWebhook", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("WebhookHandler", "CreateWebhook", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -71,15 +76,18 @@ func (webhookHandler *WebhookHandler) GetWebhook(echoCtx echo.Context) error {
 	)
 	if err != nil { // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 認可エラーの場合
+			logger.PrintHandlerError("WebhookHandler", "GetWebhook", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが存在しない場合
+			logger.PrintHandlerError("WebhookHandler", "GetWebhook", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("WebhookHandler", "GetWebhook", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -99,15 +107,18 @@ func (webhookHandler *WebhookHandler) DeleteWebhook(echoCtx echo.Context) error 
 	)
 	if err != nil { // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 認可エラーの場合
+			logger.PrintHandlerError("WebhookHandler", "DeleteWebhook", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが存在しない場合
+			logger.PrintHandlerError("WebhookHandler", "DeleteWebhook", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("WebhookHandler", "DeleteWebhook", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -124,6 +135,7 @@ func (webhookHandler *WebhookHandler) ReceiveGithubWebhook(echoCtx echo.Context)
 
 	body, err := io.ReadAll(echoCtx.Request().Body) // リクエストボディを読み込む
 	if err != nil {
+		logger.PrintHandlerError("WebhookHandler", "ReceiveGithubWebhook", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストボディの読み込みに失敗しました",
 		})
@@ -136,15 +148,18 @@ func (webhookHandler *WebhookHandler) ReceiveGithubWebhook(echoCtx echo.Context)
 		body,
 	); err != nil {
 		if errors.Is(err, service.ErrInvalidSignature) { // 署名不正の場合
+			logger.PrintHandlerError("WebhookHandler", "ReceiveGithubWebhook", echoCtx.Request().URL.Path, http.StatusUnauthorized, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusUnauthorized, map[string]string{
 				"error": "署名が不正です",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが存在しない場合
+			logger.PrintHandlerError("WebhookHandler", "ReceiveGithubWebhook", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("WebhookHandler", "ReceiveGithubWebhook", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})

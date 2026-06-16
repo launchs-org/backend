@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"app/logger"
 	"app/service"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -29,15 +31,18 @@ func (volumeHandler *VolumeHandler) ListVolumes(echoCtx echo.Context) error {
 	volumeList, err := volumeHandler.volumeService.ListVolumes(echoCtx.Request().Context(), userID, projectID) // サービスを呼び出して一覧を取得する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("VolumeHandler", "ListVolumes", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("VolumeHandler", "ListVolumes", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("VolumeHandler", "ListVolumes", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -52,16 +57,19 @@ func (volumeHandler *VolumeHandler) CreateVolume(echoCtx echo.Context) error {
 
 	var requestBody service.CreateVolumeRequest               // リクエストボディの構造体を定義する
 	if err := echoCtx.Bind(&requestBody); err != nil {        // リクエストをバインドする
+		logger.PrintHandlerError("VolumeHandler", "CreateVolume", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
 		})
 	}
 	if requestBody.Name == "" { // 必須フィールドのバリデーションを行う
+		logger.PrintHandlerError("VolumeHandler", "CreateVolume", echoCtx.Request().URL.Path, http.StatusBadRequest, fmt.Errorf("name は必須です")) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "name は必須です",
 		})
 	}
 	if requestBody.SizeMB <= 0 { // size_mb のバリデーションを行う
+		logger.PrintHandlerError("VolumeHandler", "CreateVolume", echoCtx.Request().URL.Path, http.StatusBadRequest, fmt.Errorf("size_mb は 1 以上の値が必要です")) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "size_mb は 1 以上の値が必要です",
 		})
@@ -70,15 +78,18 @@ func (volumeHandler *VolumeHandler) CreateVolume(echoCtx echo.Context) error {
 	volumeData, err := volumeHandler.volumeService.CreateVolume(echoCtx.Request().Context(), userID, projectID, requestBody) // サービスを呼び出して volume を作成する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("VolumeHandler", "CreateVolume", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("VolumeHandler", "CreateVolume", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("VolumeHandler", "CreateVolume", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -94,15 +105,18 @@ func (volumeHandler *VolumeHandler) DeleteVolume(echoCtx echo.Context) error {
 	err := volumeHandler.volumeService.DeleteVolume(echoCtx.Request().Context(), userID, volumeID) // サービスを呼び出して volume を削除する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("VolumeHandler", "DeleteVolume", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("VolumeHandler", "DeleteVolume", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("VolumeHandler", "DeleteVolume", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -118,15 +132,18 @@ func (volumeHandler *VolumeHandler) ListVolumeMounts(echoCtx echo.Context) error
 	mountList, err := volumeHandler.volumeService.ListVolumeMounts(echoCtx.Request().Context(), userID, deploymentID) // サービスを呼び出してマウント一覧を取得する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("VolumeHandler", "ListVolumeMounts", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("VolumeHandler", "ListVolumeMounts", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("VolumeHandler", "ListVolumeMounts", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -141,16 +158,19 @@ func (volumeHandler *VolumeHandler) CreateVolumeMount(echoCtx echo.Context) erro
 
 	var requestBody service.CreateVolumeMountRequest              // リクエストボディの構造体を定義する
 	if err := echoCtx.Bind(&requestBody); err != nil {           // リクエストをバインドする
+		logger.PrintHandlerError("VolumeHandler", "CreateVolumeMount", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
 		})
 	}
 	if requestBody.VolumeID == "" { // 必須フィールドのバリデーションを行う
+		logger.PrintHandlerError("VolumeHandler", "CreateVolumeMount", echoCtx.Request().URL.Path, http.StatusBadRequest, fmt.Errorf("volume_id は必須です")) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "volume_id は必須です",
 		})
 	}
 	if requestBody.MountPath == "" { // マウントパスのバリデーションを行う
+		logger.PrintHandlerError("VolumeHandler", "CreateVolumeMount", echoCtx.Request().URL.Path, http.StatusBadRequest, fmt.Errorf("mount_path は必須です")) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "mount_path は必須です",
 		})
@@ -159,20 +179,24 @@ func (volumeHandler *VolumeHandler) CreateVolumeMount(echoCtx echo.Context) erro
 	mountData, err := volumeHandler.volumeService.CreateVolumeMount(echoCtx.Request().Context(), userID, deploymentID, requestBody) // サービスを呼び出してマウント設定を作成する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("VolumeHandler", "CreateVolumeMount", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, service.ErrDuplicateVolumeMount) { // 重複エラーの場合は 409 を返す
+			logger.PrintHandlerError("VolumeHandler", "CreateVolumeMount", echoCtx.Request().URL.Path, http.StatusConflict, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusConflict, map[string]string{
 				"error": "同一マウントパスが既に存在します",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("VolumeHandler", "CreateVolumeMount", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("VolumeHandler", "CreateVolumeMount", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -188,15 +212,18 @@ func (volumeHandler *VolumeHandler) DeleteVolumeMount(echoCtx echo.Context) erro
 	err := volumeHandler.volumeService.DeleteVolumeMount(echoCtx.Request().Context(), userID, mountID) // サービスを呼び出してマウント設定を削除する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("VolumeHandler", "DeleteVolumeMount", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("VolumeHandler", "DeleteVolumeMount", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("VolumeHandler", "DeleteVolumeMount", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})

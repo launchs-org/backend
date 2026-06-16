@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"app/logger"
 	"app/middlewares"
 	"app/service"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -35,15 +37,18 @@ func (envVarHandler *EnvVarHandler) ListEnvVars(echoCtx echo.Context) error {
 	envVarList, err := envVarHandler.envVarService.ListEnvVars(echoCtx.Request().Context(), userClaim.UserID, projectID) // サービスを呼び出して一覧を取得する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("EnvVarHandler", "ListEnvVars", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("EnvVarHandler", "ListEnvVars", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("EnvVarHandler", "ListEnvVars", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -73,11 +78,13 @@ func (envVarHandler *EnvVarHandler) CreateEnvVar(echoCtx echo.Context) error {
 
 	var requestBody service.CreateEnvVarRequest               // リクエストボディの構造体を定義する
 	if err := echoCtx.Bind(&requestBody); err != nil {        // リクエストをバインドする
+		logger.PrintHandlerError("EnvVarHandler", "CreateEnvVar", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
 		})
 	}
 	if requestBody.Key == "" { // 必須フィールドのバリデーションを行う
+		logger.PrintHandlerError("EnvVarHandler", "CreateEnvVar", echoCtx.Request().URL.Path, http.StatusBadRequest, fmt.Errorf("key は必須です")) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "key は必須です",
 		})
@@ -86,15 +93,18 @@ func (envVarHandler *EnvVarHandler) CreateEnvVar(echoCtx echo.Context) error {
 	envVarData, err := envVarHandler.envVarService.CreateEnvVar(echoCtx.Request().Context(), userClaim.UserID, projectID, requestBody) // サービスを呼び出して env_var を作成する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("EnvVarHandler", "CreateEnvVar", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("EnvVarHandler", "CreateEnvVar", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("EnvVarHandler", "CreateEnvVar", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -120,6 +130,7 @@ func (envVarHandler *EnvVarHandler) UpdateEnvVar(echoCtx echo.Context) error {
 
 	var requestBody service.UpdateEnvVarRequest               // リクエストボディの構造体を定義する
 	if err := echoCtx.Bind(&requestBody); err != nil {        // リクエストをバインドする
+		logger.PrintHandlerError("EnvVarHandler", "UpdateEnvVar", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
 		})
@@ -128,15 +139,18 @@ func (envVarHandler *EnvVarHandler) UpdateEnvVar(echoCtx echo.Context) error {
 	envVarData, err := envVarHandler.envVarService.UpdateEnvVar(echoCtx.Request().Context(), userClaim.UserID, envVarID, requestBody) // サービスを呼び出して env_var を更新する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("EnvVarHandler", "UpdateEnvVar", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("EnvVarHandler", "UpdateEnvVar", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("EnvVarHandler", "UpdateEnvVar", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -163,15 +177,18 @@ func (envVarHandler *EnvVarHandler) DeleteEnvVar(echoCtx echo.Context) error {
 	err := envVarHandler.envVarService.DeleteEnvVar(echoCtx.Request().Context(), userClaim.UserID, envVarID) // サービスを呼び出して env_var を削除する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("EnvVarHandler", "DeleteEnvVar", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("EnvVarHandler", "DeleteEnvVar", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("EnvVarHandler", "DeleteEnvVar", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -187,15 +204,18 @@ func (envVarHandler *EnvVarHandler) ListEnvVarMounts(echoCtx echo.Context) error
 	mountList, err := envVarHandler.envVarMountService.ListEnvVarMounts(echoCtx.Request().Context(), userClaim.UserID, deploymentID) // サービスを呼び出して一覧を取得する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("EnvVarHandler", "ListEnvVarMounts", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("EnvVarHandler", "ListEnvVarMounts", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("EnvVarHandler", "ListEnvVarMounts", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -210,11 +230,13 @@ func (envVarHandler *EnvVarHandler) CreateEnvVarMount(echoCtx echo.Context) erro
 
 	var requestBody service.CreateEnvVarMountRequest          // リクエストボディの構造体を定義する
 	if err := echoCtx.Bind(&requestBody); err != nil {        // リクエストをバインドする
+		logger.PrintHandlerError("EnvVarHandler", "CreateEnvVarMount", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
 		})
 	}
 	if requestBody.EnvVarID == "" { // 必須フィールドのバリデーションを行う
+		logger.PrintHandlerError("EnvVarHandler", "CreateEnvVarMount", echoCtx.Request().URL.Path, http.StatusBadRequest, fmt.Errorf("env_var_id は必須です")) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "env_var_id は必須です",
 		})
@@ -223,20 +245,24 @@ func (envVarHandler *EnvVarHandler) CreateEnvVarMount(echoCtx echo.Context) erro
 	mountData, err := envVarHandler.envVarMountService.CreateEnvVarMount(echoCtx.Request().Context(), userClaim.UserID, deploymentID, requestBody) // サービスを呼び出してマウント設定を作成する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("EnvVarHandler", "CreateEnvVarMount", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, service.ErrDuplicateMount) { // 重複マウントの場合は 409 を返す
+			logger.PrintHandlerError("EnvVarHandler", "CreateEnvVarMount", echoCtx.Request().URL.Path, http.StatusConflict, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusConflict, map[string]string{
 				"error": "この環境変数は既にマウントされています",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("EnvVarHandler", "CreateEnvVarMount", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("EnvVarHandler", "CreateEnvVarMount", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
@@ -252,15 +278,18 @@ func (envVarHandler *EnvVarHandler) DeleteEnvVarMount(echoCtx echo.Context) erro
 	err := envVarHandler.envVarMountService.DeleteEnvVarMount(echoCtx.Request().Context(), userClaim.UserID, mountID) // サービスを呼び出してマウント設定を削除する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("EnvVarHandler", "DeleteEnvVarMount", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("EnvVarHandler", "DeleteEnvVarMount", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("EnvVarHandler", "DeleteEnvVarMount", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})

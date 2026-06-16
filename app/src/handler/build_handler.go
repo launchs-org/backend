@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"app/logger"
 	"app/service"
 	"errors"
 	"net/http"
@@ -30,20 +31,24 @@ func (buildHandler *BuildHandler) TriggerBuild(echoCtx echo.Context) error {
 	buildData, err := buildHandler.buildService.TriggerBuild(echoCtx.Request().Context(), userID, deploymentID) // サービスを呼び出してビルドをトリガーする
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 所有権エラーの場合は 403 を返す
+			logger.PrintHandlerError("BuildHandler", "TriggerBuild", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセス権限がありません",
 			})
 		}
 		if errors.Is(err, service.ErrBuildConflict) { // ビルド中の場合は 409 を返す
+			logger.PrintHandlerError("BuildHandler", "TriggerBuild", echoCtx.Request().URL.Path, http.StatusConflict, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusConflict, map[string]string{
 				"error": "ビルドが既に進行中です",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが見つからない場合は 404 を返す
+			logger.PrintHandlerError("BuildHandler", "TriggerBuild", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("BuildHandler", "TriggerBuild", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{ // その他のエラーは 500 を返す
 			"error": "内部サーバーエラー",
 		})
@@ -59,20 +64,24 @@ func (buildHandler *BuildHandler) CancelBuild(echoCtx echo.Context) error {
 	err := buildHandler.buildService.CancelBuild(echoCtx.Request().Context(), userID, buildID) // サービスを呼び出してビルドをキャンセルする
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 所有権エラーの場合は 403 を返す
+			logger.PrintHandlerError("BuildHandler", "CancelBuild", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセス権限がありません",
 			})
 		}
 		if errors.Is(err, service.ErrBuildNotCancellable) { // キャンセル不可の場合は 409 を返す
+			logger.PrintHandlerError("BuildHandler", "CancelBuild", echoCtx.Request().URL.Path, http.StatusConflict, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusConflict, map[string]string{
 				"error": "ビルドはキャンセルできない状態です",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが見つからない場合は 404 を返す
+			logger.PrintHandlerError("BuildHandler", "CancelBuild", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("BuildHandler", "CancelBuild", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{ // その他のエラーは 500 を返す
 			"error": "内部サーバーエラー",
 		})
@@ -92,6 +101,7 @@ func (buildHandler *BuildHandler) GetBuildLogs(echoCtx echo.Context) error {
 	if sinceParam != "" {                             // since が指定されている場合はパースする
 		parsedTime, parseErr := time.Parse(time.RFC3339, sinceParam) // RFC3339 形式でパースする
 		if parseErr != nil {                                          // パースエラーの場合は 400 を返す
+			logger.PrintHandlerError("BuildHandler", "GetBuildLogs", echoCtx.Request().URL.Path, http.StatusBadRequest, parseErr) // エラーログを出力する
 			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 				"error": "since パラメータの形式が不正です（RFC3339 形式で指定してください）",
 			})
@@ -102,15 +112,18 @@ func (buildHandler *BuildHandler) GetBuildLogs(echoCtx echo.Context) error {
 	logContent, err := buildHandler.buildService.GetBuildLogs(echoCtx.Request().Context(), userID, buildID, sinceTime) // サービスを呼び出してビルドログを取得する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 所有権エラーの場合は 403 を返す
+			logger.PrintHandlerError("BuildHandler", "GetBuildLogs", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセス権限がありません",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが見つからない場合は 404 を返す
+			logger.PrintHandlerError("BuildHandler", "GetBuildLogs", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
+		logger.PrintHandlerError("BuildHandler", "GetBuildLogs", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{ // その他のエラーは 500 を返す
 			"error": "内部サーバーエラー",
 		})
