@@ -52,6 +52,11 @@ func (handler *ProjectHandler) CreateProject(echoCtx echo.Context) error {
 
 	projectData, err := handler.projectService.CreateProject(echoCtx.Request().Context(), userID, requestBody) // サービスを呼び出して project を作成する
 	if err != nil {
+		if errors.Is(err, service.ErrProjectQuotaExceeded) { // プロジェクト数が上限に達している場合は 400 を返す
+			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "プロジェクト数の上限に達しています",
+			})
+		}
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})

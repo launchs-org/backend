@@ -830,3 +830,69 @@ func TestUpdateIngressRoute_正常に更新されて200を返す(t *testing.T) {
 		t.Errorf("期待する pending_path_prefix: /new, 実際の pending_path_prefix: %s", responseBody.PendingPathPrefix)
 	}
 }
+
+// TestCreateDeployment_デプロイメント数がQuota超過の場合は400になる はQuota超過時に400が返ることを確認する
+func TestCreateDeployment_デプロイメント数がQuota超過の場合は400になる(t *testing.T) {
+	mockSvc := &mockDeploymentService{
+		createDeploymentFunc: func(ctx context.Context, req service.CreateDeploymentRequest) (*models.Deployment, error) {
+			return nil, service.ErrDeploymentQuotaExceeded // Quota超過エラーを返す
+		},
+	}
+
+	deploymentHandler := NewDeploymentHandler(mockSvc, &mockApplyService{}) // ハンドラーを生成する
+	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPost, "/api/v1/projects/project-id-1/deployments", `{"name":"my-app","type":"image_url"}`, map[string]string{"id": "project-id-1"}) // テスト用コンテキストを生成する
+
+	err := deploymentHandler.CreateDeployment(echoCtx) // ハンドラーを実行する
+	if err != nil {
+		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
+	}
+	if responseRecorder.Code != http.StatusBadRequest { // 400 が返ることを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusBadRequest, responseRecorder.Code)
+	}
+}
+
+// TestUpdateDeployment_レプリカ数がQuota超過の場合は400になる はQuota超過時に400が返ることを確認する
+func TestUpdateDeployment_レプリカ数がQuota超過の場合は400になる(t *testing.T) {
+	mockSvc := &mockDeploymentService{
+		updateDeploymentFunc: func(ctx context.Context, userID string, deploymentID string, req service.UpdateDeploymentRequest) (*models.Deployment, error) {
+			return nil, service.ErrReplicasQuotaExceeded // Quota超過エラーを返す
+		},
+	}
+
+	deploymentHandler := NewDeploymentHandler(mockSvc, &mockApplyService{}) // ハンドラーを生成する
+	replicasValue := int32(10)                                              // 上限を超えるレプリカ数を設定する
+	requestBody := service.UpdateDeploymentRequest{Replicas: &replicasValue}
+	requestJSON, _ := json.Marshal(requestBody)                            // リクエストボディをJSON化する
+	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPut, "/api/v1/deployments/deployment-id-1", string(requestJSON), map[string]string{"id": "deployment-id-1"}) // テスト用コンテキストを生成する
+
+	err := deploymentHandler.UpdateDeployment(echoCtx) // ハンドラーを実行する
+	if err != nil {
+		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
+	}
+	if responseRecorder.Code != http.StatusBadRequest { // 400 が返ることを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusBadRequest, responseRecorder.Code)
+	}
+}
+
+// TestApplyDeployment_レプリカ数がQuota超過の場合は400になる はapply時にQuota超過で400が返ることを確認する
+func TestApplyDeployment_レプリカ数がQuota超過の場合は400になる(t *testing.T) {
+	mockApplySvc := &mockApplyService{
+		applyFunc: func(ctx context.Context, userID string, deploymentID string) (*service.ApplyResult, error) {
+			return nil, service.ErrReplicasQuotaExceeded // Quota超過エラーを返す
+		},
+		listApplyHistoriesFunc: func(ctx context.Context, userID string, deploymentID string) ([]*models.ApplyHistory, error) {
+			return nil, nil // 空のリストを返す
+		},
+	}
+
+	deploymentHandler := NewDeploymentHandler(&mockDeploymentService{}, mockApplySvc) // ハンドラーを生成する
+	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPost, "/api/v1/deployments/deployment-id-1/apply", "", map[string]string{"id": "deployment-id-1"}) // テスト用コンテキストを生成する
+
+	err := deploymentHandler.ApplyDeployment(echoCtx) // ハンドラーを実行する
+	if err != nil {
+		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
+	}
+	if responseRecorder.Code != http.StatusBadRequest { // 400 が返ることを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusBadRequest, responseRecorder.Code)
+	}
+}

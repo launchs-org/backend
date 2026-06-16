@@ -70,7 +70,7 @@ func main() {
 	ingressRouteRepo := repository.NewIngressRouteRepository(repository.Database)   // ingress_route リポジトリを生成する
 
 	// project ハンドラーを DI 組み立てする
-	projectServiceImpl := service.NewProjectService(repository.Database, projectRepo, harborCredentialRepo, deploymentRepo, ingressRouteRepo, k8sClient, dynamicClient, harborClient) // project サービスを生成する
+	projectServiceImpl := service.NewProjectService(repository.Database, projectRepo, harborCredentialRepo, deploymentRepo, ingressRouteRepo, userQuotaRepo, k8sClient, dynamicClient, harborClient) // project サービスを生成する
 	projectHandler := handler.NewProjectHandler(projectServiceImpl)                 // project ハンドラーを生成する
 
 	// deployment ハンドラーを DI 組み立てする
@@ -81,8 +81,8 @@ func main() {
 	volumeRepo := repository.NewVolumeRepository(repository.Database)                                                      // volume リポジトリを生成する
 	volumeMountRepo := repository.NewVolumeMountRepository(repository.Database)                                            // volume_mount リポジトリを生成する
 	buildRepo := repository.NewDeploymentBuildRepository(repository.Database)                                              // build リポジトリを生成する
-	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, envVarMountRepo, volumeMountRepo, k8sClient, dynamicClient) // deployment サービスを生成する
-	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, envVarRepo, envVarMountRepo, volumeRepo, volumeMountRepo) // apply サービスを生成する
+	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, envVarMountRepo, volumeMountRepo, userQuotaRepo, k8sClient, dynamicClient) // deployment サービスを生成する
+	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, envVarRepo, envVarMountRepo, volumeRepo, volumeMountRepo, userQuotaRepo) // apply サービスを生成する
 	deploymentHandler := handler.NewDeploymentHandler(deploymentServiceImpl, applyServiceImpl)                             // deployment ハンドラーを生成する
 
 	// build ハンドラーを DI 組み立てする
@@ -101,7 +101,7 @@ func main() {
 	envVarHandler := handler.NewEnvVarHandler(envVarServiceImpl, envVarMountServiceImpl)                                                       // env_var ハンドラーを生成する
 
 	// volume ハンドラーを DI 組み立てする
-	volumeServiceImpl := service.NewVolumeService(repository.Database, volumeRepo, volumeMountRepo, deploymentRepo, projectRepo)  // volume サービスを生成する
+	volumeServiceImpl := service.NewVolumeService(repository.Database, volumeRepo, volumeMountRepo, deploymentRepo, projectRepo, userQuotaRepo)  // volume サービスを生成する
 	volumeHandler := handler.NewVolumeHandler(volumeServiceImpl)                                                                  // volume ハンドラーを生成する
 
 	// webhook ハンドラーを DI 組み立てする
