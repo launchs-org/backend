@@ -3,6 +3,7 @@ package k8s
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -35,7 +36,11 @@ func NewHarborClient(endpoint, robotName, robotSecret string) *HarborClient {
 		endpoint:    endpoint,             // エンドポイントを設定する
 		robotName:   robotName,            // robot アカウント名を設定する
 		robotSecret: robotSecret,          // シークレットを設定する
-		httpClient:  &http.Client{},       // デフォルト HTTP クライアントを使用する
+		httpClient: &http.Client{ // TLS 証明書検証をスキップする（自己署名証明書対応）
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // IP SAN なし証明書を許容する
+			},
+		},
 	}
 }
 
