@@ -79,6 +79,14 @@ func (mock *mockDeploymentService) UpdateIngressRoute(ctx context.Context, userI
 	return &models.IngressRoute{DeploymentID: deploymentID}, nil // デフォルトは空の ingress_route を返す
 }
 
+func (mock *mockDeploymentService) DeleteService(ctx context.Context, userID string, deploymentID string) error {
+	return nil // デフォルトは成功を返す
+}
+
+func (mock *mockDeploymentService) DeleteIngressRoute(ctx context.Context, userID string, deploymentID string) error {
+	return nil // デフォルトは成功を返す
+}
+
 // setupDeploymentEchoContext はテスト用の Echo コンテキストを生成するヘルパー関数
 func setupDeploymentEchoContext(method, path, body string, params map[string]string) (echo.Context, *httptest.ResponseRecorder) {
 	echoInstance := echo.New()                                            // Echo インスタンスを生成する

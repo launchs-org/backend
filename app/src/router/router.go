@@ -51,6 +51,7 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.GET("/deployments/:id/apply-histories", opts.DeploymentHandler.ListApplyHistories)   // apply 履歴一覧取得エンドポイント
 	apiGroup.GET("/deployments/:id/service", opts.DeploymentHandler.GetService)                   // service 設定取得エンドポイント
 	apiGroup.PUT("/deployments/:id/service", opts.DeploymentHandler.UpdateService)                // service 設定更新エンドポイント
+	apiGroup.DELETE("/deployments/:id/service", opts.DeploymentHandler.DeleteService)             // service 削除エンドポイント
 
 	// build エンドポイントを登録する
 	apiGroup.POST("/deployments/:id/build", opts.BuildHandler.TriggerBuild) // ビルドトリガーエンドポイント
@@ -69,9 +70,10 @@ func New(opts RouterOptions) *echo.Echo {
 	router.POST("/webhooks/:deployment_id/github", opts.WebhookHandler.ReceiveGithubWebhook) // GitHub push イベントレシーバーエンドポイント
 
 	// ingress-route エンドポイントを登録する
-	apiGroup.GET("/deployments/:id/ingress-route", opts.DeploymentHandler.GetIngressRoute)        // ingress-route 設定取得エンドポイント
-	apiGroup.POST("/deployments/:id/ingress-route", opts.DeploymentHandler.CreateIngressRoute)    // ingress-route 作成エンドポイント
-	apiGroup.PUT("/deployments/:id/ingress-route", opts.DeploymentHandler.UpdateIngressRoute)     // ingress-route 設定更新エンドポイント
+	apiGroup.GET("/deployments/:id/ingress-route", opts.DeploymentHandler.GetIngressRoute)           // ingress-route 設定取得エンドポイント
+	apiGroup.POST("/deployments/:id/ingress-route", opts.DeploymentHandler.CreateIngressRoute)      // ingress-route 作成エンドポイント
+	apiGroup.PUT("/deployments/:id/ingress-route", opts.DeploymentHandler.UpdateIngressRoute)        // ingress-route 設定更新エンドポイント
+	apiGroup.DELETE("/deployments/:id/ingress-route", opts.DeploymentHandler.DeleteIngressRoute)     // ingress-route 削除エンドポイント
 
 	// env-vars エンドポイントを登録する
 	apiGroup.GET("/projects/:id/env-vars", opts.EnvVarHandler.ListEnvVars)    // env_var 一覧取得エンドポイント

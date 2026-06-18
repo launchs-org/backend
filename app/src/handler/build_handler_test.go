@@ -18,6 +18,7 @@ type mockBuildService struct {
 	triggerBuildFunc func(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error)
 	cancelBuildFunc  func(ctx context.Context, userID string, buildID string) error
 	getBuildLogsFunc func(ctx context.Context, userID string, buildID string, since *time.Time) (string, error)
+	listBuildsFunc   func(ctx context.Context, userID string, deploymentID string) ([]models.DeploymentBuild, error)
 }
 
 func (mock *mockBuildService) TriggerBuild(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error) {
@@ -30,6 +31,13 @@ func (mock *mockBuildService) CancelBuild(ctx context.Context, userID string, bu
 
 func (mock *mockBuildService) GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, error) {
 	return mock.getBuildLogsFunc(ctx, userID, buildID, since) // モック関数を呼び出す
+}
+
+func (mock *mockBuildService) ListBuilds(ctx context.Context, userID string, deploymentID string) ([]models.DeploymentBuild, error) {
+	if mock.listBuildsFunc != nil {
+		return mock.listBuildsFunc(ctx, userID, deploymentID) // モック関数を呼び出す
+	}
+	return []models.DeploymentBuild{}, nil // デフォルトは空リストを返す
 }
 
 // newCancelBuildHandlerTestContext は CancelBuild ハンドラーテスト用の Echo コンテキストを生成するヘルパー関数

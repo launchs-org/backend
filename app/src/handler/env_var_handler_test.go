@@ -48,6 +48,7 @@ func setupEnvVarEchoContext(method, path, body string, params map[string]string)
 	responseRecorder := httptest.NewRecorder()                            // テスト用レスポンスレコーダーを生成する
 	echoCtx := echoInstance.NewContext(request, responseRecorder)         // Echo コンテキストを生成する
 	echoCtx.Set("claim", &middlewares.AccessTokenClaim{UserID: "test-user-id"}) // テスト用クレームを設定する
+	echoCtx.Set("UserID", "test-user-id")                                       // テスト用 UserID を設定する
 
 	if len(params) > 0 { // パスパラメータが存在する場合は設定する
 		paramNames := make([]string, 0, len(params))

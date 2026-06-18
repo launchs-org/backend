@@ -14,6 +14,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"os"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -81,13 +82,14 @@ func main() {
 	volumeRepo := repository.NewVolumeRepository(repository.Database)                                                      // volume リポジトリを生成する
 	volumeMountRepo := repository.NewVolumeMountRepository(repository.Database)                                            // volume_mount リポジトリを生成する
 	buildRepo := repository.NewDeploymentBuildRepository(repository.Database)                                              // build リポジトリを生成する
-	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, envVarMountRepo, volumeMountRepo, userQuotaRepo, k8sClient, dynamicClient) // deployment サービスを生成する
+	baseDomain := os.Getenv("BASE_DOMAIN")                                                                                                                                                          // ベースドメインを環境変数から取得する
+	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, envVarMountRepo, volumeMountRepo, userQuotaRepo, k8sClient, dynamicClient, baseDomain) // deployment サービスを生成する
 	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, envVarRepo, envVarMountRepo, volumeRepo, volumeMountRepo, userQuotaRepo) // apply サービスを生成する
 	deploymentHandler := handler.NewDeploymentHandler(deploymentServiceImpl, applyServiceImpl)                             // deployment ハンドラーを生成する
 
 	// build ハンドラーを DI 組み立てする
 	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)                                                                           // build ログチャンクリポジトリを生成する
-	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient)                  // build サービスを生成する
+	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient, "harbor.main-harbor") // build サービスを生成する（ビルドジョブはクラスタ内 DNS 名でアクセスする）
 	buildHandler := handler.NewBuildHandler(buildServiceImpl)                                                                                            // build ハンドラーを生成する
 
 	// log ハンドラーを DI 組み立てする
@@ -115,7 +117,7 @@ func main() {
 		go k8s.WatchIngressRoutes(ctx, dynamicClient, ingressRouteRepo)                 // Traefik IngressRoute の状態変化を監視して DB を自動更新する
 		go k8s.WatchPVCs(ctx, k8sClient, volumeRepo)                                    // PVC の Bound 状態を監視して DB を自動更新する
 		go k8s.WatchNamespaces(ctx, k8sClient, projectRepo)                             // Namespace の削除イベントを監視して DB の Project レコードを削除する
-		go k8s.WatchBuildJobs(ctx, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo) // Build Job の完了・失敗を監視して DB を自動更新する
+		go k8s.WatchBuildJobs(ctx, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, "harbor.main-harbor") // Build Job の完了・失敗を監視して DB を自動更新する
 		k8s.WatchDeployments(ctx, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, podLogChunkRepo, projectRepo) // k8s Deployment の状態変化を監視して DB を自動更新する
 	})
 
