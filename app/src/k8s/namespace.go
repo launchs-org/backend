@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
@@ -24,17 +25,70 @@ func ToNamespaceName(name string) string {
 	return trimmed
 }
 
-// CreateNamespace は指定した名前の k8s namespace を作成する
+// CreateNamespace は指定した名前の k8s namespace を作成し、NetworkPolicy を適用する
 func CreateNamespace(ctx context.Context, client kubernetes.Interface, name string) error {
 	namespaceObj := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name, // namespace 名を設定する
 			Labels: map[string]string{
-				"launchs.org/managed": "true", // このサービスが管理する namespace であることを示すラベル
+				"launchs.org/managed": "true",        // このサービスが管理する namespace であることを示すラベル
+				"kubernetes.io/metadata.name": name,  // NetworkPolicy の namespaceSelector で参照するためのラベル
 			},
 		},
 	}
 	_, err := client.CoreV1().Namespaces().Create(ctx, namespaceObj, metav1.CreateOptions{}) // namespace を作成する
+	if err != nil {
+		return err // namespace 作成に失敗した場合はエラーを返す
+	}
+
+	return applyNamespaceNetworkPolicy(ctx, client, name) // NetworkPolicy を適用する
+}
+
+// applyNamespaceNetworkPolicy は traefik・cloudflared・自身の namespace からのみ Ingress を許可する NetworkPolicy を適用する
+func applyNamespaceNetworkPolicy(ctx context.Context, client kubernetes.Interface, namespaceName string) error {
+	egressAllowAll := networkingv1.NetworkPolicyEgressRule{} // Egress は全て許可する
+	networkPolicyObj := &networkingv1.NetworkPolicy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "allow-traefik-cloudflared-local", // NetworkPolicy 名を設定する
+			Namespace: namespaceName,                     // 対象 namespace を設定する
+		},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{}, // namespace 内の全 Pod を対象にする
+			PolicyTypes: []networkingv1.PolicyType{
+				networkingv1.PolicyTypeIngress, // Ingress ポリシーを有効にする
+				networkingv1.PolicyTypeEgress,  // Egress ポリシーを有効にする
+			},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{
+				{
+					From: []networkingv1.NetworkPolicyPeer{
+						{
+							NamespaceSelector: &metav1.LabelSelector{ // traefik namespace からのアクセスを許可する
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": "traefik",
+								},
+							},
+						},
+						{
+							NamespaceSelector: &metav1.LabelSelector{ // cloudflared namespace からのアクセスを許可する
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": "cloudflared",
+								},
+							},
+						},
+						{
+							NamespaceSelector: &metav1.LabelSelector{ // 自身の namespace 内からのアクセスを許可する
+								MatchLabels: map[string]string{
+									"kubernetes.io/metadata.name": namespaceName,
+								},
+							},
+						},
+					},
+				},
+			},
+			Egress: []networkingv1.NetworkPolicyEgressRule{egressAllowAll}, // Egress は全て許可する
+		},
+	}
+	_, err := client.NetworkingV1().NetworkPolicies(namespaceName).Create(ctx, networkPolicyObj, metav1.CreateOptions{}) // NetworkPolicy を作成する
 	return err
 }
 

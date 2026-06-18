@@ -88,7 +88,7 @@ type harborRobotResponse struct {
 func (client *HarborClient) CreateHarborProject(ctx context.Context, projectName string) error {
 	requestBody := harborProjectRequest{
 		ProjectName: projectName, // プロジェクト名を設定する
-		Public:      false,       // プライベートプロジェクトとして作成する
+		Public:      true,       // 公開設定（false = プライベート）
 	}
 	bodyBytes, err := json.Marshal(requestBody) // リクエストボディを JSON にシリアライズする
 	if err != nil {

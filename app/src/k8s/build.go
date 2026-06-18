@@ -43,6 +43,7 @@ func WatchBuildJobs(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
+	registryHost string,
 ) {
 	// 起動時リカバリ: building 状態のビルドに対してログストリームを再開する
 	buildingList, err := buildRepo.FindAllBuilding(ctx) // building 状態のビルドを全件取得する
@@ -75,7 +76,7 @@ func WatchBuildJobs(
 
 		logger.Println("WatchBuildJobs: 監視を開始しました") // 監視開始ログを出力する
 
-		watchBuildJobLoop(ctx, watcher, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo) // イベントループを実行する
+		watchBuildJobLoop(ctx, watcher, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, registryHost) // イベントループを実行する
 
 		logger.Println("WatchBuildJobs: Watch チャネルが終了しました。再接続します") // 再接続ログを出力する
 	}
@@ -91,6 +92,7 @@ func watchBuildJobLoop(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
+	registryHost string,
 ) {
 	defer watcher.Stop() // 終了時に Watch を停止する
 
@@ -102,7 +104,7 @@ func watchBuildJobLoop(
 			if !ok { // チャネルが閉じられた場合はループを抜ける
 				return
 			}
-			handleBuildJobEvent(ctx, event, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo) // イベントを処理する
+			handleBuildJobEvent(ctx, event, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, registryHost) // イベントを処理する
 		}
 	}
 }
@@ -117,6 +119,7 @@ func handleBuildJobEvent(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
+	registryHost string,
 ) {
 	k8sJob, ok := event.Object.(*batchv1.Job) // イベントオブジェクトを Job にキャストする
 	if !ok {                                   // キャストに失敗した場合はスキップする
@@ -151,7 +154,7 @@ func handleBuildJobEvent(
 		logger.Println("WatchBuildJobs: ビルドを building に更新してログストリームを開始しました: " + buildID) // 更新ログを出力する
 
 	case k8sJob.Status.Succeeded > 0 && buildData.Status == models.BuildStatusBuilding: // Job が成功かつ DB が building の場合
-		builtImageURL, urlErr := buildBuiltImageURL(ctx, buildData, deploymentRepo, projectRepo, harborCredentialRepo) // BuiltImageURL を組み立てる
+		builtImageURL, urlErr := buildBuiltImageURL(ctx, buildData, deploymentRepo, projectRepo, harborCredentialRepo, registryHost) // BuiltImageURL を組み立てる
 		if urlErr != nil {
 			logger.PrintErr("WatchBuildJobs: BuiltImageURL の組み立てに失敗しました（buildID=" + buildID + "）: " + urlErr.Error()) // エラーをログ出力する
 			return
@@ -229,37 +232,63 @@ func streamAndSaveLogs(
 	}
 }
 
-// collectJobLogs は build-job-id ラベルに対応する全 Pod を取得し、各 Pod の全コンテナログをチャンネルで返す
+// collectJobLogs は build-job-id ラベルに対応する Pod を取得し、
+// initContainer → main container の順に各コンテナが起動するまで待機してからログをストリームする
 func collectJobLogs(ctx context.Context, k8sClient kubernetes.Interface, namespace, buildID string) <-chan string {
 	logCh := make(chan string, 100) // ログ行を送るチャンネルを生成する
 
 	go func() {
 		defer close(logCh) // 終了時にチャンネルをクローズする
 
-		podList, err := waitForJobPods(ctx, k8sClient, namespace, buildID) // Job に属する Pod が起動するまで待機する
+		pod, err := waitForJobPod(ctx, k8sClient, namespace, buildID) // Job に属する Pod が起動するまで待機する
 		if err != nil {
 			logger.PrintErr("WatchBuildJobs: Pod 取得に失敗しました（buildID=" + buildID + "）: " + err.Error()) // エラーをログ出力する
 			return
 		}
 
-		for podIndex := range podList { // 各 Pod のログを取得する
-			pod := &podList[podIndex]
+		// initContainer 名のリストを収集する（実行順を保持）
+		initContainerNames := make([]string, 0, len(pod.Spec.InitContainers)) // initContainer 名リストを初期化する
+		for initIndex := range pod.Spec.InitContainers {
+			initContainerNames = append(initContainerNames, pod.Spec.InitContainers[initIndex].Name) // initContainer 名を追加する
+		}
 
-			// initContainers と containers の全コンテナ名を収集する
-			containerNames := make([]string, 0) // コンテナ名一覧を初期化する
-			for initIndex := range pod.Spec.InitContainers {
-				containerNames = append(containerNames, pod.Spec.InitContainers[initIndex].Name) // initContainer 名を追加する
-			}
-			for containerIndex := range pod.Spec.Containers {
-				containerNames = append(containerNames, pod.Spec.Containers[containerIndex].Name) // container 名を追加する
-			}
+		// main container 名のリストを収集する
+		mainContainerNames := make([]string, 0, len(pod.Spec.Containers)) // main container 名リストを初期化する
+		for containerIndex := range pod.Spec.Containers {
+			mainContainerNames = append(mainContainerNames, pod.Spec.Containers[containerIndex].Name) // container 名を追加する
+		}
 
-			for _, containerName := range containerNames { // 各コンテナのログをストリームする
-				if err := streamPodContainerLogs(ctx, k8sClient, namespace, pod.Name, containerName, logCh); err != nil { // コンテナのログをストリームする
-					if ctx.Err() == nil { // コンテキストキャンセル以外のエラーをログ出力する
-						logger.PrintErr("WatchBuildJobs: コンテナログ取得に失敗しました（pod=" + pod.Name + ", container=" + containerName + "）: " + err.Error()) // エラーをログ出力する
-					}
+		// initContainer は順番に実行されるため、各コンテナが running または terminated になるまで待機してからログを取得する
+		for _, containerName := range initContainerNames {
+			if err := waitForContainerRunning(ctx, k8sClient, namespace, pod.Name, containerName); err != nil { // コンテナが起動するまで待機する
+				if ctx.Err() != nil { // コンテキストキャンセルの場合は終了する
+					return
 				}
+				logger.PrintErr("WatchBuildJobs: initContainer の起動待機に失敗しました（container=" + containerName + "）: " + err.Error()) // エラーをログ出力する
+				continue                                                                                                                     // 次のコンテナへ進む
+			}
+			if err := streamPodContainerLogs(ctx, k8sClient, namespace, pod.Name, containerName, logCh); err != nil { // コンテナのログをストリームする
+				if ctx.Err() != nil { // コンテキストキャンセルの場合は終了する
+					return
+				}
+				logger.PrintErr("WatchBuildJobs: initContainer ログ取得に失敗しました（container=" + containerName + "）: " + err.Error()) // エラーをログ出力する
+			}
+		}
+
+		// main container のログを取得する（init コンテナがすべて完了した後に実行される）
+		for _, containerName := range mainContainerNames {
+			if err := waitForContainerRunning(ctx, k8sClient, namespace, pod.Name, containerName); err != nil { // コンテナが起動するまで待機する
+				if ctx.Err() != nil { // コンテキストキャンセルの場合は終了する
+					return
+				}
+				logger.PrintErr("WatchBuildJobs: main container の起動待機に失敗しました（container=" + containerName + "）: " + err.Error()) // エラーをログ出力する
+				continue                                                                                                                      // 次のコンテナへ進む
+			}
+			if err := streamPodContainerLogs(ctx, k8sClient, namespace, pod.Name, containerName, logCh); err != nil { // コンテナのログをストリームする
+				if ctx.Err() != nil { // コンテキストキャンセルの場合は終了する
+					return
+				}
+				logger.PrintErr("WatchBuildJobs: main container ログ取得に失敗しました（container=" + containerName + "）: " + err.Error()) // エラーをログ出力する
 			}
 		}
 	}()
@@ -267,16 +296,16 @@ func collectJobLogs(ctx context.Context, k8sClient kubernetes.Interface, namespa
 	return logCh // チャンネルを返す
 }
 
-// waitForJobPods は build-job-id ラベルに対応する Pod が少なくとも1つ起動するまで最大 60 秒待機して返す
-func waitForJobPods(ctx context.Context, k8sClient kubernetes.Interface, namespace, buildID string) ([]corev1.Pod, error) {
+// waitForJobPod は build-job-id ラベルに対応する Pod が少なくとも1つ起動するまで最大 120 秒待機して返す
+func waitForJobPod(ctx context.Context, k8sClient kubernetes.Interface, namespace, buildID string) (*corev1.Pod, error) {
 	labelSelector := "build-job-id=" + buildID // build-job-id ラベルでフィルタするセレクタを生成する
-	for retryIndex := range make([]struct{}, 60) {                              // 最大 60 回リトライする
+	for retryIndex := range make([]struct{}, 120) {                             // 最大 120 回リトライする
 		_ = retryIndex
 		podList, err := k8sClient.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 			LabelSelector: labelSelector, // build-job-id ラベルで Pod を絞り込む
 		}) // Pod 一覧を取得する
 		if err == nil && len(podList.Items) > 0 { // Pod が1つ以上存在する場合は返す
-			return podList.Items, nil
+			return &podList.Items[0], nil // 最初の Pod を返す
 		}
 		select {
 		case <-ctx.Done(): // コンテキストがキャンセルされた場合は終了する
@@ -284,7 +313,52 @@ func waitForJobPods(ctx context.Context, k8sClient kubernetes.Interface, namespa
 		case <-time.After(time.Second): // 1秒待機してリトライする
 		}
 	}
-	return nil, fmt.Errorf("build-job-id=%s に対応する Pod が 60 秒以内に起動しませんでした", buildID) // タイムアウトエラーを返す
+	return nil, fmt.Errorf("build-job-id=%s に対応する Pod が 120 秒以内に起動しませんでした", buildID) // タイムアウトエラーを返す
+}
+
+// waitForContainerRunning は指定コンテナが Running または Terminated（ログ取得可能）になるまで最大 300 秒待機する
+func waitForContainerRunning(ctx context.Context, k8sClient kubernetes.Interface, namespace, podName, containerName string) error {
+	for retryIndex := range make([]struct{}, 300) { // 最大 300 回（300 秒）リトライする
+		_ = retryIndex
+		pod, err := k8sClient.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{}) // Pod の最新状態を取得する
+		if err != nil {
+			select {
+			case <-ctx.Done(): // コンテキストキャンセルの場合は終了する
+				return ctx.Err()
+			case <-time.After(time.Second):
+				continue // Pod 取得失敗は一時的なものとしてリトライする
+			}
+		}
+
+		// initContainer のステータスを確認する
+		for statusIndex := range pod.Status.InitContainerStatuses {
+			status := &pod.Status.InitContainerStatuses[statusIndex]
+			if status.Name != containerName { // 対象コンテナでない場合はスキップする
+				continue
+			}
+			if status.State.Running != nil || status.State.Terminated != nil { // Running または Terminated であればログ取得可能
+				return nil
+			}
+		}
+
+		// main container のステータスを確認する
+		for statusIndex := range pod.Status.ContainerStatuses {
+			status := &pod.Status.ContainerStatuses[statusIndex]
+			if status.Name != containerName { // 対象コンテナでない場合はスキップする
+				continue
+			}
+			if status.State.Running != nil || status.State.Terminated != nil { // Running または Terminated であればログ取得可能
+				return nil
+			}
+		}
+
+		select {
+		case <-ctx.Done(): // コンテキストがキャンセルされた場合は終了する
+			return ctx.Err()
+		case <-time.After(time.Second): // 1秒待機してリトライする
+		}
+	}
+	return fmt.Errorf("コンテナ %s が 300 秒以内に起動しませんでした", containerName) // タイムアウトエラーを返す
 }
 
 // streamPodContainerLogs は指定した Pod/コンテナのログを Follow で読み取り、logCh へ送信する
@@ -301,7 +375,8 @@ func streamPodContainerLogs(ctx context.Context, k8sClient kubernetes.Interface,
 	defer stream.Close() // 終了時にストリームをクローズする
 
 	scanner := bufio.NewScanner(stream) // スキャナを生成する
-	for scanner.Scan() {                // ログを1行ずつ読み取る
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 長い行（buildctl の出力）に対応するためバッファを拡大する
+	for scanner.Scan() {                               // ログを1行ずつ読み取る
 		line := fmt.Sprintf("[%s] %s", containerName, scanner.Text()) // コンテナ名プレフィックスを付与する
 		select {
 		case logCh <- line: // ログ行をチャンネルへ送信する
@@ -319,6 +394,7 @@ func buildBuiltImageURL(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
+	registryHost string,
 ) (string, error) {
 	deploymentData, err := deploymentRepo.FindByID(ctx, buildData.DeploymentID) // deployment を取得する
 	if err != nil {
@@ -330,16 +406,17 @@ func buildBuiltImageURL(
 		return "", fmt.Errorf("project の取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
-	harborCredential, err := harborCredentialRepo.FindByProjectIDNoTx(ctx, deploymentData.ProjectID) // harbor credential を取得する
+	// harbor credential はロボットアカウント認証情報の取得のみに使う（エンドポイントは registryHost を使う）
+	_, err = harborCredentialRepo.FindByProjectIDNoTx(ctx, deploymentData.ProjectID) // harbor credential の存在確認をする
 	if err != nil {
 		return "", fmt.Errorf("harbor credential の取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
 	imageURL := fmt.Sprintf("%s/%s/%s:%s",
-		harborCredential.HarborEndpoint, // Harbor エンドポイントを設定する
-		projectData.Name,                // プロジェクト名を設定する
-		deploymentData.Name,             // デプロイメント名を設定する
-		buildData.ID,                    // ビルドIDをタグに使用する
+		registryHost,       // クラスタ内 DNS 名を使用する
+		projectData.ID,     // Harbor プロジェクト名にプロジェクト ID を使う
+		deploymentData.ID,  // イメージ名にデプロイメント ID を使う
+		buildData.ID,       // ビルド ID をタグに使用する
 	) // イメージURLを組み立てる
 
 	return imageURL, nil // イメージURLを返す

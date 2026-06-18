@@ -144,9 +144,15 @@ func (generator *Generator) GenerateService(
 	if port == 0 {                  // pending が 0 の場合は current 値を使う
 		port = serviceData.Port
 	}
+	if port == 0 { // current も 0 の場合はデフォルト値を設定する（k8s は 0 を拒否する）
+		port = 80
+	}
 	targetPort := serviceData.PendingTargetPort // pending_target_port を使う
 	if targetPort == 0 {                        // pending が 0 の場合は current 値を使う
 		targetPort = serviceData.TargetPort
+	}
+	if targetPort == 0 { // current も 0 の場合は port に合わせる
+		targetPort = port
 	}
 	serviceType := corev1.ServiceType(serviceData.Type) // Service タイプを設定する
 	if serviceType == "" {                              // 未設定の場合はデフォルトを ClusterIP にする

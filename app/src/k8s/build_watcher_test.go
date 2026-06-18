@@ -276,7 +276,7 @@ func TestHandleBuildJobEvent_ActiveJob_StatusBecomesBuilding(t *testing.T) {
 		Object: activeJob,         // Job オブジェクトを設定する
 	}
 
-	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo) // イベントを処理する
+	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, "") // イベントを処理する
 
 	if updatedStatus != models.BuildStatusBuilding { // ステータスが building になっていることを確認する
 		t.Errorf("Job Active 後のステータスは building であるべきですが、%s でした", updatedStatus)
@@ -320,14 +320,14 @@ func TestHandleBuildJobEvent_SucceededJob_StatusBecomesSucceeded(t *testing.T) {
 		Object: succeededJob,      // Job オブジェクトを設定する
 	}
 
-	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo) // イベントを処理する
+	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, "") // イベントを処理する
 
 	if resultStatus != models.BuildStatusSucceeded { // ステータスが succeeded になっていることを確認する
 		t.Errorf("Job Succeeded 後のステータスは succeeded であるべきですが、%s でした", resultStatus)
 	}
 
-	expectedImageURL := "harbor.example.com/my-project/my-app:" + buildID // 期待するイメージURLを組み立てる
-	if resultImageURL != expectedImageURL {                                 // イメージURLが正しいことを確認する
+	expectedImageURL := "/project-id-002/deployment-id-002:" + buildID // 期待するイメージURLを組み立てる（registryHost="" のため先頭スラッシュ）
+	if resultImageURL != expectedImageURL {                              // イメージURLが正しいことを確認する
 		t.Errorf("BuiltImageURL: 期待=%s, 実際=%s", expectedImageURL, resultImageURL)
 	}
 }
@@ -367,10 +367,10 @@ func TestHandleBuildJobEvent_SucceededJob_PendingImageURLUpdated(t *testing.T) {
 		Object: succeededJob,      // Job オブジェクトを設定する
 	}
 
-	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo) // イベントを処理する
+	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, "") // イベントを処理する
 
-	expectedImageURL := "harbor.example.com/my-project/my-app:" + buildID // 期待するイメージURLを組み立てる
-	if updatedPendingImageURL != expectedImageURL {                        // pending_image_url が正しく更新されていることを確認する
+	expectedImageURL := "/project-id-003/deployment-id-003:" + buildID // 期待するイメージURLを組み立てる（registryHost="" のため先頭スラッシュ）
+	if updatedPendingImageURL != expectedImageURL {                      // pending_image_url が正しく更新されていることを確認する
 		t.Errorf("pending_image_url: 期待=%s, 実際=%s", expectedImageURL, updatedPendingImageURL)
 	}
 }
@@ -410,7 +410,7 @@ func TestHandleBuildJobEvent_FailedJob_StatusBecomesFailed(t *testing.T) {
 		Object: failedJob,         // Job オブジェクトを設定する
 	}
 
-	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo) // イベントを処理する
+	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, "") // イベントを処理する
 
 	if resultStatus != models.BuildStatusFailed { // ステータスが failed になっていることを確認する
 		t.Errorf("Job Failed 後のステータスは failed であるべきですが、%s でした", resultStatus)
@@ -462,7 +462,7 @@ func TestWatchBuildJobs_RecoversInProgressBuilds(t *testing.T) {
 		return true, fakeWatcher, nil // フェイク Watcher を返す
 	})
 
-	go WatchBuildJobs(ctx, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo) // Watcher をバックグラウンドで起動する
+	go WatchBuildJobs(ctx, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, "") // Watcher をバックグラウンドで起動する
 
 	// リカバリが実行されるまで少し待機する
 	waitDeadline := time.After(2 * time.Second) // 2秒のタイムアウトを設定する

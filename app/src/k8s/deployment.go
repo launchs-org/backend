@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,96 @@ func DeleteDeployment(ctx context.Context, client kubernetes.Interface, namespac
 	return client.AppsV1().Deployments(namespace).Delete(ctx, name, metav1.DeleteOptions{}) // Deployment を削除する
 }
 
+// pollDeployments は 10 秒ごとに全 Deployment を List して app_status を同期する
+// Watch 接続切断中のイベント取りこぼしを補完するためのポーリングループ
+func pollDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]context.CancelFunc, streamCancelMu *sync.Mutex) {
+	ticker := time.NewTicker(10 * time.Second) // 10 秒ごとにポーリングするタイマーを生成する
+	defer ticker.Stop()                        // 終了時にタイマーを停止する
+
+	for {
+		select {
+		case <-ctx.Done(): // コンテキストがキャンセルされた場合は終了する
+			return
+		case <-ticker.C: // 10 秒ごとにポーリングを実行する
+			logger.Println("pollDeployments: ポーリング開始") // ポーリング開始ログを出力する
+
+			deploymentList, err := k8sClient.AppsV1().Deployments("").List(ctx, metav1.ListOptions{
+				LabelSelector: "launchs.org/deployment-id", // launchs.org/deployment-id ラベルを持つ Deployment のみ取得する
+			}) // Deployment 一覧を取得する
+			if err != nil {
+				logger.PrintErr("pollDeployments: Deployment 一覧取得に失敗しました: " + err.Error()) // エラーをログ出力する
+				continue                                                                        // 次のポーリングまで待機する
+			}
+
+			logger.Println("pollDeployments: " + strconv.Itoa(len(deploymentList.Items)) + " 件の Deployment を確認します") // 件数ログを出力する
+
+			for pollIndex := range deploymentList.Items { // 各 Deployment を確認する
+				k8sDeployment := &deploymentList.Items[pollIndex]                        // ポインタを取得する
+				deploymentID := k8sDeployment.Labels["launchs.org/deployment-id"]       // deployment-id ラベルを取得する
+				if deploymentID == "" {                                                  // ラベルが存在しない場合はスキップする
+					continue
+				}
+
+				newAppStatus := calcAppStatus(k8sDeployment) // 現在の k8s 状態から app_status を計算する
+
+				currentDeployment, err := deploymentRepo.FindByID(ctx, deploymentID) // DB の現在値を取得する
+				if err != nil {
+					logger.PrintErr("pollDeployments: Deployment 取得に失敗しました（deploymentID=" + deploymentID + "）: " + err.Error()) // エラーをログ出力する
+					continue                                                                                                          // 次の Deployment に進む
+				}
+
+				if currentDeployment.AppStatus != newAppStatus { // app_status に変化がある場合のみ更新する
+					logger.Println("pollDeployments: app_status 変化検出 deploymentID=" + deploymentID + " " + string(currentDeployment.AppStatus) + " → " + string(newAppStatus)) // 変化ログを出力する
+
+					if err := deploymentRepo.UpdateAppStatus(ctx, deploymentID, newAppStatus); err != nil { // app_status を更新する
+						logger.PrintErr("pollDeployments: app_status 更新に失敗しました（deploymentID=" + deploymentID + "）: " + err.Error()) // エラーをログ出力する
+						continue                                                                                                            // 次の Deployment に進む
+					}
+
+					k8sStatusJSON, marshalErr := marshalDeploymentStatus(k8sDeployment.Status) // k8s_status をシリアライズする
+					if marshalErr != nil {
+						logger.PrintErr("pollDeployments: k8s_status シリアライズに失敗しました（deploymentID=" + deploymentID + "）: " + marshalErr.Error()) // エラーをログ出力する
+					} else if err := deploymentRepo.UpdateK8sStatus(ctx, deploymentID, k8sStatusJSON); err != nil { // k8s_status を更新する
+						logger.PrintErr("pollDeployments: k8s_status 更新に失敗しました（deploymentID=" + deploymentID + "）: " + err.Error()) // エラーをログ出力する
+					}
+				} else {
+					logger.Println("pollDeployments: 変化なし deploymentID=" + deploymentID + " app_status=" + string(newAppStatus)) // 変化なしログを出力する
+				}
+
+				if newAppStatus == models.AppStatusRunning { // app_status が running の場合はログストリームを開始する
+					streamCancelMu.Lock()                                       // マップへの排他アクセスを開始する
+					_, streamRunning := streamCancelMap[deploymentID]           // ストリームが既に実行中か確認する
+					streamCancelMu.Unlock()                                     // マップへの排他アクセスを終了する
+
+					if !streamRunning { // ストリームが未起動の場合のみ開始する
+						projectData, projectErr := projectRepo.FindByIDNoTx(ctx, currentDeployment.ProjectID) // project を取得して namespace を解決する
+						if projectErr != nil {
+							logger.PrintErr("pollDeployments: Project 取得に失敗しました（deploymentID=" + deploymentID + "）: " + projectErr.Error()) // エラーをログ出力する
+							continue                                                                                                                // 次の Deployment に進む
+						}
+						streamCtx, streamCancel := context.WithCancel(ctx)      // ストリームのコンテキストを生成する
+						streamCancelMu.Lock()                                    // マップへの排他アクセスを開始する
+						streamCancelMap[deploymentID] = streamCancel             // キャンセル関数をマップに登録する
+						streamCancelMu.Unlock()                                  // マップへの排他アクセスを終了する
+						go streamAndSavePodLogs(streamCtx, k8sClient, podLogChunkRepo, deploymentID, projectData.Namespace, k8sDeployment.Name) // ログストリームを goroutine で開始する
+						logger.Println("pollDeployments: Podログストリームを開始しました: " + deploymentID)                                               // 開始ログを出力する
+					}
+				} else { // running 以外の場合は実行中のログストリームをキャンセルする
+					streamCancelMu.Lock()                                               // マップへの排他アクセスを開始する
+					if streamCancel, streamExists := streamCancelMap[deploymentID]; streamExists { // ストリームが実行中の場合
+						streamCancel()                        // ストリームをキャンセルする
+						delete(streamCancelMap, deploymentID) // マップから削除する
+						logger.Println("pollDeployments: Podログストリームを停止しました: " + deploymentID) // 停止ログを出力する
+					}
+					streamCancelMu.Unlock() // マップへの排他アクセスを終了する
+				}
+			}
+
+			logger.Println("pollDeployments: ポーリング完了") // ポーリング完了ログを出力する
+		}
+	}
+}
+
 // WatchDeployments は全 Namespace の Deployment 変化を監視して DB を自動更新する
 func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository) {
 	// 実行中のログストリームを管理するマップ（deploymentID → cancelFunc）
@@ -64,6 +155,8 @@ func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deplo
 			logger.Println("WatchDeployments: 起動時リカバリでログストリームを再開しました: " + deploymentData.ID)                                            // リカバリログを出力する
 		}
 	}
+
+	go pollDeployments(ctx, k8sClient, deploymentRepo, podLogChunkRepo, projectRepo, streamCancelMap, &streamCancelMu) // 定期ポーリングを goroutine で起動する
 
 	for {
 		if ctx.Err() != nil { // コンテキストがキャンセルされた場合は終了する
@@ -362,18 +455,13 @@ func marshalDeploymentStatus(status appsv1.DeploymentStatus) (datatypes.JSON, er
 	return datatypes.JSON(statusBytes), nil // datatypes.JSON に変換して返す
 }
 
-// calcAppStatus は k8s Deployment の状態から AppStatus を計算する
+// calcAppStatus は k8s Deployment の DeploymentAvailable 条件から AppStatus を計算する
+// kubectl rollout status と同じ判定でローリングアップデート中の誤検知を防ぐ
 func calcAppStatus(k8sDeployment *appsv1.Deployment) models.AppStatus {
-	desiredReplicas := k8sDeployment.Spec.Replicas // 希望レプリカ数を取得する
-	if desiredReplicas == nil {                     // nil の場合はデフォルト 1 とみなす
-		defaultReplicas := int32(1)
-		desiredReplicas = &defaultReplicas
+	for _, condition := range k8sDeployment.Status.Conditions { // Deployment の条件一覧を確認する
+		if condition.Type == appsv1.DeploymentAvailable && condition.Status == corev1.ConditionTrue { // Available 条件が True の場合
+			return models.AppStatusRunning // running を返す
+		}
 	}
-
-	readyReplicas := k8sDeployment.Status.ReadyReplicas // Ready なレプリカ数を取得する
-
-	if readyReplicas >= *desiredReplicas && *desiredReplicas > 0 { // 全レプリカが Ready の場合
-		return models.AppStatusRunning // running を返す
-	}
-	return models.AppStatusDeploying // 未達の場合は deploying を返す
+	return models.AppStatusDeploying // Available 条件が満たされていない場合は deploying を返す
 }
