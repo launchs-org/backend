@@ -14,6 +14,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const buildkitNamespace = "buildkit" // ビルドジョブを作成する専用 namespace
+
 // ErrBuildConflict はビルドが既に進行中の場合のエラー
 var ErrBuildConflict = errors.New("build already in progress")
 
@@ -37,6 +39,7 @@ type buildServiceImpl struct {
 	harborCredentialRepo repository.HarborCredentialRepository // harbor credential リポジトリ
 	logChunkRepo         repository.BuildLogChunkRepository    // ログチャンクリポジトリ
 	k8sClient            kubernetes.Interface                  // k8s クライアント
+	registryHost         string                                // ビルドジョブが使う Harbor ホスト名（スキームなし、クラスタ内 DNS 名）
 }
 
 // NewBuildService は BuildService の実装を返す
@@ -47,6 +50,7 @@ func NewBuildService(
 	harborCredentialRepo repository.HarborCredentialRepository,
 	logChunkRepo repository.BuildLogChunkRepository,
 	k8sClient kubernetes.Interface,
+	registryHost string,
 ) BuildService {
 	return &buildServiceImpl{
 		deploymentRepo:       deploymentRepo,       // deployment リポジトリを注入する
@@ -55,6 +59,7 @@ func NewBuildService(
 		harborCredentialRepo: harborCredentialRepo, // harbor credential リポジトリを注入する
 		logChunkRepo:         logChunkRepo,         // ログチャンクリポジトリを注入する
 		k8sClient:            k8sClient,            // k8s クライアントを注入する
+		registryHost:         registryHost,         // クラスタ内 DNS 名を注入する
 	}
 }
 
@@ -126,15 +131,15 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 		railpackClient, railpackErr := railpack.New(svc.k8sClient, railpack.BuildConfig{ // railpack クライアントを生成する
 			JobID:            buildData.ID,                      // ビルド ID をジョブ ID に使う
 			GitRepo:          deploymentData.PendingGithubRepoURL, // Git リポジトリ URL を設定する
-			GitBranch:        buildData.Branch,                  // ブランチを設定する
-			Subdir:           buildData.Directory,               // ビルドサブディレクトリを設定する
-			ImageName:        deploymentData.Name,               // イメージ名にデプロイメント名を使う
-			ImageTag:         buildData.ID,                      // タグにビルド ID を使う
-			RegistryHost:     harborCredential.HarborEndpoint,   // Harbor ホストを設定する
-			RegistryProject:  projectData.Name,                  // Harbor プロジェクト名を設定する
-			RegistryUsername: harborCredential.RobotName,        // robot アカウント名を設定する
-			RegistryPassword: harborCredential.RobotSecret,      // robot シークレットを設定する
-			Namespace:        projectData.Namespace,             // namespace を設定する
+			GitBranch:        buildData.Branch,                    // ブランチを設定する
+			Subdir:           buildData.Directory,                 // ビルドサブディレクトリを設定する
+			ImageName:        deploymentData.ID,                   // イメージ名にデプロイメント ID を使う
+			ImageTag:         buildData.ID,                        // タグにビルド ID を使う
+			RegistryHost:     svc.registryHost, // クラスタ内 DNS 名を使用する（DB の harbor_endpoint は外部アクセス用 IP のため使わない）
+			RegistryProject:  projectData.ID,                      // Harbor プロジェクト名にプロジェクト ID を使う
+			RegistryUsername: harborCredential.RobotName,          // robot アカウント名を設定する
+			RegistryPassword: harborCredential.RobotSecret,        // robot シークレットを設定する
+			Namespace:        buildkitNamespace,                   // ビルド専用 namespace を設定する
 		})
 		if railpackErr != nil {
 			return nil, railpackErr // クライアント生成エラーを返す
@@ -186,7 +191,7 @@ func (svc *buildServiceImpl) CancelBuild(ctx context.Context, userID string, bui
 
 	// 4. k8s Job を削除する（Job 名が設定されている場合のみ）
 	if buildData.K8sJobName != "" { // Job 名が空の場合は pending 状態で Job 未作成なのでスキップする
-		if err := k8s.DeleteBuildJob(ctx, svc.k8sClient, projectData.Namespace, buildData.K8sJobName); err != nil { // k8s Job を削除する
+		if err := k8s.DeleteBuildJob(ctx, svc.k8sClient, buildkitNamespace, buildData.K8sJobName); err != nil { // ビルド専用 namespace の Job を削除する
 			return fmt.Errorf("k8s Job の削除に失敗しました: %w", err) // 削除エラーを返す
 		}
 	}
@@ -238,6 +243,30 @@ func (svc *buildServiceImpl) GetBuildLogs(ctx context.Context, userID string, bu
 	}
 	return logBuilder.String(), nil // 結合したログ文字列を返す
 }
+
+// ListBuilds は deploymentID に紐づくビルド一覧を返す
+func (svc *buildServiceImpl) ListBuilds(ctx context.Context, userID string, deploymentID string) ([]models.DeploymentBuild, error) {
+	// 1. 所有権チェック
+	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // project を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	if projectData.UserID != userID { // UserID が一致しない場合は禁止エラーを返す
+		return nil, ErrForbidden
+	}
+
+	// 2. ビルド一覧を取得して返す
+	buildList, err := svc.buildRepo.FindAllByDeploymentID(ctx, deploymentID) // ビルド一覧を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	return buildList, nil // ビルド一覧を返す
+}
+
 
 // resolveBuildType は DeploymentType からビルドタイプを解決する
 func resolveBuildType(deploymentType models.DeploymentType) (models.BuildType, error) {

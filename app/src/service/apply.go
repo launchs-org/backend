@@ -155,8 +155,10 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 		}
 
 		// 4. instance_size マスターを取得してマニフェスト生成用データを組み立てる
-		var instanceSizeData models.InstanceSize                               // instance_size を格納する変数を定義する
-		tx.WithContext(ctx).First(&instanceSizeData, "size = ?", instanceSize) // instance_size マスターを取得する
+		var instanceSizeData models.InstanceSize                                                         // instance_size を格納する変数を定義する
+		if err := tx.WithContext(ctx).First(&instanceSizeData, "size = ?", instanceSize).Error; err != nil { // instance_size マスターを取得する
+			return fmt.Errorf("instance_size '%s' が instance_sizes テーブルに存在しません: %w", instanceSize, err) // レコードが見つからない場合はエラーを返す
+		}
 
 		deploymentForManifest := *deploymentData          // manifest 生成用にコピーする
 		deploymentForManifest.InstanceSize = instanceSize // 実効 instance_size を設定する

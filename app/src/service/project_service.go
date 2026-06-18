@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/google/uuid"
 	k8sclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/dynamic"
 
@@ -84,26 +85,28 @@ func (svc *projectServiceImpl) CreateProject(ctx context.Context, userID string,
 	// DB トランザクションを開始する
 	err := svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// Project レコードを作成する
+		projectID := uuid.New().String()                          // プロジェクト ID を事前生成する
 		projectData := &models.Project{
-			UserID:    userID,                           // ユーザーIDを設定する
-			Name:      req.Name,                         // プロジェクト名を設定する
-			Namespace: k8s.ToNamespaceName(req.Name),    // namespace 名として有効な文字列に変換する
-			Status:    models.ProjectStatusProvisioning, // 初期ステータスを設定する
+			ID:        projectID,                                     // UUID を明示セットする
+			UserID:    userID,                                        // ユーザーIDを設定する
+			Name:      req.Name,                                      // プロジェクト名を設定する
+			Namespace: "project-" + projectID,                        // namespace にプロジェクト ID を使う
+			Status:    models.ProjectStatusProvisioning,              // 初期ステータスを設定する
 		}
 		if err := svc.projectRepo.Create(ctx, tx, projectData); err != nil {
 			return fmt.Errorf("project レコードの作成に失敗しました: %w", err)
 		}
 
 		// Harbor project を作成する（失敗時は DB ロールバック）
-		if err := svc.harborClient.CreateHarborProject(ctx, req.Name); err != nil {
+		if err := svc.harborClient.CreateHarborProject(ctx, projectID); err != nil { // Harbor プロジェクト名にプロジェクト ID を使う
 			return fmt.Errorf("harbor project の作成に失敗しました: %w", err)
 		}
 
 		// Harbor robot account を作成する（失敗時は管理用 robot で Harbor project を補償削除して DB ロールバック）
-		robotCredential, err := svc.harborClient.CreateHarborRobotAccount(ctx, req.Name)
+		robotCredential, err := svc.harborClient.CreateHarborRobotAccount(ctx, projectID) // Harbor プロジェクト名にプロジェクト ID を使う
 		if err != nil {
 			// robot account 未作成なので管理用 robot で補償削除する
-			_ = svc.harborClient.DeleteHarborProject(ctx, req.Name, svc.harborClient.AdminCredential()) // ベストエフォートで補償削除する
+			_ = svc.harborClient.DeleteHarborProject(ctx, projectID, svc.harborClient.AdminCredential()) // ベストエフォートで補償削除する
 			return fmt.Errorf("harbor robot account の作成に失敗しました: %w", err)
 		}
 
@@ -115,19 +118,19 @@ func (svc *projectServiceImpl) CreateProject(ctx context.Context, userID string,
 			HarborEndpoint: svc.harborClient.Endpoint(), // エンドポイントを設定する
 		}
 		if err := svc.harborCredentialRepo.Create(ctx, tx, credentialData); err != nil {
-			_ = svc.harborClient.DeleteHarborProject(ctx, req.Name, *robotCredential) // ベストエフォートで補償削除する
+			_ = svc.harborClient.DeleteHarborProject(ctx, projectID, *robotCredential) // ベストエフォートで補償削除する
 			return fmt.Errorf("harbor credential レコードの作成に失敗しました: %w", err)
 		}
 
 		// k8s namespace を作成する（失敗時は project 専用 robot で Harbor project を補償削除して DB ロールバック）
-		if err := k8s.CreateNamespace(ctx, svc.k8sClient, projectData.Namespace); err != nil { // 変換済みの namespace 名を使う
-			_ = svc.harborClient.DeleteHarborProject(ctx, req.Name, *robotCredential) // ベストエフォートで補償削除する
+		if err := k8s.CreateNamespace(ctx, svc.k8sClient, projectData.Namespace); err != nil { // プロジェクト ID ベースの namespace 名を使う
+			_ = svc.harborClient.DeleteHarborProject(ctx, projectID, *robotCredential) // ベストエフォートで補償削除する
 			return fmt.Errorf("k8s namespace の作成に失敗しました: %w", err)
 		}
 
 		// すべての作成が成功したら status を active に更新する
 		if err := svc.projectRepo.UpdateStatus(ctx, tx, projectData, models.ProjectStatusActive); err != nil {
-			_ = svc.harborClient.DeleteHarborProject(ctx, req.Name, *robotCredential)         // ベストエフォートで補償削除する
+			_ = svc.harborClient.DeleteHarborProject(ctx, projectID, *robotCredential)         // ベストエフォートで補償削除する
 			_ = k8s.DeleteNamespace(ctx, svc.k8sClient, projectData.Namespace)                // ベストエフォートで補償削除する
 			return fmt.Errorf("project ステータスの更新に失敗しました: %w", err)
 		}
@@ -241,7 +244,7 @@ func (svc *projectServiceImpl) deleteProjectResources(projectData *models.Projec
 	waitGroup.Wait() // 全 Deployment の k8s リソース削除完了を待つ
 
 	// Harbor project を削除する
-	if err := svc.harborClient.DeleteHarborProject(bgCtx, projectData.Name, k8s.HarborRobotCredential{
+	if err := svc.harborClient.DeleteHarborProject(bgCtx, projectData.ID, k8s.HarborRobotCredential{ // Harbor プロジェクト名はプロジェクト ID
 		Name:   credentialData.RobotName,   // DB に保存した robot 名を使う
 		Secret: credentialData.RobotSecret, // DB に保存したシークレットを使う
 	}); err != nil {

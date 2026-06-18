@@ -125,6 +125,10 @@ func (mock *mockIngressRouteRepository) UpdateStatus(ctx context.Context, ingres
 	return nil // デフォルトは nil を返す
 }
 
+func (mock *mockIngressRouteRepository) Delete(ctx context.Context, ingressRouteID string) error {
+	return nil // デフォルトは成功を返す
+}
+
 // mockServiceRepository は ServiceRepository のテスト用モック実装
 type mockServiceRepository struct {
 	createFunc              func(ctx context.Context, service *models.Service) error
@@ -164,6 +168,10 @@ func (mock *mockServiceRepository) UpdateStatus(ctx context.Context, serviceID s
 		return mock.updateStatusFunc(ctx, serviceID, status, k8sStatus)
 	}
 	return nil // デフォルトは nil を返す
+}
+
+func (mock *mockServiceRepository) Delete(ctx context.Context, serviceID string) error {
+	return nil // デフォルトは成功を返す
 }
 
 // mockProjectRepository は ProjectRepository のテスト用モック実装（所有権チェック用）
@@ -215,7 +223,7 @@ func (mock *mockProjectRepository) DeleteNoTx(ctx context.Context, project *mode
 func newTestDeploymentService(deploymentRepo *mockDeploymentRepository, serviceRepo *mockServiceRepository, projectRepo *mockProjectRepository, ingressRouteRepo *mockIngressRouteRepository) DeploymentService {
 	fakeK8sClient := k8sfake.NewSimpleClientset()                                                                          // fake k8s クライアントを生成する
 	fakeDynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())                                            // fake dynamic クライアントを生成する
-	return NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, fakeDynamicClient) // サービスを生成する
+	return NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, fakeDynamicClient, "") // サービスを生成する
 }
 
 // TestCreateDeployment_正常に作成されpendingフィールドに値が入る は POST で全フィールドが pending_*** に入ることを確認する
@@ -528,7 +536,7 @@ func TestDeleteDeployment_k8sリソースが削除される(t *testing.T) {
 
 	fakeK8sClient := k8sfake.NewSimpleClientset()                             // fake k8s クライアントを生成する
 	fakeDynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()) // fake dynamic クライアントを生成する
-	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, fakeDynamicClient) // サービスを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, fakeDynamicClient, "") // サービスを生成する
 
 	result, err := deploymentSvc.DeleteDeployment(context.Background(), "test-user-id", "deployment-id-k8s") // サービスを実行する
 	if err != nil {
