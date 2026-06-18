@@ -55,6 +55,30 @@ func Init() error {
 	// ログを出す
 	logger.Println("マイグレーションを実行しました")
 
+	// マスターデータを挿入する
+	if err := seedMasterData(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// seedMasterData は instance_sizes などのマスターテーブルに初期データを挿入する
+func seedMasterData() error {
+	instanceSizeList := []models.InstanceSize{
+		{Size: "small",  CPURequest: "100m",  CPULimit: "500m",  MemoryRequest: "128Mi", MemoryLimit: "512Mi"},  // 小サイズ
+		{Size: "medium", CPURequest: "250m",  CPULimit: "1000m", MemoryRequest: "256Mi", MemoryLimit: "1Gi"},    // 中サイズ
+		{Size: "large",  CPURequest: "500m",  CPULimit: "2000m", MemoryRequest: "512Mi", MemoryLimit: "2Gi"},    // 大サイズ
+	} // 挿入するインスタンスサイズ一覧
+
+	for _, instanceSize := range instanceSizeList {
+		result := Database.FirstOrCreate(&instanceSize, models.InstanceSize{Size: instanceSize.Size}) // 存在しない場合のみ挿入する
+		if result.Error != nil {
+			return fmt.Errorf("instance_sizes シードデータの挿入に失敗しました (size=%s): %w", instanceSize.Size, result.Error) // シードエラーを返す
+		}
+	}
+
+	logger.Println("マスターデータのシードが完了しました")
 	return nil
 }
 

@@ -152,6 +152,7 @@ type ServiceRepository interface {
 	FindByServiceID(ctx context.Context, serviceID string) (*models.Service, error)                              // serviceID に紐づく service を取得する
 	Update(ctx context.Context, service *models.Service) error                                                   // service を更新する
 	UpdateStatus(ctx context.Context, serviceID string, status models.ServiceStatus, k8sStatus datatypes.JSON) error // service の status と k8s_status を更新する
+	Delete(ctx context.Context, serviceID string) error                                                          // service を削除する
 }
 
 // serviceRepositoryImpl は ServiceRepository の GORM 実装
@@ -202,6 +203,18 @@ func (repo *serviceRepositoryImpl) UpdateStatus(ctx context.Context, serviceID s
 		return result.Error // エラーを返す
 	}
 	if result.RowsAffected == 0 { // 更新対象が存在しない場合
+		return gorm.ErrRecordNotFound // レコードなしエラーを返す
+	}
+	return nil // 正常終了
+}
+
+// Delete は serviceID に対応する service レコードを削除する
+func (repo *serviceRepositoryImpl) Delete(ctx context.Context, serviceID string) error {
+	result := repo.db.WithContext(ctx).Delete(&models.Service{}, "id = ?", serviceID) // service を削除する
+	if result.Error != nil {                                                           // エラーが発生した場合
+		return result.Error // エラーを返す
+	}
+	if result.RowsAffected == 0 { // 削除対象が存在しない場合
 		return gorm.ErrRecordNotFound // レコードなしエラーを返す
 	}
 	return nil // 正常終了

@@ -15,6 +15,7 @@ type IngressRouteRepository interface {
 	FindByDeploymentID(ctx context.Context, deploymentID string) (*models.IngressRoute, error)                                        // deploymentID に紐づく ingress_route を取得する
 	Update(ctx context.Context, ingressRoute *models.IngressRoute) error                                                              // ingress_route を更新する
 	UpdateStatus(ctx context.Context, ingressRouteID string, status models.IngressRouteStatus, k8sStatus datatypes.JSON) error        // ingress_route の status と k8s_status を更新する
+	Delete(ctx context.Context, ingressRouteID string) error                                                                          // ingress_route を削除する
 }
 
 // ingressRouteRepositoryImpl は IngressRouteRepository の GORM 実装
@@ -65,6 +66,18 @@ func (repo *ingressRouteRepositoryImpl) UpdateStatus(ctx context.Context, ingres
 		return result.Error // エラーを返す
 	}
 	if result.RowsAffected == 0 { // 更新対象が存在しない場合
+		return gorm.ErrRecordNotFound // レコードなしエラーを返す
+	}
+	return nil // 正常終了
+}
+
+// Delete は ingressRouteID に対応する ingress_route レコードを削除する
+func (repo *ingressRouteRepositoryImpl) Delete(ctx context.Context, ingressRouteID string) error {
+	result := repo.db.WithContext(ctx).Delete(&models.IngressRoute{}, "id = ?", ingressRouteID) // ingress_route を削除する
+	if result.Error != nil {                                                                      // エラーが発生した場合
+		return result.Error // エラーを返す
+	}
+	if result.RowsAffected == 0 { // 削除対象が存在しない場合
 		return gorm.ErrRecordNotFound // レコードなしエラーを返す
 	}
 	return nil // 正常終了
