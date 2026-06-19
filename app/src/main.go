@@ -65,27 +65,32 @@ func main() {
 	)
 
 	// リポジトリを生成する（project・deployment ハンドラーで共有する）
-	projectRepo := repository.NewProjectRepository(repository.Database)             // project リポジトリを生成する
-	harborCredentialRepo := repository.NewHarborCredentialRepository(repository.Database) // harbor credential リポジトリを生成する
-	deploymentRepo := repository.NewDeploymentRepository(repository.Database)       // deployment リポジトリを生成する
-	ingressRouteRepo := repository.NewIngressRouteRepository(repository.Database)   // ingress_route リポジトリを生成する
+	projectRepo := repository.NewProjectRepository(repository.Database)                    // project リポジトリを生成する
+	harborCredentialRepo := repository.NewHarborCredentialRepository(repository.Database)  // harbor credential リポジトリを生成する
+	deploymentRepo := repository.NewDeploymentRepository(repository.Database)              // deployment リポジトリを生成する
+	ingressRouteRepo := repository.NewIngressRouteRepository(repository.Database)          // ingress_route リポジトリを生成する
+	ingressRouteRouteRepo := repository.NewIngressRouteRouteRepository(repository.Database) // ingress_route_route リポジトリを生成する
 
 	// project ハンドラーを DI 組み立てする
-	projectServiceImpl := service.NewProjectService(repository.Database, projectRepo, harborCredentialRepo, deploymentRepo, ingressRouteRepo, userQuotaRepo, k8sClient, dynamicClient, harborClient) // project サービスを生成する
-	projectHandler := handler.NewProjectHandler(projectServiceImpl)                 // project ハンドラーを生成する
+	projectServiceImpl := service.NewProjectService(repository.Database, projectRepo, harborCredentialRepo, deploymentRepo, ingressRouteRepo, ingressRouteRouteRepo, userQuotaRepo, k8sClient, dynamicClient, harborClient) // project サービスを生成する
+	projectHandler := handler.NewProjectHandler(projectServiceImpl)                        // project ハンドラーを生成する
 
 	// deployment ハンドラーを DI 組み立てする
-	serviceRepo := repository.NewServiceRepository(repository.Database)                                                    // service リポジトリを生成する
-	envVarRepo := repository.NewEnvVarRepository(repository.Database)                                                      // env_var リポジトリを生成する
-	envVarMountRepo := repository.NewEnvVarMountRepository(repository.Database)                                            // env_var_mount リポジトリを生成する
-	applyHistoryRepo := repository.NewApplyHistoryRepository(repository.Database)                                          // apply_history リポジトリを生成する
-	volumeRepo := repository.NewVolumeRepository(repository.Database)                                                      // volume リポジトリを生成する
-	volumeMountRepo := repository.NewVolumeMountRepository(repository.Database)                                            // volume_mount リポジトリを生成する
-	buildRepo := repository.NewDeploymentBuildRepository(repository.Database)                                              // build リポジトリを生成する
-	baseDomain := os.Getenv("BASE_DOMAIN")                                                                                                                                                          // ベースドメインを環境変数から取得する
-	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, envVarMountRepo, volumeMountRepo, userQuotaRepo, k8sClient, dynamicClient, baseDomain) // deployment サービスを生成する
-	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, envVarRepo, envVarMountRepo, volumeRepo, volumeMountRepo, userQuotaRepo) // apply サービスを生成する
-	deploymentHandler := handler.NewDeploymentHandler(deploymentServiceImpl, applyServiceImpl)                             // deployment ハンドラーを生成する
+	serviceRepo := repository.NewServiceRepository(repository.Database)              // service リポジトリを生成する
+	envVarRepo := repository.NewEnvVarRepository(repository.Database)                // env_var リポジトリを生成する
+	envVarMountRepo := repository.NewEnvVarMountRepository(repository.Database)      // env_var_mount リポジトリを生成する
+	applyHistoryRepo := repository.NewApplyHistoryRepository(repository.Database)    // apply_history リポジトリを生成する
+	volumeRepo := repository.NewVolumeRepository(repository.Database)                // volume リポジトリを生成する
+	volumeMountRepo := repository.NewVolumeMountRepository(repository.Database)      // volume_mount リポジトリを生成する
+	buildRepo := repository.NewDeploymentBuildRepository(repository.Database)        // build リポジトリを生成する
+	baseDomain := os.Getenv("BASE_DOMAIN")                                           // ベースドメインを環境変数から取得する
+	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, envVarMountRepo, volumeMountRepo, userQuotaRepo, k8sClient) // deployment サービスを生成する
+	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, ingressRouteRouteRepo, envVarRepo, envVarMountRepo, volumeRepo, volumeMountRepo, userQuotaRepo) // apply サービスを生成する
+	deploymentHandler := handler.NewDeploymentHandler(deploymentServiceImpl, applyServiceImpl) // deployment ハンドラーを生成する
+
+	// ingress_route ハンドラーを DI 組み立てする
+	ingressRouteServiceImpl := service.NewIngressRouteService(ingressRouteRepo, ingressRouteRouteRepo, projectRepo, deploymentRepo, baseDomain) // ingress_route サービスを生成する
+	ingressRouteHandler := handler.NewIngressRouteHandler(ingressRouteServiceImpl)             // ingress_route ハンドラーを生成する
 
 	// build ハンドラーを DI 組み立てする
 	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)                                                                           // build ログチャンクリポジトリを生成する
@@ -123,14 +128,15 @@ func main() {
 
 	// ルーターを生成してサーバーを起動する
 	echoRouter := router.New(router.RouterOptions{
-		UserQuotaHandler:  userQuotaHandler,  // quota ハンドラーを注入する
-		ProjectHandler:    projectHandler,    // project ハンドラーを注入する
-		DeploymentHandler: deploymentHandler, // deployment ハンドラーを注入する
-		EnvVarHandler:     envVarHandler,     // env_var ハンドラーを注入する
-		VolumeHandler:     volumeHandler,     // volume ハンドラーを注入する
-		BuildHandler:      buildHandler,      // build ハンドラーを注入する
-		WebhookHandler:    webhookHandler,    // webhook ハンドラーを注入する
-		LogHandler:        logHandler,        // log ハンドラーを注入する
+		UserQuotaHandler:    userQuotaHandler,    // quota ハンドラーを注入する
+		ProjectHandler:      projectHandler,      // project ハンドラーを注入する
+		DeploymentHandler:   deploymentHandler,   // deployment ハンドラーを注入する
+		IngressRouteHandler: ingressRouteHandler, // ingress_route ハンドラーを注入する
+		EnvVarHandler:       envVarHandler,       // env_var ハンドラーを注入する
+		VolumeHandler:       volumeHandler,       // volume ハンドラーを注入する
+		BuildHandler:        buildHandler,        // build ハンドラーを注入する
+		WebhookHandler:      webhookHandler,      // webhook ハンドラーを注入する
+		LogHandler:          logHandler,          // log ハンドラーを注入する
 	})
 	if err := echoRouter.Start(":" + cfg.GetServerPort()); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("サーバーの起動に失敗しました", "error", err) // サーバー起動失敗時にエラーログを出す
