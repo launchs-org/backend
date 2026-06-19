@@ -37,15 +37,16 @@ type UpdateProjectRequest struct {
 
 // projectServiceImpl は ProjectService の実装
 type projectServiceImpl struct {
-	db                   *gorm.DB                              // データベース接続（トランザクション開始に使用する）
-	projectRepo          repository.ProjectRepository          // project リポジトリ
-	harborCredentialRepo repository.HarborCredentialRepository // harbor credential リポジトリ
-	deploymentRepo       repository.DeploymentRepository       // deployment リポジトリ
-	ingressRouteRepo     repository.IngressRouteRepository     // ingress_route リポジトリ
-	userQuotaRepo        repository.UserQuotaRepository        // user_quota リポジトリ（Quotaチェック用）
-	k8sClient            k8sclient.Interface                   // k8s クライアント
-	dynamicClient        dynamic.Interface                     // dynamic クライアント（IngressRoute 削除用）
-	harborClient         *k8s.HarborClient                     // Harbor API クライアント（管理用 robot）
+	db                    *gorm.DB                                 // データベース接続（トランザクション開始に使用する）
+	projectRepo           repository.ProjectRepository             // project リポジトリ
+	harborCredentialRepo  repository.HarborCredentialRepository    // harbor credential リポジトリ
+	deploymentRepo        repository.DeploymentRepository          // deployment リポジトリ
+	ingressRouteRepo      repository.IngressRouteRepository        // ingress_route リポジトリ（プロジェクト削除時に使用）
+	ingressRouteRouteRepo repository.IngressRouteRouteRepository   // ingress_route_route リポジトリ（プロジェクト削除時に使用）
+	userQuotaRepo         repository.UserQuotaRepository           // user_quota リポジトリ（Quotaチェック用）
+	k8sClient             k8sclient.Interface                      // k8s クライアント
+	dynamicClient         dynamic.Interface                        // dynamic クライアント（IngressRoute 削除用）
+	harborClient          *k8s.HarborClient                        // Harbor API クライアント（管理用 robot）
 }
 
 // NewProjectService は ProjectService の実装を返す
@@ -55,21 +56,23 @@ func NewProjectService(
 	harborCredentialRepo repository.HarborCredentialRepository,
 	deploymentRepo repository.DeploymentRepository,
 	ingressRouteRepo repository.IngressRouteRepository,
+	ingressRouteRouteRepo repository.IngressRouteRouteRepository,
 	userQuotaRepo repository.UserQuotaRepository,
 	k8sClient k8sclient.Interface,
 	dynamicClient dynamic.Interface,
 	harborClient *k8s.HarborClient,
 ) ProjectService {
 	return &projectServiceImpl{
-		db:                   db,                   // DB 接続を注入する
-		projectRepo:          projectRepo,          // project リポジトリを注入する
-		harborCredentialRepo: harborCredentialRepo, // harbor credential リポジトリを注入する
-		deploymentRepo:       deploymentRepo,       // deployment リポジトリを注入する
-		ingressRouteRepo:     ingressRouteRepo,     // ingress_route リポジトリを注入する
-		userQuotaRepo:        userQuotaRepo,        // user_quota リポジトリを注入する
-		k8sClient:            k8sClient,            // k8s クライアントを注入する
-		dynamicClient:        dynamicClient,        // dynamic クライアントを注入する
-		harborClient:         harborClient,         // Harbor クライアントを注入する
+		db:                    db,                    // DB 接続を注入する
+		projectRepo:           projectRepo,           // project リポジトリを注入する
+		harborCredentialRepo:  harborCredentialRepo,  // harbor credential リポジトリを注入する
+		deploymentRepo:        deploymentRepo,         // deployment リポジトリを注入する
+		ingressRouteRepo:      ingressRouteRepo,       // ingress_route リポジトリを注入する
+		ingressRouteRouteRepo: ingressRouteRouteRepo,  // ingress_route_route リポジトリを注入する
+		userQuotaRepo:         userQuotaRepo,          // user_quota リポジトリを注入する
+		k8sClient:             k8sClient,              // k8s クライアントを注入する
+		dynamicClient:         dynamicClient,          // dynamic クライアントを注入する
+		harborClient:          harborClient,           // Harbor クライアントを注入する
 	}
 }
 
@@ -243,6 +246,20 @@ func (svc *projectServiceImpl) deleteProjectResources(projectData *models.Projec
 	}
 	waitGroup.Wait() // 全 Deployment の k8s リソース削除完了を待つ
 
+	// プロジェクトに紐づく IngressRoute を削除する（存在する場合のみ）
+	ingressRouteData, ingressRouteErr := svc.ingressRouteRepo.FindByProjectID(bgCtx, projectData.ID) // IngressRoute を取得する
+	if ingressRouteErr == nil && ingressRouteData != nil {                                            // IngressRoute が存在する場合
+		if deleteRoutesErr := svc.ingressRouteRouteRepo.DeleteByIngressRouteID(bgCtx, nil, ingressRouteData.ID); deleteRoutesErr != nil { // 関連ルートエントリを全削除する
+			logger.PrintErr("deleteProjectResources: ingress_route_route の削除に失敗しました: " + deleteRoutesErr.Error())
+		}
+		if k8sErr := k8s.DeleteIngressRoute(bgCtx, svc.dynamicClient, projectData.Namespace, ingressRouteData.ID); k8sErr != nil { // k8s IngressRoute を削除する
+			_ = k8sErr // k8s 上に存在しない場合もあるため無視して継続する
+		}
+		if deleteErr := svc.ingressRouteRepo.Delete(bgCtx, ingressRouteData.ID); deleteErr != nil { // DB レコードを削除する
+			logger.PrintErr("deleteProjectResources: ingress_route の削除に失敗しました: " + deleteErr.Error())
+		}
+	}
+
 	// Harbor project を削除する
 	if err := svc.harborClient.DeleteHarborProject(bgCtx, projectData.ID, k8s.HarborRobotCredential{ // Harbor プロジェクト名はプロジェクト ID
 		Name:   credentialData.RobotName,   // DB に保存した robot 名を使う
@@ -282,12 +299,4 @@ func (svc *projectServiceImpl) deleteDeploymentK8sResources(ctx context.Context,
 	if err := k8s.DeleteSecret(ctx, svc.k8sClient, namespace, deploymentData.Name); err != nil {
 		_ = err
 	}
-	// IngressRoute が存在する場合は削除する
-	ingressRouteData, ingressRouteErr := svc.ingressRouteRepo.FindByDeploymentID(ctx, deploymentData.ID)
-	if ingressRouteErr == nil && ingressRouteData != nil {
-		if err := k8s.DeleteIngressRoute(ctx, svc.dynamicClient, namespace, ingressRouteData.ID); err != nil { // k8s IngressRoute を削除する
-			_ = err
-		}
-	}
-
 }

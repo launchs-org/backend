@@ -30,19 +30,20 @@ type ApplyServiceInterface interface {
 
 // ApplyService は apply のコアロジックを実装するサービス
 type ApplyService struct {
-	DB                 *gorm.DB                            // データベース接続（トランザクション管理用）
-	K8s                k8sclient.Interface                 // k8s クライアント
-	DynamicClient      dynamic.Interface                   // dynamic クライアント（Traefik CRD 用）
-	DeploymentRepo     repository.DeploymentRepository     // deployment リポジトリ
-	ApplyHistoryRepo   repository.ApplyHistoryRepository   // apply_history リポジトリ
-	ProjectRepository  repository.ProjectRepository        // project リポジトリ
-	ServiceRepo        repository.ServiceRepository        // service リポジトリ
-	IngressRouteRepo   repository.IngressRouteRepository   // ingress_route リポジトリ
-	EnvVarRepo         repository.EnvVarRepository         // env_var リポジトリ
-	EnvVarMountRepo    repository.EnvVarMountRepository    // env_var_mount リポジトリ
-	VolumeRepo         repository.VolumeRepository         // volume リポジトリ
-	VolumeMountRepo    repository.VolumeMountRepository    // volume_mount リポジトリ
-	UserQuotaRepo      repository.UserQuotaRepository      // user_quota リポジトリ（Quotaチェック用）
+	DB                    *gorm.DB                                 // データベース接続（トランザクション管理用）
+	K8s                   k8sclient.Interface                      // k8s クライアント
+	DynamicClient         dynamic.Interface                        // dynamic クライアント（Traefik CRD 用）
+	DeploymentRepo        repository.DeploymentRepository          // deployment リポジトリ
+	ApplyHistoryRepo      repository.ApplyHistoryRepository        // apply_history リポジトリ
+	ProjectRepository     repository.ProjectRepository             // project リポジトリ
+	ServiceRepo           repository.ServiceRepository             // service リポジトリ
+	IngressRouteRepo      repository.IngressRouteRepository        // ingress_route リポジトリ
+	IngressRouteRouteRepo repository.IngressRouteRouteRepository   // ingress_route_route リポジトリ
+	EnvVarRepo            repository.EnvVarRepository              // env_var リポジトリ
+	EnvVarMountRepo       repository.EnvVarMountRepository         // env_var_mount リポジトリ
+	VolumeRepo            repository.VolumeRepository              // volume リポジトリ
+	VolumeMountRepo       repository.VolumeMountRepository         // volume_mount リポジトリ
+	UserQuotaRepo         repository.UserQuotaRepository           // user_quota リポジトリ（Quotaチェック用）
 }
 
 // ApplyResult は Apply 処理の結果を表す構造体
@@ -62,6 +63,7 @@ func NewApplyService(
 	projectRepository repository.ProjectRepository,
 	serviceRepo repository.ServiceRepository,
 	ingressRouteRepo repository.IngressRouteRepository,
+	ingressRouteRouteRepo repository.IngressRouteRouteRepository,
 	envVarRepo repository.EnvVarRepository,
 	envVarMountRepo repository.EnvVarMountRepository,
 	volumeRepo repository.VolumeRepository,
@@ -69,19 +71,20 @@ func NewApplyService(
 	userQuotaRepo repository.UserQuotaRepository,
 ) *ApplyService {
 	return &ApplyService{ // 依存を注入して返す
-		DB:                db,
-		K8s:               k8sClient,
-		DynamicClient:     dynamicClient,
-		DeploymentRepo:    deploymentRepo,
-		ApplyHistoryRepo:  applyHistoryRepo,
-		ProjectRepository: projectRepository,
-		ServiceRepo:       serviceRepo,
-		IngressRouteRepo:  ingressRouteRepo,
-		EnvVarRepo:        envVarRepo,
-		EnvVarMountRepo:   envVarMountRepo,
-		VolumeRepo:        volumeRepo,
-		VolumeMountRepo:   volumeMountRepo,
-		UserQuotaRepo:     userQuotaRepo, // user_quota リポジトリを注入する
+		DB:                    db,
+		K8s:                   k8sClient,
+		DynamicClient:         dynamicClient,
+		DeploymentRepo:        deploymentRepo,
+		ApplyHistoryRepo:      applyHistoryRepo,
+		ProjectRepository:     projectRepository,
+		ServiceRepo:           serviceRepo,
+		IngressRouteRepo:      ingressRouteRepo,
+		IngressRouteRouteRepo: ingressRouteRouteRepo, // ingress_route_route リポジトリを注入する
+		EnvVarRepo:            envVarRepo,
+		EnvVarMountRepo:       envVarMountRepo,
+		VolumeRepo:            volumeRepo,
+		VolumeMountRepo:       volumeMountRepo,
+		UserQuotaRepo:         userQuotaRepo, // user_quota リポジトリを注入する
 	}
 }
 
@@ -316,19 +319,27 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 			}
 		}
 
-		// 7-3. k8s に IngressRoute を apply する（IngressRoute レコードが存在する場合のみ）
-		var ingressRouteData *models.IngressRoute                                                             // IngressRoute レコードを格納する変数を宣言する
-		ingressRouteData, _ = applyService.IngressRouteRepo.FindByDeploymentID(ctx, deploymentID)            // IngressRoute レコードを取得する（存在しない場合は nil）
-		if ingressRouteData != nil {                                                                         // IngressRoute レコードが存在する場合は apply する
-			serviceName := deploymentData.Name + "-svc"                                                                                // Service 名を生成する
-			servicePort := 80                                                                                                           // デフォルトの Service ポートを設定する
-			if serviceData != nil {                                                                                                     // Service レコードが存在する場合はそのポートを使う
-				servicePort = serviceData.PendingPort
-				if servicePort == 0 { // pending が 0 の場合は current 値を使う
-					servicePort = serviceData.Port
-				}
+		// 7-3. k8s に IngressRoute を apply する（プロジェクトに IngressRoute が存在する場合のみ）
+		var ingressRouteData *models.IngressRoute                                                                     // IngressRoute レコードを格納する変数を宣言する
+		ingressRouteData, _ = applyService.IngressRouteRepo.FindByProjectID(ctx, projectData.ID)                      // プロジェクトの IngressRoute を取得する（存在しない場合は nil）
+		if ingressRouteData != nil {                                                                                   // IngressRoute レコードが存在する場合は apply する
+			routeEntryList, routeErr := applyService.IngressRouteRouteRepo.FindActiveAndPendingByIngressRouteID(ctx, ingressRouteData.ID) // active・pending のルートエントリ一覧を取得する
+			if routeErr != nil {
+				return fmt.Errorf("ingress_route_route list: %w", routeErr) // 取得エラーを返す
 			}
-			if err := k8s.ApplyIngressRoute(ctx, applyService.DynamicClient, *ingressRouteData, projectData.Namespace, serviceName, servicePort); err != nil { // k8s に IngressRoute を apply する
+			resolvedRouteList := make([]k8s.ResolvedRouteEntry, 0, len(routeEntryList)) // 解決済みルートエントリ一覧を初期化する
+			for _, routeEntry := range routeEntryList {                                  // 各ルートエントリを解決する
+				entryDeployment, entryErr := applyService.DeploymentRepo.FindByID(ctx, routeEntry.DeploymentID) // ルーティング先 Deployment を取得する
+				if entryErr != nil {
+					return fmt.Errorf("deployment not found for route (deployment_id=%s): %w", routeEntry.DeploymentID, entryErr) // 取得エラーを返す
+				}
+				resolvedRouteList = append(resolvedRouteList, k8s.ResolvedRouteEntry{
+					PathPrefix:  routeEntry.PathPrefix,            // パスプレフィックスを設定する
+					ServiceName: entryDeployment.Name + "-svc",   // k8s Service 名を生成する
+					Port:        routeEntry.Port,                  // 転送先ポート番号を設定する
+				})
+			}
+			if err := k8s.ApplyIngressRoute(ctx, applyService.DynamicClient, *ingressRouteData, projectData.Namespace, resolvedRouteList); err != nil { // k8s に IngressRoute を apply する
 				applyHistoryRecord.Status = models.ApplyStatusFailed                                                                                  // k8s IngressRoute apply 失敗時はステータスを failed に変更する
 				applyHistoryRecord.ErrorMessage = err.Error()                                                                                         // エラーメッセージを記録する
 				if updateErr := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); updateErr != nil { // ステータスを更新する
@@ -381,23 +392,32 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 			}
 		}
 
-		// 10. IngressRoute の pending_*** を昇格させる
-		if ingressRouteData != nil { // IngressRoute レコードが存在する場合のみ昇格する
+		// 10. IngressRoute の pending_host を昇格させ、ルートエントリのステータスを更新する
+		if ingressRouteData != nil { // IngressRoute レコードが存在する場合のみ処理する
 			if ingressRouteData.PendingHost != "" { // pending_host が設定されている場合は昇格する
 				ingressRouteData.Host = ingressRouteData.PendingHost
 				ingressRouteData.PendingHost = ""
 			}
-			if ingressRouteData.PendingPathPrefix != "" { // pending_path_prefix が設定されている場合は昇格する
-				ingressRouteData.PathPrefix = ingressRouteData.PendingPathPrefix
-				ingressRouteData.PendingPathPrefix = ""
-			}
-			if ingressRouteData.PendingPort != 0 { // pending_port が設定されている場合は昇格する
-				ingressRouteData.Port = ingressRouteData.PendingPort
-				ingressRouteData.PendingPort = 0
-			}
-			ingressRouteData.Status = models.IngressRouteStatusActive             // status を active に更新する
-			if err := applyService.IngressRouteRepo.Update(ctx, ingressRouteData); err != nil { // IngressRoute を更新する
+			ingressRouteData.Status = models.IngressRouteStatusActive                              // status を active に更新する
+			if err := applyService.IngressRouteRepo.Update(ctx, ingressRouteData); err != nil {    // IngressRoute を更新する
 				return fmt.Errorf("ingress_route update: %w", err) // 更新エラーを返す
+			}
+			// ルートエントリのステータスを更新する（pending → active、deleting → 物理削除）
+			allRouteList, routeListErr := applyService.IngressRouteRouteRepo.FindByIngressRouteID(ctx, ingressRouteData.ID) // 全ルートエントリを取得する
+			if routeListErr != nil {
+				return fmt.Errorf("ingress_route_route list: %w", routeListErr) // 取得エラーを返す
+			}
+			for _, routeEntry := range allRouteList { // 各ルートエントリを処理する
+				switch routeEntry.Status {
+				case models.IngressRouteRouteStatusPending: // pending の場合は active に昇格する
+					if updateErr := applyService.IngressRouteRouteRepo.UpdateStatus(ctx, tx, routeEntry.ID, models.IngressRouteRouteStatusActive); updateErr != nil { // ステータスを active に更新する
+						return fmt.Errorf("ingress_route_route update status: %w", updateErr) // 更新エラーを返す
+					}
+				case models.IngressRouteRouteStatusDeleting: // deleting の場合は物理削除する
+					if deleteErr := applyService.IngressRouteRouteRepo.Delete(ctx, tx, routeEntry.ID); deleteErr != nil { // ルートエントリを削除する
+						return fmt.Errorf("ingress_route_route delete: %w", deleteErr) // 削除エラーを返す
+					}
+				}
 			}
 		}
 

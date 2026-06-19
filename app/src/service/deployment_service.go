@@ -9,7 +9,6 @@ import (
 
 	"gorm.io/gorm"
 	k8sclient "k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/dynamic"
 )
 
 // DeploymentService は Deployment CRUD のビジネスロジックを定義するインターフェース
@@ -21,11 +20,7 @@ type DeploymentService interface {
 	DeleteDeployment(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)                                       // deployment を削除（deleting 状態に変更）する
 	GetService(ctx context.Context, userID string, deploymentID string) (*models.Service, error)                                                // service 設定を取得する
 	UpdateService(ctx context.Context, userID string, deploymentID string, req UpdateServiceRequest) (*models.Service, error)                   // service の pending フィールドを更新する
-	GetIngressRoute(ctx context.Context, userID string, deploymentID string) (*models.IngressRoute, error)                                      // ingress_route 設定を取得する
-	CreateIngressRoute(ctx context.Context, userID string, deploymentID string, req CreateIngressRouteRequest) (*models.IngressRoute, error)    // ingress_route を作成する
-	UpdateIngressRoute(ctx context.Context, userID string, deploymentID string, req UpdateIngressRouteRequest) (*models.IngressRoute, error)    // ingress_route の pending フィールドを更新する
 	DeleteService(ctx context.Context, userID string, deploymentID string) error                                                                // service を削除する
-	DeleteIngressRoute(ctx context.Context, userID string, deploymentID string) error                                                           // ingress_route を削除する
 }
 
 // CreateDeploymentRequest は POST /projects/:id/deployments のリクエスト構造体
@@ -49,23 +44,6 @@ type UpdateServiceRequest struct {
 	TargetPort *int `json:"target_port"` // nil の場合は更新しない
 }
 
-// CreateIngressRouteRequest は POST /deployments/:id/ingress-route のリクエスト構造体
-type CreateIngressRouteRequest struct {
-	Host                string `json:"host"`                 // ホスト名
-	PathPrefix          string `json:"path_prefix"`          // パスプレフィックス
-	Port                int    `json:"port"`                 // 転送先ポート番号
-	TLSEnabled          bool   `json:"tls_enabled"`          // TLS 有効化フラグ
-	CertificateResolver string `json:"certificate_resolver"` // 証明書リゾルバー名
-}
-
-// UpdateIngressRouteRequest は PUT /deployments/:id/ingress-route のリクエスト構造体
-type UpdateIngressRouteRequest struct {
-	PathPrefix          *string `json:"path_prefix"`          // nil の場合は更新しない
-	Port                *int    `json:"port"`                 // nil の場合は更新しない
-	TLSEnabled          *bool   `json:"tls_enabled"`          // nil の場合は更新しない
-	CertificateResolver *string `json:"certificate_resolver"` // nil の場合は更新しない
-}
-
 // UpdateDeploymentRequest は PUT /deployments/:id のリクエスト構造体
 type UpdateDeploymentRequest struct {
 	ImageURL            *string  `json:"image_url"`         // nil の場合は更新しない
@@ -82,16 +60,13 @@ type UpdateDeploymentRequest struct {
 
 // deploymentServiceImpl は DeploymentService の実装
 type deploymentServiceImpl struct {
-	deploymentRepo   repository.DeploymentRepository   // deployment リポジトリ
-	serviceRepo      repository.ServiceRepository      // service リポジトリ
-	projectRepo      repository.ProjectRepository      // project リポジトリ（所有権チェック用）
-	ingressRouteRepo repository.IngressRouteRepository // ingress_route リポジトリ
-	envVarMountRepo  repository.EnvVarMountRepository  // env_var_mount リポジトリ
-	volumeMountRepo  repository.VolumeMountRepository  // volume_mount リポジトリ
-	userQuotaRepo    repository.UserQuotaRepository    // user_quota リポジトリ（Quotaチェック用）
-	k8sClient        k8sclient.Interface               // k8s クライアント（リソース削除用）
-	dynamicClient    dynamic.Interface                 // dynamic クライアント（IngressRoute 削除用）
-	baseDomain       string                            // IngressRoute のホスト自動生成に使うベースドメイン
+	deploymentRepo  repository.DeploymentRepository  // deployment リポジトリ
+	serviceRepo     repository.ServiceRepository     // service リポジトリ
+	projectRepo     repository.ProjectRepository     // project リポジトリ（所有権チェック用）
+	envVarMountRepo repository.EnvVarMountRepository // env_var_mount リポジトリ
+	volumeMountRepo repository.VolumeMountRepository // volume_mount リポジトリ
+	userQuotaRepo   repository.UserQuotaRepository   // user_quota リポジトリ（Quotaチェック用）
+	k8sClient       k8sclient.Interface              // k8s クライアント（リソース削除用）
 }
 
 // NewDeploymentService は DeploymentService の実装を返す
@@ -99,25 +74,19 @@ func NewDeploymentService(
 	deploymentRepo repository.DeploymentRepository,
 	serviceRepo repository.ServiceRepository,
 	projectRepo repository.ProjectRepository,
-	ingressRouteRepo repository.IngressRouteRepository,
 	envVarMountRepo repository.EnvVarMountRepository,
 	volumeMountRepo repository.VolumeMountRepository,
 	userQuotaRepo repository.UserQuotaRepository,
 	k8sClient k8sclient.Interface,
-	dynamicClient dynamic.Interface,
-	baseDomain string,
 ) DeploymentService {
 	return &deploymentServiceImpl{
-		deploymentRepo:   deploymentRepo,   // deployment リポジトリを注入する
-		serviceRepo:      serviceRepo,      // service リポジトリを注入する
-		projectRepo:      projectRepo,      // project リポジトリを注入する
-		ingressRouteRepo: ingressRouteRepo, // ingress_route リポジトリを注入する
-		envVarMountRepo:  envVarMountRepo,  // env_var_mount リポジトリを注入する
-		volumeMountRepo:  volumeMountRepo,  // volume_mount リポジトリを注入する
-		userQuotaRepo:    userQuotaRepo,    // user_quota リポジトリを注入する
-		k8sClient:        k8sClient,        // k8s クライアントを注入する
-		dynamicClient:    dynamicClient,    // dynamic クライアントを注入する
-		baseDomain:       baseDomain,       // ベースドメインを注入する
+		deploymentRepo:  deploymentRepo,  // deployment リポジトリを注入する
+		serviceRepo:     serviceRepo,     // service リポジトリを注入する
+		projectRepo:     projectRepo,     // project リポジトリを注入する
+		envVarMountRepo: envVarMountRepo, // env_var_mount リポジトリを注入する
+		volumeMountRepo: volumeMountRepo, // volume_mount リポジトリを注入する
+		userQuotaRepo:   userQuotaRepo,   // user_quota リポジトリを注入する
+		k8sClient:       k8sClient,       // k8s クライアントを注入する
 	}
 }
 
@@ -285,14 +254,6 @@ func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID s
 		_ = k8sErr // k8s 上に存在しない場合もあるため無視して継続する
 	}
 
-	// IngressRoute が存在する場合は削除する
-	ingressRouteData, ingressRouteErr := svc.ingressRouteRepo.FindByDeploymentID(ctx, deploymentID) // IngressRoute を取得する
-	if ingressRouteErr == nil && ingressRouteData != nil {                                            // IngressRoute が存在する場合
-		if k8sErr := k8s.DeleteIngressRoute(ctx, svc.dynamicClient, namespace, ingressRouteData.ID); k8sErr != nil { // k8s IngressRoute を削除する
-			_ = k8sErr // k8s 上に存在しない場合もあるため無視して継続する
-		}
-	}
-
 	return deploymentData, nil // 更新後の deployment を返す
 }
 
@@ -333,77 +294,6 @@ func (svc *deploymentServiceImpl) UpdateService(ctx context.Context, userID stri
 	return serviceData, nil // 更新後の service を返す
 }
 
-// GetIngressRoute は deploymentID に紐づく ingress_route 設定を返す
-func (svc *deploymentServiceImpl) GetIngressRoute(ctx context.Context, userID string, deploymentID string) (*models.IngressRoute, error) {
-	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得して所有権チェック用に使う
-	if err != nil {
-		return nil, err // 取得エラーを返す
-	}
-	if err := svc.checkOwnership(ctx, userID, deploymentData.ProjectID); err != nil { // 所有権を確認する
-		return nil, err
-	}
-	return svc.ingressRouteRepo.FindByDeploymentID(ctx, deploymentID) // リポジトリ経由で ingress_route を取得する
-}
-
-// CreateIngressRoute は deploymentID に紐づく ingress_route を作成する
-func (svc *deploymentServiceImpl) CreateIngressRoute(ctx context.Context, userID string, deploymentID string, req CreateIngressRouteRequest) (*models.IngressRoute, error) {
-	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得して所有権チェック用に使う
-	if err != nil {
-		return nil, err // 取得エラーを返す
-	}
-	if err := svc.checkOwnership(ctx, userID, deploymentData.ProjectID); err != nil { // 所有権を確認する
-		return nil, err
-	}
-	host := req.Host                                                 // リクエストのホスト名を使う
-	if host == "" {                                                  // ホストが未指定の場合は自動生成する
-		host = deploymentID + "." + svc.baseDomain                   // deploymentID.baseDomain 形式で生成する
-	}
-	ingressRouteData := &models.IngressRoute{
-		DeploymentID:        deploymentID,           // deployment ID を設定する
-		Host:                host,                   // ホスト名を設定する（自動生成 or 指定値）
-		PathPrefix:          req.PathPrefix,         // パスプレフィックスを設定する
-		Port:                req.Port,               // ポート番号を設定する
-		TLSEnabled:          req.TLSEnabled,         // TLS 有効化フラグを設定する
-		CertificateResolver: req.CertificateResolver, // 証明書リゾルバーを設定する
-		Status:              models.IngressRouteStatusPending, // 初期ステータスを設定する
-	}
-	if err := svc.ingressRouteRepo.Create(ctx, ingressRouteData); err != nil { // リポジトリ経由で作成する
-		return nil, err // 作成エラーを返す
-	}
-	return ingressRouteData, nil // 作成した ingress_route を返す
-}
-
-// UpdateIngressRoute は送られてきたフィールドのみ pending_* を更新する
-func (svc *deploymentServiceImpl) UpdateIngressRoute(ctx context.Context, userID string, deploymentID string, req UpdateIngressRouteRequest) (*models.IngressRoute, error) {
-	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得して所有権チェック用に使う
-	if err != nil {
-		return nil, err // 取得エラーを返す
-	}
-	if err := svc.checkOwnership(ctx, userID, deploymentData.ProjectID); err != nil { // 所有権を確認する
-		return nil, err
-	}
-	ingressRouteData, err := svc.ingressRouteRepo.FindByDeploymentID(ctx, deploymentID) // リポジトリ経由で ingress_route を取得する
-	if err != nil {
-		return nil, err // 取得エラーを返す
-	}
-	if req.PathPrefix != nil {
-		ingressRouteData.PendingPathPrefix = *req.PathPrefix // pending_path_prefix を更新する
-	}
-	if req.Port != nil {
-		ingressRouteData.PendingPort = *req.Port // pending_port を更新する
-	}
-	if req.TLSEnabled != nil {
-		ingressRouteData.PendingTLSEnabled = req.TLSEnabled // pending_tls_enabled を更新する
-	}
-	if req.CertificateResolver != nil {
-		ingressRouteData.PendingCertificateResolver = *req.CertificateResolver // pending_certificate_resolver を更新する
-	}
-	if err := svc.ingressRouteRepo.Update(ctx, ingressRouteData); err != nil { // リポジトリ経由で保存する
-		return nil, err // 保存エラーを返す
-	}
-	return ingressRouteData, nil // 更新後の ingress_route を返す
-}
-
 // DeleteService は deploymentID に紐づく k8s Service と DB レコードを削除する
 func (svc *deploymentServiceImpl) DeleteService(ctx context.Context, userID string, deploymentID string) error {
 	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得して所有権チェック用に使う
@@ -426,29 +316,6 @@ func (svc *deploymentServiceImpl) DeleteService(ctx context.Context, userID stri
 		return err // 削除エラーを返す
 	}
 	return svc.serviceRepo.Delete(ctx, serviceData.ID) // DB レコードを削除する
-}
-
-// DeleteIngressRoute は deploymentID に紐づく k8s IngressRoute と DB レコードを削除する
-func (svc *deploymentServiceImpl) DeleteIngressRoute(ctx context.Context, userID string, deploymentID string) error {
-	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得して所有権チェック用に使う
-	if err != nil {
-		return err // 取得エラーを返す
-	}
-	if err := svc.checkOwnership(ctx, userID, deploymentData.ProjectID); err != nil { // 所有権を確認する
-		return err
-	}
-	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // namespace 解決のために project を取得する
-	if err != nil {
-		return err // 取得エラーを返す
-	}
-	ingressRouteData, err := svc.ingressRouteRepo.FindByDeploymentID(ctx, deploymentID) // ingress_route を取得する
-	if err != nil {
-		return err // 取得エラーを返す
-	}
-	if err := k8s.DeleteIngressRoute(ctx, svc.dynamicClient, projectData.Namespace, ingressRouteData.ID); err != nil { // k8s から IngressRoute を削除する
-		return err // 削除エラーを返す
-	}
-	return svc.ingressRouteRepo.Delete(ctx, ingressRouteData.ID) // DB レコードを削除する
 }
 
 // ErrDeploymentNotFound は deployment が見つからない場合のエラー
