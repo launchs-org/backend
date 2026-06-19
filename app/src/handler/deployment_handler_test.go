@@ -18,16 +18,13 @@ import (
 
 // mockDeploymentService は DeploymentService のテスト用モック実装
 type mockDeploymentService struct {
-	listDeploymentsFunc    func(ctx context.Context, projectID string) ([]models.Deployment, error)
-	createDeploymentFunc   func(ctx context.Context, req service.CreateDeploymentRequest) (*models.Deployment, error)
-	getDeploymentFunc      func(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)
-	updateDeploymentFunc   func(ctx context.Context, userID string, deploymentID string, req service.UpdateDeploymentRequest) (*models.Deployment, error)
-	deleteDeploymentFunc   func(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)
-	getServiceFunc         func(ctx context.Context, userID string, deploymentID string) (*models.Service, error)
-	updateServiceFunc      func(ctx context.Context, userID string, deploymentID string, req service.UpdateServiceRequest) (*models.Service, error)
-	getIngressRouteFunc    func(ctx context.Context, userID string, deploymentID string) (*models.IngressRoute, error)
-	createIngressRouteFunc func(ctx context.Context, userID string, deploymentID string, req service.CreateIngressRouteRequest) (*models.IngressRoute, error)
-	updateIngressRouteFunc func(ctx context.Context, userID string, deploymentID string, req service.UpdateIngressRouteRequest) (*models.IngressRoute, error)
+	listDeploymentsFunc  func(ctx context.Context, projectID string) ([]models.Deployment, error)
+	createDeploymentFunc func(ctx context.Context, req service.CreateDeploymentRequest) (*models.Deployment, error)
+	getDeploymentFunc    func(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)
+	updateDeploymentFunc func(ctx context.Context, userID string, deploymentID string, req service.UpdateDeploymentRequest) (*models.Deployment, error)
+	deleteDeploymentFunc func(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)
+	getServiceFunc       func(ctx context.Context, userID string, deploymentID string) (*models.Service, error)
+	updateServiceFunc    func(ctx context.Context, userID string, deploymentID string, req service.UpdateServiceRequest) (*models.Service, error)
 }
 
 func (mock *mockDeploymentService) ListDeployments(ctx context.Context, projectID string) ([]models.Deployment, error) {
@@ -58,32 +55,7 @@ func (mock *mockDeploymentService) UpdateService(ctx context.Context, userID str
 	return mock.updateServiceFunc(ctx, userID, deploymentID, req) // モック関数を呼び出す
 }
 
-func (mock *mockDeploymentService) GetIngressRoute(ctx context.Context, userID string, deploymentID string) (*models.IngressRoute, error) {
-	if mock.getIngressRouteFunc != nil { // モック関数が設定されている場合は呼び出す
-		return mock.getIngressRouteFunc(ctx, userID, deploymentID)
-	}
-	return &models.IngressRoute{DeploymentID: deploymentID}, nil // デフォルトは空の ingress_route を返す
-}
-
-func (mock *mockDeploymentService) CreateIngressRoute(ctx context.Context, userID string, deploymentID string, req service.CreateIngressRouteRequest) (*models.IngressRoute, error) {
-	if mock.createIngressRouteFunc != nil { // モック関数が設定されている場合は呼び出す
-		return mock.createIngressRouteFunc(ctx, userID, deploymentID, req)
-	}
-	return &models.IngressRoute{DeploymentID: deploymentID}, nil // デフォルトは空の ingress_route を返す
-}
-
-func (mock *mockDeploymentService) UpdateIngressRoute(ctx context.Context, userID string, deploymentID string, req service.UpdateIngressRouteRequest) (*models.IngressRoute, error) {
-	if mock.updateIngressRouteFunc != nil { // モック関数が設定されている場合は呼び出す
-		return mock.updateIngressRouteFunc(ctx, userID, deploymentID, req)
-	}
-	return &models.IngressRoute{DeploymentID: deploymentID}, nil // デフォルトは空の ingress_route を返す
-}
-
 func (mock *mockDeploymentService) DeleteService(ctx context.Context, userID string, deploymentID string) error {
-	return nil // デフォルトは成功を返す
-}
-
-func (mock *mockDeploymentService) DeleteIngressRoute(ctx context.Context, userID string, deploymentID string) error {
 	return nil // デフォルトは成功を返す
 }
 
@@ -722,120 +694,6 @@ func TestUpdateService_他ユーザーのDeploymentは403が返る(t *testing.T)
 	}
 	if responseRecorder.Code != http.StatusForbidden { // 403 が返ることを確認する
 		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusForbidden, responseRecorder.Code)
-	}
-}
-
-// TestGetIngressRoute_正常にIngress設定が取得される は GET で 200 と ingress_route が返ることを確認する
-func TestGetIngressRoute_正常にIngress設定が取得される(t *testing.T) {
-	expectedIngressRoute := &models.IngressRoute{
-		DeploymentID: "deployment-id-1",    // デプロイメント ID を設定する
-		Host:         "example.launchs.org", // ホスト名を設定する
-		Port:         8080,                 // ポート番号を設定する
-	}
-
-	deploymentSvc := &mockDeploymentService{
-		getIngressRouteFunc: func(ctx context.Context, userID string, deploymentID string) (*models.IngressRoute, error) {
-			return expectedIngressRoute, nil // ingress_route を返す
-		},
-	}
-	deploymentHandler := NewDeploymentHandler(deploymentSvc, &mockApplyService{}) // ハンドラーを生成する
-
-	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodGet, "/deployments/deployment-id-1/ingress-route", "", map[string]string{"id": "deployment-id-1"}) // テスト用コンテキストを生成する
-
-	if err := deploymentHandler.GetIngressRoute(echoCtx); err != nil { // ハンドラーを実行する
-		t.Fatalf("GetIngressRoute がエラーを返しました: %v", err)
-	}
-	if responseRecorder.Code != http.StatusOK { // 200 が返ることを確認する
-		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusOK, responseRecorder.Code)
-	}
-	var responseBody models.IngressRoute                                           // レスポンスボディを格納する変数を定義する
-	if err := json.Unmarshal(responseRecorder.Body.Bytes(), &responseBody); err != nil { // レスポンスボディをデコードする
-		t.Fatalf("レスポンスボディのデコードに失敗しました: %v", err)
-	}
-	if responseBody.Host != "example.launchs.org" { // host が一致することを確認する
-		t.Errorf("期待する host: example.launchs.org, 実際の host: %s", responseBody.Host)
-	}
-}
-
-// TestGetIngressRoute_ErrForbiddenの場合403を返す は ErrForbidden のとき 403 が返ることを確認する
-func TestGetIngressRoute_ErrForbiddenの場合403を返す(t *testing.T) {
-	deploymentSvc := &mockDeploymentService{
-		getIngressRouteFunc: func(ctx context.Context, userID string, deploymentID string) (*models.IngressRoute, error) {
-			return nil, service.ErrForbidden // ErrForbidden を返す
-		},
-	}
-	deploymentHandler := NewDeploymentHandler(deploymentSvc, &mockApplyService{}) // ハンドラーを生成する
-
-	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodGet, "/deployments/deployment-id-1/ingress-route", "", map[string]string{"id": "deployment-id-1"}) // テスト用コンテキストを生成する
-
-	if err := deploymentHandler.GetIngressRoute(echoCtx); err != nil { // ハンドラーを実行する
-		t.Fatalf("GetIngressRoute がエラーを返しました: %v", err)
-	}
-	if responseRecorder.Code != http.StatusForbidden { // 403 が返ることを確認する
-		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusForbidden, responseRecorder.Code)
-	}
-}
-
-// TestCreateIngressRoute_正常に作成されて201を返す は POST で 201 と ingress_route が返ることを確認する
-func TestCreateIngressRoute_正常に作成されて201を返す(t *testing.T) {
-	deploymentSvc := &mockDeploymentService{
-		createIngressRouteFunc: func(ctx context.Context, userID string, deploymentID string, req service.CreateIngressRouteRequest) (*models.IngressRoute, error) {
-			return &models.IngressRoute{ // 作成した ingress_route を返す
-				DeploymentID: deploymentID,
-				Host:         req.Host,
-				Port:         req.Port,
-				Status:       models.IngressRouteStatusPending,
-			}, nil
-		},
-	}
-	deploymentHandler := NewDeploymentHandler(deploymentSvc, &mockApplyService{}) // ハンドラーを生成する
-
-	requestBody := `{"host":"example.launchs.org","path_prefix":"/","port":8080,"tls_enabled":false}` // リクエストボディを設定する
-	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPost, "/deployments/deployment-id-1/ingress-route", requestBody, map[string]string{"id": "deployment-id-1"})
-
-	if err := deploymentHandler.CreateIngressRoute(echoCtx); err != nil { // ハンドラーを実行する
-		t.Fatalf("CreateIngressRoute がエラーを返しました: %v", err)
-	}
-	if responseRecorder.Code != http.StatusCreated { // 201 が返ることを確認する
-		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusCreated, responseRecorder.Code)
-	}
-	var responseBody models.IngressRoute                                               // レスポンスボディを格納する変数を定義する
-	if err := json.Unmarshal(responseRecorder.Body.Bytes(), &responseBody); err != nil { // レスポンスボディをデコードする
-		t.Fatalf("レスポンスボディのデコードに失敗しました: %v", err)
-	}
-	if responseBody.Status != models.IngressRouteStatusPending { // status が pending であることを確認する
-		t.Errorf("期待する status: pending, 実際の status: %s", responseBody.Status)
-	}
-}
-
-// TestUpdateIngressRoute_正常に更新されて200を返す は PUT で 200 と更新後の ingress_route が返ることを確認する
-func TestUpdateIngressRoute_正常に更新されて200を返す(t *testing.T) {
-	deploymentSvc := &mockDeploymentService{
-		updateIngressRouteFunc: func(ctx context.Context, userID string, deploymentID string, req service.UpdateIngressRouteRequest) (*models.IngressRoute, error) {
-			newPathPrefix := "/new"                             // 更新後のパスプレフィックスを設定する
-			return &models.IngressRoute{                        // 更新後の ingress_route を返す
-				DeploymentID:      deploymentID,
-				PendingPathPrefix: newPathPrefix,
-			}, nil
-		},
-	}
-	deploymentHandler := NewDeploymentHandler(deploymentSvc, &mockApplyService{}) // ハンドラーを生成する
-
-	requestBody := `{"path_prefix":"/new"}` // リクエストボディを設定する
-	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPut, "/deployments/deployment-id-1/ingress-route", requestBody, map[string]string{"id": "deployment-id-1"})
-
-	if err := deploymentHandler.UpdateIngressRoute(echoCtx); err != nil { // ハンドラーを実行する
-		t.Fatalf("UpdateIngressRoute がエラーを返しました: %v", err)
-	}
-	if responseRecorder.Code != http.StatusOK { // 200 が返ることを確認する
-		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusOK, responseRecorder.Code)
-	}
-	var responseBody models.IngressRoute                                               // レスポンスボディを格納する変数を定義する
-	if err := json.Unmarshal(responseRecorder.Body.Bytes(), &responseBody); err != nil { // レスポンスボディをデコードする
-		t.Fatalf("レスポンスボディのデコードに失敗しました: %v", err)
-	}
-	if responseBody.PendingPathPrefix != "/new" { // pending_path_prefix が更新されていることを確認する
-		t.Errorf("期待する pending_path_prefix: /new, 実際の pending_path_prefix: %s", responseBody.PendingPathPrefix)
 	}
 }
 

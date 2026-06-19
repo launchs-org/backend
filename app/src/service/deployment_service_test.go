@@ -9,8 +9,6 @@ import (
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // mockDeploymentRepository は DeploymentRepository のテスト用モック実装
@@ -83,11 +81,11 @@ func (mock *mockDeploymentRepository) FindAllRunning(ctx context.Context) ([]mod
 
 // mockIngressRouteRepository は IngressRouteRepository のテスト用モック実装
 type mockIngressRouteRepository struct {
-	createFunc              func(ctx context.Context, ingressRoute *models.IngressRoute) error
-	findByIDFunc            func(ctx context.Context, ingressRouteID string) (*models.IngressRoute, error)
-	findByDeploymentIDFunc  func(ctx context.Context, deploymentID string) (*models.IngressRoute, error)
-	updateFunc              func(ctx context.Context, ingressRoute *models.IngressRoute) error
-	updateStatusFunc        func(ctx context.Context, ingressRouteID string, status models.IngressRouteStatus, k8sStatus datatypes.JSON) error
+	createFunc           func(ctx context.Context, ingressRoute *models.IngressRoute) error
+	findByIDFunc         func(ctx context.Context, ingressRouteID string) (*models.IngressRoute, error)
+	findByProjectIDFunc  func(ctx context.Context, projectID string) (*models.IngressRoute, error)
+	updateFunc           func(ctx context.Context, ingressRoute *models.IngressRoute) error
+	updateStatusFunc     func(ctx context.Context, ingressRouteID string, status models.IngressRouteStatus, k8sStatus datatypes.JSON) error
 }
 
 func (mock *mockIngressRouteRepository) Create(ctx context.Context, ingressRoute *models.IngressRoute) error {
@@ -104,11 +102,11 @@ func (mock *mockIngressRouteRepository) FindByID(ctx context.Context, ingressRou
 	return &models.IngressRoute{ID: ingressRouteID}, nil // デフォルトは空の ingress_route を返す
 }
 
-func (mock *mockIngressRouteRepository) FindByDeploymentID(ctx context.Context, deploymentID string) (*models.IngressRoute, error) {
-	if mock.findByDeploymentIDFunc != nil { // モック関数が設定されている場合は呼び出す
-		return mock.findByDeploymentIDFunc(ctx, deploymentID)
+func (mock *mockIngressRouteRepository) FindByProjectID(ctx context.Context, projectID string) (*models.IngressRoute, error) {
+	if mock.findByProjectIDFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.findByProjectIDFunc(ctx, projectID)
 	}
-	return &models.IngressRoute{DeploymentID: deploymentID}, nil // デフォルトは空の ingress_route を返す
+	return &models.IngressRoute{ProjectID: projectID}, nil // デフォルトは空の ingress_route を返す
 }
 
 func (mock *mockIngressRouteRepository) Update(ctx context.Context, ingressRoute *models.IngressRoute) error {
@@ -221,9 +219,8 @@ func (mock *mockProjectRepository) DeleteNoTx(ctx context.Context, project *mode
 
 // newTestDeploymentService はテスト用のデフォルト DeploymentService を生成するヘルパー関数
 func newTestDeploymentService(deploymentRepo *mockDeploymentRepository, serviceRepo *mockServiceRepository, projectRepo *mockProjectRepository, ingressRouteRepo *mockIngressRouteRepository) DeploymentService {
-	fakeK8sClient := k8sfake.NewSimpleClientset()                                                                          // fake k8s クライアントを生成する
-	fakeDynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())                                            // fake dynamic クライアントを生成する
-	return NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, fakeDynamicClient, "") // サービスを生成する
+	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
+	return NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &noopUserQuotaRepository{}, fakeK8sClient) // サービスを生成する
 }
 
 // TestCreateDeployment_正常に作成されpendingフィールドに値が入る は POST で全フィールドが pending_*** に入ることを確認する
@@ -528,15 +525,8 @@ func TestDeleteDeployment_k8sリソースが削除される(t *testing.T) {
 			return &models.Project{UserID: "test-user-id", Namespace: "test-ns"}, nil // namespace 付きの project を返す
 		},
 	}
-	ingressRouteRepo := &mockIngressRouteRepository{
-		findByDeploymentIDFunc: func(ctx context.Context, deploymentID string) (*models.IngressRoute, error) {
-			return nil, gorm.ErrRecordNotFound // IngressRoute が存在しない場合を想定する
-		},
-	}
-
-	fakeK8sClient := k8sfake.NewSimpleClientset()                             // fake k8s クライアントを生成する
-	fakeDynamicClient := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()) // fake dynamic クライアントを生成する
-	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, ingressRouteRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, fakeDynamicClient, "") // サービスを生成する
+	fakeK8sClient := k8sfake.NewSimpleClientset()                                                                                                                                     // fake k8s クライアントを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &noopUserQuotaRepository{}, fakeK8sClient) // サービスを生成する
 
 	result, err := deploymentSvc.DeleteDeployment(context.Background(), "test-user-id", "deployment-id-k8s") // サービスを実行する
 	if err != nil {
@@ -702,156 +692,3 @@ func TestUpdateService_他ユーザーのDeploymentはErrForbiddenを返す(t *t
 	}
 }
 
-// TestCreateIngressRoute_正常に作成される は POST で IngressRoute レコードが作成されることを確認する
-func TestCreateIngressRoute_正常に作成される(t *testing.T) {
-	var capturedIngressRoute *models.IngressRoute // キャプチャした ingress_route を格納する変数を定義する
-
-	deploymentRepo := &mockDeploymentRepository{
-		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
-			return &models.Deployment{ID: deploymentID, ProjectID: "project-id-1"}, nil // deployment を返す
-		},
-	}
-	ingressRouteRepo := &mockIngressRouteRepository{
-		createFunc: func(ctx context.Context, ingressRoute *models.IngressRoute) error {
-			capturedIngressRoute = ingressRoute // ingress_route をキャプチャする
-			return nil                          // 正常終了を返す
-		},
-	}
-	projectRepo := &mockProjectRepository{
-		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
-			return &models.Project{UserID: "test-user-id"}, nil // 所有者として返す
-		},
-	}
-
-	deploymentSvc := newTestDeploymentService(deploymentRepo, &mockServiceRepository{}, projectRepo, ingressRouteRepo) // サービスを生成する
-	req := CreateIngressRouteRequest{
-		Host:       "example.launchs.org", // ホスト名を設定する
-		PathPrefix: "/",                   // パスプレフィックスを設定する
-		Port:       8080,                  // ポート番号を設定する
-		TLSEnabled: true,                  // TLS を有効にする
-	}
-
-	result, err := deploymentSvc.CreateIngressRoute(context.Background(), "test-user-id", "deployment-id-1", req) // サービスを実行する
-	if err != nil {
-		t.Fatalf("CreateIngressRoute がエラーを返しました: %v", err)
-	}
-	if result.Status != models.IngressRouteStatusPending { // status が pending であることを確認する
-		t.Errorf("期待する status: pending, 実際の status: %s", result.Status)
-	}
-	if capturedIngressRoute.Host != "example.launchs.org" { // host が設定されていることを確認する
-		t.Errorf("期待する host: example.launchs.org, 実際の host: %s", capturedIngressRoute.Host)
-	}
-	if capturedIngressRoute.Port != 8080 { // port が設定されていることを確認する
-		t.Errorf("期待する port: 8080, 実際の port: %d", capturedIngressRoute.Port)
-	}
-	if !capturedIngressRoute.TLSEnabled { // tls_enabled が設定されていることを確認する
-		t.Errorf("期待する tls_enabled: true, 実際の tls_enabled: %v", capturedIngressRoute.TLSEnabled)
-	}
-}
-
-// TestCreateIngressRoute_他ユーザーのDeploymentはErrForbiddenを返す は所有者でない場合に ErrForbidden が返ることを確認する
-func TestCreateIngressRoute_他ユーザーのDeploymentはErrForbiddenを返す(t *testing.T) {
-	deploymentRepo := &mockDeploymentRepository{
-		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
-			return &models.Deployment{ID: deploymentID, ProjectID: "project-id-1"}, nil // deployment を返す
-		},
-	}
-	projectRepo := &mockProjectRepository{
-		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
-			return &models.Project{UserID: "other-user-id"}, nil // 別ユーザーとして返す
-		},
-	}
-
-	deploymentSvc := newTestDeploymentService(deploymentRepo, &mockServiceRepository{}, projectRepo, &mockIngressRouteRepository{}) // サービスを生成する
-	req := CreateIngressRouteRequest{Host: "example.launchs.org", Port: 8080}
-
-	_, err := deploymentSvc.CreateIngressRoute(context.Background(), "test-user-id", "deployment-id-1", req) // サービスを実行する
-	if !errors.Is(err, ErrForbidden) { // ErrForbidden が返ることを確認する
-		t.Errorf("ErrForbidden が返るべきですが実際のエラー: %v", err)
-	}
-}
-
-// TestGetIngressRoute_正常にIngress設定が取得される は GetIngressRoute で ingress_route が返ることを確認する
-func TestGetIngressRoute_正常にIngress設定が取得される(t *testing.T) {
-	expectedIngressRoute := &models.IngressRoute{
-		DeploymentID: "deployment-id-1",   // デプロイメント ID を設定する
-		Host:         "example.launchs.org", // ホスト名を設定する
-		Port:         8080,                // ポート番号を設定する
-	}
-
-	deploymentRepo := &mockDeploymentRepository{
-		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
-			return &models.Deployment{ID: deploymentID, ProjectID: "project-id-1"}, nil // deployment を返す
-		},
-	}
-	ingressRouteRepo := &mockIngressRouteRepository{
-		findByDeploymentIDFunc: func(ctx context.Context, deploymentID string) (*models.IngressRoute, error) {
-			return expectedIngressRoute, nil // ingress_route を返す
-		},
-	}
-	projectRepo := &mockProjectRepository{
-		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
-			return &models.Project{UserID: "test-user-id"}, nil // 所有者として返す
-		},
-	}
-
-	deploymentSvc := newTestDeploymentService(deploymentRepo, &mockServiceRepository{}, projectRepo, ingressRouteRepo) // サービスを生成する
-
-	result, err := deploymentSvc.GetIngressRoute(context.Background(), "test-user-id", "deployment-id-1") // サービスを実行する
-	if err != nil {
-		t.Fatalf("GetIngressRoute がエラーを返しました: %v", err)
-	}
-	if result.Host != "example.launchs.org" { // host が一致することを確認する
-		t.Errorf("期待する host: example.launchs.org, 実際の host: %s", result.Host)
-	}
-	if result.Port != 8080 { // port が一致することを確認する
-		t.Errorf("期待する port: 8080, 実際の port: %d", result.Port)
-	}
-}
-
-// TestUpdateIngressRoute_pendingフィールドが更新される は UpdateIngressRoute で pending フィールドが更新されることを確認する
-func TestUpdateIngressRoute_pendingフィールドが更新される(t *testing.T) {
-	originalIngressRoute := &models.IngressRoute{
-		DeploymentID:      "deployment-id-1",
-		PendingPathPrefix: "/old", // 更新前の値を設定する
-		PendingPort:       8080,   // 更新前の値を設定する
-	}
-
-	var savedIngressRoute *models.IngressRoute // 保存された ingress_route を格納する変数を定義する
-	deploymentRepo := &mockDeploymentRepository{
-		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
-			return &models.Deployment{ID: deploymentID, ProjectID: "project-id-1"}, nil // deployment を返す
-		},
-	}
-	ingressRouteRepo := &mockIngressRouteRepository{
-		findByDeploymentIDFunc: func(ctx context.Context, deploymentID string) (*models.IngressRoute, error) {
-			return originalIngressRoute, nil // 元の ingress_route を返す
-		},
-		updateFunc: func(ctx context.Context, ingressRoute *models.IngressRoute) error {
-			savedIngressRoute = ingressRoute // 保存された ingress_route をキャプチャする
-			return nil
-		},
-	}
-	projectRepo := &mockProjectRepository{
-		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
-			return &models.Project{UserID: "test-user-id"}, nil // 所有者として返す
-		},
-	}
-
-	deploymentSvc := newTestDeploymentService(deploymentRepo, &mockServiceRepository{}, projectRepo, ingressRouteRepo) // サービスを生成する
-	newPathPrefix := "/new"                                                                                          // 更新するパスプレフィックスを設定する
-	req := UpdateIngressRouteRequest{
-		PathPrefix: &newPathPrefix, // path_prefix のみ送る
-	}
-
-	result, err := deploymentSvc.UpdateIngressRoute(context.Background(), "test-user-id", "deployment-id-1", req) // サービスを実行する
-	if err != nil {
-		t.Fatalf("UpdateIngressRoute がエラーを返しました: %v", err)
-	}
-	if result.PendingPathPrefix != "/new" { // pending_path_prefix が更新されていることを確認する
-		t.Errorf("期待する pending_path_prefix: /new, 実際の pending_path_prefix: %s", result.PendingPathPrefix)
-	}
-	if savedIngressRoute.PendingPort != 8080 { // 送っていない pending_port が変化していないことを確認する
-		t.Errorf("pending_port は変化しないはずですが変化しています: %d", savedIngressRoute.PendingPort)
-	}
-}

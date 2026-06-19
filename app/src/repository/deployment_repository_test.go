@@ -31,6 +31,19 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		t.Skipf("DB に接続できないためテストをスキップします: %v", err) // DB 未起動時はスキップする
 	}
 
+	// ingress_routes テーブルの旧カラムを削除する（存在する場合のみ）
+	// project_id カラムが存在しない（旧スキーマ）場合はテストデータを全削除してスキーマ変更できるようにする
+	db.Exec("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ingress_routes' AND column_name='project_id') THEN DELETE FROM ingress_routes; END IF; END $$")
+	db.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS deployment_id")
+	db.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS path_prefix")
+	db.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS port")
+	db.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS pending_path_prefix")
+	db.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS pending_port")
+	db.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS tls_enabled")
+	db.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS pending_tls_enabled")
+	db.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS certificate_resolver")
+	db.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS pending_certificate_resolver")
+
 	// テストに必要なテーブルをマイグレーションする
 	if err := db.AutoMigrate(
 		&models.InstanceSize{},
@@ -43,6 +56,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		&models.DeploymentWebhook{},
 		&models.Service{},
 		&models.IngressRoute{},
+		&models.IngressRouteRoute{},
 		&models.EnvVar{},
 		&models.EnvVarMount{},
 		&models.Volume{},
