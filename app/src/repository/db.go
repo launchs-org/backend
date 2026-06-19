@@ -83,6 +83,18 @@ func seedMasterData() error {
 }
 
 func AutoMigrate() error {
+	// ingress_routes テーブルの旧カラムを削除する（存在する場合のみ）
+	// GORM AutoMigrate はカラム削除をしないため手動で処理する
+	Database.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS deployment_id")
+	Database.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS path_prefix")
+	Database.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS port")
+	Database.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS pending_path_prefix")
+	Database.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS pending_port")
+	Database.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS tls_enabled")
+	Database.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS pending_tls_enabled")
+	Database.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS certificate_resolver")
+	Database.Exec("ALTER TABLE ingress_routes DROP COLUMN IF EXISTS pending_certificate_resolver")
+
 	return Database.AutoMigrate(
 		&models.InstanceSize{},
 		&models.UserQuota{},
@@ -96,6 +108,7 @@ func AutoMigrate() error {
 		&models.DeploymentWebhook{},
 		&models.Service{},
 		&models.IngressRoute{},
+		&models.IngressRouteRoute{},
 		&models.EnvVar{},
 		&models.EnvVarMount{},
 		&models.Volume{},
