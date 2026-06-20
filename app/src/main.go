@@ -90,7 +90,7 @@ func main() {
 
 	// ingress_route ハンドラーを DI 組み立てする
 	ingressRouteServiceImpl := service.NewIngressRouteService(ingressRouteRepo, pathRuleRepo, projectRepo, baseDomain) // ingress_route サービスを生成する
-	ingressRouteHandler := handler.NewIngressRouteHandler(ingressRouteServiceImpl)                                     // ingress_route ハンドラーを生成する
+	ingressRouteHandler := handler.NewIngressRouteHandler(ingressRouteServiceImpl, applyServiceImpl)                   // ingress_route ハンドラーを生成する（apply サービスも注入する）
 
 	// build ハンドラーを DI 組み立てする
 	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)                                                                           // build ログチャンクリポジトリを生成する

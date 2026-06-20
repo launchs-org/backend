@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 	k8sclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/dynamic"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // ErrDuplicateEnvKey は apply 時に環境変数キーが重複している場合のエラー
@@ -25,6 +26,7 @@ var ErrAlreadyApplying = errors.New("already applying")
 // ApplyServiceInterface は apply サービスのインターフェース
 type ApplyServiceInterface interface {
 	Apply(ctx context.Context, userID string, deploymentID string) (*ApplyResult, error)                          // apply を実行する
+	ApplyProject(ctx context.Context, userID string, projectID string) error                                      // project 単位で IngressRoute を apply する
 	ListApplyHistories(ctx context.Context, userID string, deploymentID string) ([]*models.ApplyHistory, error)   // apply 履歴一覧を取得する
 }
 
@@ -304,22 +306,21 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 			return fmt.Errorf("k8s deployment apply: %w", err) // k8s Deployment apply エラーを返す
 		}
 
-		// 7-2. k8s に Service を apply する（pending_port=0 の場合は k8s から削除する）
+		// 7-2. k8s に Service を apply する（status ベースで操作を決定する）
 		var serviceData *models.Service                                                            // Service レコードを格納する変数を宣言する
 		serviceData, _ = applyService.ServiceRepo.FindByDeploymentID(ctx, deploymentID)           // Service レコードを取得する（存在しない場合は nil）
 		if serviceData != nil {
-			pendingPort := serviceData.PendingPort // pending_port を取得する
-			if pendingPort == 0 && serviceData.Port != 0 {
-				// pending_port=0 かつ現在値が設定済みの場合は k8s から Service を削除する（無効化）
-				k8sServiceName := deploymentData.Name + "-svc"
+			if serviceData.Status == models.ServiceStatusDeleting {
+				// status=deleting の場合は k8s から Service を削除する
+				k8sServiceName := serviceData.ID + "-svc" // Service 名は Service UUID ベース
 				if delErr := k8s.DeleteService(ctx, applyService.K8s, projectData.Namespace, k8sServiceName); delErr != nil { // k8s Service を削除する
 					if updateErr := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); updateErr != nil {
 						return fmt.Errorf("apply_history update: %w", updateErr)
 					}
 					return fmt.Errorf("k8s service delete: %w", delErr)
 				}
-			} else if pendingPort != 0 {
-				// pending_port が設定されている場合は k8s に apply する
+			} else if serviceData.PendingPort != 0 {
+				// pending_port が設定されている場合のみ k8s に apply する（0 は変更なし）
 				serviceManifest := manifestGenerator.GenerateService(*serviceData, deploymentData.Name, projectData.Namespace) // Service マニフェストを生成する
 				if err := k8s.ApplyService(ctx, applyService.K8s, serviceManifest); err != nil {                              // k8s に Service を apply する
 					applyHistoryRecord.Status = models.ApplyStatusFailed                                                                                  // k8s Service apply 失敗時はステータスを failed に変更する
@@ -330,54 +331,10 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 					return fmt.Errorf("k8s service apply: %w", err) // k8s Service apply エラーを返す
 				}
 			}
+			// pending_port=0 かつ status が deleting でない場合は変更なし → 何もしない
 		}
 
-		// 7-3. k8s に IngressRoute を apply する（PathRule を集約して Traefik IngressRoute を再構築する）
-		var ingressRouteData *models.IngressRoute                                                                       // IngressRoute レコードを格納する変数を宣言する
-		ingressRouteData, _ = applyService.IngressRouteRepo.FindByProjectID(ctx, deploymentData.ProjectID)             // Project に紐づく IngressRoute を取得する（存在しない場合は nil）
-		if ingressRouteData != nil {
-			pathRuleList, pathRuleErr := applyService.PathRuleRepo.FindActiveAndPendingByIngressRouteID(ctx, ingressRouteData.ID) // active/pending の PathRule 一覧を取得する
-			if pathRuleErr != nil {
-				return fmt.Errorf("path_rule 一覧の取得に失敗しました: %w", pathRuleErr) // 取得エラーを返す
-			}
-
-			if len(pathRuleList) == 0 {
-				// PathRule が 0 件の場合は k8s から IngressRoute を削除する
-				if delErr := k8s.DeleteIngressRoute(ctx, applyService.DynamicClient, projectData.Namespace, ingressRouteData.ID); delErr != nil { // k8s IngressRoute を削除する
-					if updateErr := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); updateErr != nil {
-						return fmt.Errorf("apply_history update: %w", updateErr)
-					}
-					return fmt.Errorf("k8s ingress_route delete: %w", delErr)
-				}
-			} else {
-				// PathRule を集約して Service 情報を解決する
-				pathRuleSpecList := make([]k8s.PathRuleSpec, 0, len(pathRuleList)) // PathRuleSpec 一覧を初期化する
-				for _, pathRuleItem := range pathRuleList {
-					pathRuleService, serviceErr := applyService.ServiceRepo.FindByServiceID(ctx, pathRuleItem.ServiceID) // PathRule が指す Service を取得する
-					if serviceErr != nil {
-						return fmt.Errorf("path_rule の Service 取得に失敗しました (service_id=%s): %w", pathRuleItem.ServiceID, serviceErr) // 取得エラーを返す
-					}
-					pathRuleServicePort := pathRuleService.PendingPort // pending_port を使う
-					if pathRuleServicePort == 0 {                      // pending が 0 の場合は current 値を使う
-						pathRuleServicePort = pathRuleService.Port
-					}
-					pathRuleSpecList = append(pathRuleSpecList, k8s.PathRuleSpec{ // PathRuleSpec を追加する
-						PathPrefix:  pathRuleItem.PathPrefix,                 // パスプレフィックスを設定する
-						ServiceName: pathRuleService.DeploymentID + "-svc",  // Service 名を生成する（deployment名-svc の命名規則）
-						ServicePort: pathRuleServicePort,                     // サービスポートを設定する
-					})
-				}
-
-				if err := k8s.ApplyIngressRoute(ctx, applyService.DynamicClient, *ingressRouteData, projectData.Namespace, pathRuleSpecList); err != nil { // k8s に IngressRoute を apply する
-					applyHistoryRecord.Status = models.ApplyStatusFailed                                                                                  // k8s IngressRoute apply 失敗時はステータスを failed に変更する
-					applyHistoryRecord.ErrorMessage = err.Error()                                                                                         // エラーメッセージを記録する
-					if updateErr := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); updateErr != nil { // ステータスを更新する
-						return fmt.Errorf("apply_history update: %w", updateErr) // 更新エラーを返す
-					}
-					return fmt.Errorf("k8s ingress_route apply: %w", err) // k8s IngressRoute apply エラーを返す
-				}
-			}
-		}
+		// 7-3. IngressRoute は ApplyProject で管理するため Deployment Apply では触らない
 
 		// 8. pending_*** を空にして current 値に昇格させる
 		appliedAt := time.Now() // apply 完了時刻を記録する
@@ -412,42 +369,28 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 
 		// 9. Service の pending_*** を昇格させる
 		if serviceData != nil { // Service レコードが存在する場合のみ昇格する
-			serviceData.Port = serviceData.PendingPort             // pending_port を昇格する（0=無効化も含む）
-			serviceData.PendingPort = 0                            // pending_port をクリアする
-			serviceData.TargetPort = serviceData.PendingTargetPort // pending_target_port を昇格する
-			serviceData.PendingTargetPort = 0                      // pending_target_port をクリアする
-			if serviceData.Port == 0 {
-				serviceData.Status = models.ServiceStatusPending // port=0 は未設定（pending）に戻す
-			} else {
-				serviceData.Status = models.ServiceStatusActive // port が設定されている場合は active にする
+			if serviceData.Status == models.ServiceStatusDeleting {
+				// status=deleting の場合は k8s 削除済みなので port をクリアして pending に戻す
+				serviceData.Port = 0
+				serviceData.TargetPort = 0
+				serviceData.PendingPort = 0
+				serviceData.PendingTargetPort = 0
+				serviceData.Status = models.ServiceStatusPending // 未設定状態に戻す
+			} else if serviceData.PendingPort != 0 {
+				// pending_port が設定されている場合のみ昇格する（0 は変更なし）
+				serviceData.Port = serviceData.PendingPort             // pending_port を昇格する
+				serviceData.PendingPort = 0                            // pending_port をクリアする
+				serviceData.TargetPort = serviceData.PendingTargetPort // pending_target_port を昇格する
+				serviceData.PendingTargetPort = 0                      // pending_target_port をクリアする
+				serviceData.Status = models.ServiceStatusActive        // active にする
 			}
+			// pending_port=0 かつ status が deleting でない場合は変更なし → status・port はそのまま
 			if err := applyService.ServiceRepo.Update(ctx, serviceData); err != nil { // Service を更新する
 				return fmt.Errorf("service update: %w", err) // 更新エラーを返す
 			}
 		}
 
-		// 10. PathRule の pending→active 昇格・deleting→物理削除を行う
-		if ingressRouteData != nil { // IngressRoute レコードが存在する場合のみ処理する
-			pendingPathRuleList, pendingErr := applyService.PathRuleRepo.FindPendingByIngressRouteID(ctx, ingressRouteData.ID) // pending の PathRule を取得する
-			if pendingErr != nil {
-				return fmt.Errorf("pending path_rule 取得に失敗しました: %w", pendingErr) // 取得エラーを返す
-			}
-			for _, pendingPathRule := range pendingPathRuleList { // pending の PathRule を active に昇格する
-				if updateErr := applyService.PathRuleRepo.UpdateStatus(ctx, nil, pendingPathRule.ID, models.PathRuleStatusActive); updateErr != nil { // status を active に更新する
-					return fmt.Errorf("path_rule status 更新に失敗しました: %w", updateErr) // 更新エラーを返す
-				}
-			}
-
-			deletingPathRuleList, deletingErr := applyService.PathRuleRepo.FindDeletingByIngressRouteID(ctx, ingressRouteData.ID) // deleting の PathRule を取得する
-			if deletingErr != nil {
-				return fmt.Errorf("deleting path_rule 取得に失敗しました: %w", deletingErr) // 取得エラーを返す
-			}
-			for _, deletingPathRule := range deletingPathRuleList { // deleting の PathRule を物理削除する
-				if deleteErr := applyService.PathRuleRepo.Delete(ctx, nil, deletingPathRule.ID); deleteErr != nil { // 物理削除する
-					return fmt.Errorf("path_rule 削除に失敗しました: %w", deleteErr) // 削除エラーを返す
-				}
-			}
-		}
+		// 10. PathRule は ApplyProject で管理するため Deployment Apply では触らない
 
 		// 11. VolumeMount の status を mounted に更新する
 		for _, volumeMountItem := range volumeMountList { // VolumeMount ごとに status を更新する
@@ -464,6 +407,105 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 	})
 
 	return applyResult, err // 結果とエラーを返す
+}
+
+// ApplyProject は projectID に紐づく IngressRoute・PathRule を k8s に apply する
+func (applyService *ApplyService) ApplyProject(ctx context.Context, userID string, projectID string) error {
+	projectData, err := applyService.ProjectRepository.FindByIDNoTx(ctx, projectID) // project を取得する
+	if err != nil {
+		return fmt.Errorf("project not found: %w", err) // 取得エラーを返す
+	}
+	if projectData.UserID != userID { // 所有者チェック
+		return ErrForbidden // 所有者でない場合は禁止エラーを返す
+	}
+
+	ingressRouteData, err := applyService.IngressRouteRepo.FindByProjectID(ctx, projectID) // IngressRoute を取得する
+	if err != nil {
+		return fmt.Errorf("ingress_route not found: %w", err) // 取得エラーを返す
+	}
+
+	// status=deleting の場合は k8s から削除して DB レコードも物理削除する
+	if ingressRouteData.Status == models.IngressRouteStatusDeleting {
+		if delErr := k8s.DeleteIngressRoute(ctx, applyService.DynamicClient, projectData.Namespace, ingressRouteData.ID); delErr != nil { // k8s IngressRoute を削除する
+			if !k8serrors.IsNotFound(delErr) { // k8s に存在しない場合は無視して続行する（未 apply のまま削除する場合）
+				return fmt.Errorf("k8s ingress_route delete: %w", delErr) // 削除エラーを返す
+			}
+		}
+		allPathRuleList, allErr := applyService.PathRuleRepo.FindByIngressRouteID(ctx, ingressRouteData.ID) // 全 PathRule を取得する
+		if allErr != nil {
+			return fmt.Errorf("path_rule 一覧取得に失敗しました: %w", allErr) // 取得エラーを返す
+		}
+		for _, pathRuleItem := range allPathRuleList { // PathRule を全件物理削除する
+			if deleteErr := applyService.PathRuleRepo.Delete(ctx, nil, pathRuleItem.ID); deleteErr != nil { // 物理削除する
+				return fmt.Errorf("path_rule 削除に失敗しました: %w", deleteErr) // 削除エラーを返す
+			}
+		}
+		if deleteErr := applyService.IngressRouteRepo.Delete(ctx, nil, ingressRouteData.ID); deleteErr != nil { // IngressRoute を物理削除する
+			return fmt.Errorf("ingress_route 削除に失敗しました: %w", deleteErr) // 削除エラーを返す
+		}
+		return nil // 削除完了
+	}
+
+	pathRuleList, err := applyService.PathRuleRepo.FindActiveAndPendingByIngressRouteID(ctx, ingressRouteData.ID) // active/pending の PathRule 一覧を取得する
+	if err != nil {
+		return fmt.Errorf("path_rule 一覧の取得に失敗しました: %w", err) // 取得エラーを返す
+	}
+
+	if len(pathRuleList) == 0 {
+		// PathRule が 0 件の場合は k8s から IngressRoute を削除する
+		if delErr := k8s.DeleteIngressRoute(ctx, applyService.DynamicClient, projectData.Namespace, ingressRouteData.ID); delErr != nil { // k8s IngressRoute を削除する
+			return fmt.Errorf("k8s ingress_route delete: %w", delErr) // 削除エラーを返す
+		}
+	} else {
+		// PathRule を集約して Service 情報を解決し k8s に apply する
+		pathRuleSpecList := make([]k8s.PathRuleSpec, 0, len(pathRuleList)) // PathRuleSpec 一覧を初期化する
+		for _, pathRuleItem := range pathRuleList {
+			pathRuleService, serviceErr := applyService.ServiceRepo.FindByServiceID(ctx, pathRuleItem.ServiceID) // PathRule が指す Service を取得する
+			if serviceErr != nil {
+				return fmt.Errorf("path_rule の Service 取得に失敗しました (service_id=%s): %w", pathRuleItem.ServiceID, serviceErr) // 取得エラーを返す
+			}
+			pathRuleServicePort := pathRuleService.PendingPort // pending_port を優先して使う
+			if pathRuleServicePort == 0 {                      // pending が 0 の場合は current 値を使う
+				pathRuleServicePort = pathRuleService.Port
+			}
+			pathRuleSpecList = append(pathRuleSpecList, k8s.PathRuleSpec{ // PathRuleSpec を追加する
+				PathPrefix:  pathRuleItem.PathPrefix,
+				ServiceName: pathRuleService.ID + "-svc", // k8s Service 名は Service UUID ベース（Deployment 名変更の影響を受けない）
+				ServicePort: pathRuleServicePort,
+			})
+		}
+		if err := k8s.ApplyIngressRoute(ctx, applyService.DynamicClient, *ingressRouteData, projectData.Namespace, pathRuleSpecList); err != nil { // k8s に IngressRoute を apply する
+			return fmt.Errorf("k8s ingress_route apply: %w", err) // apply エラーを返す
+		}
+	}
+
+	// IngressRoute の status を active に更新する
+	if err := applyService.IngressRouteRepo.UpdateStatus(ctx, ingressRouteData.ID, models.IngressRouteStatusActive, ingressRouteData.K8sStatus); err != nil { // status を active に更新する
+		return fmt.Errorf("ingress_route status 更新に失敗しました: %w", err) // 更新エラーを返す
+	}
+
+	// PathRule の pending→active 昇格・deleting→物理削除を行う
+	pendingPathRuleList, pendingErr := applyService.PathRuleRepo.FindPendingByIngressRouteID(ctx, ingressRouteData.ID) // pending の PathRule を取得する
+	if pendingErr != nil {
+		return fmt.Errorf("pending path_rule 取得に失敗しました: %w", pendingErr) // 取得エラーを返す
+	}
+	for _, pendingPathRule := range pendingPathRuleList { // pending の PathRule を active に昇格する
+		if updateErr := applyService.PathRuleRepo.UpdateStatus(ctx, nil, pendingPathRule.ID, models.PathRuleStatusActive); updateErr != nil { // status を active に更新する
+			return fmt.Errorf("path_rule status 更新に失敗しました: %w", updateErr) // 更新エラーを返す
+		}
+	}
+
+	deletingPathRuleList, deletingErr := applyService.PathRuleRepo.FindDeletingByIngressRouteID(ctx, ingressRouteData.ID) // deleting の PathRule を取得する
+	if deletingErr != nil {
+		return fmt.Errorf("deleting path_rule 取得に失敗しました: %w", deletingErr) // 取得エラーを返す
+	}
+	for _, deletingPathRule := range deletingPathRuleList { // deleting の PathRule を物理削除する
+		if deleteErr := applyService.PathRuleRepo.Delete(ctx, nil, deletingPathRule.ID); deleteErr != nil { // 物理削除する
+			return fmt.Errorf("path_rule 削除に失敗しました: %w", deleteErr) // 削除エラーを返す
+		}
+	}
+
+	return nil // 正常終了
 }
 
 // ListApplyHistories は deploymentID に紐づく apply 履歴一覧を返す

@@ -12,6 +12,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// ErrDuplicatePathPrefix は同一 IngressRoute 内で同じ path_prefix が既に存在する場合のエラー
+var ErrDuplicatePathPrefix = errors.New("path_prefix already exists in this ingress route")
+
 // IngressRouteService は IngressRoute・PathRule CRUD のビジネスロジックを定義するインターフェース
 type IngressRouteService interface {
 	GetIngressRoute(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error)                             // ingress_route を取得する
@@ -110,10 +113,22 @@ func (svc *ingressRouteServiceImpl) CreatePathRule(ctx context.Context, userID s
 	if err := svc.checkIngressRouteOwnership(ctx, userID, ingressRouteID); err != nil { // 所有権を確認する
 		return nil, err
 	}
+
+	// 同一 IngressRoute 内で同じ path_prefix が既に存在するか確認する（deleting 中も含めて弾く）
+	existingRules, err := svc.pathRuleRepo.FindByIngressRouteID(ctx, ingressRouteID) // 既存ルール一覧を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	for _, existingRule := range existingRules {
+		if existingRule.PathPrefix == req.PathPrefix { // 同じパスが既に存在する場合はエラーを返す
+			return nil, ErrDuplicatePathPrefix
+		}
+	}
+
 	pathRuleData := &models.PathRule{
-		IngressRouteID: ingressRouteID,             // ingress_route ID を設定する
-		PathPrefix:     req.PathPrefix,             // パスプレフィックスを設定する
-		ServiceID:      req.ServiceID,             // 対象 Service ID を設定する
+		IngressRouteID: ingressRouteID,               // ingress_route ID を設定する
+		PathPrefix:     req.PathPrefix,               // パスプレフィックスを設定する
+		ServiceID:      req.ServiceID,                // 対象 Service ID を設定する
 		Status:         models.PathRuleStatusPending, // 初期ステータスを pending にする
 	}
 	if err := svc.pathRuleRepo.Create(ctx, nil, pathRuleData); err != nil { // リポジトリ経由で作成する
