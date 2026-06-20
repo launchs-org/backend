@@ -663,8 +663,8 @@ func TestApplyService_Apply_applyでk8sServiceが作成される(t *testing.T) {
 		t.Fatalf("Apply がエラーを返しました: %v", err)
 	}
 
-	// k8s に Service が作成されていることを確認する（Service 名は deploymentName + "-svc"）
-	expectedServiceName := deploymentData.Name + "-svc"                                     // 期待する Service 名を生成する
+	// k8s に Service が作成されていることを確認する（Service 名は serviceID + "-svc"）
+	expectedServiceName := serviceRecord.ID + "-svc"                                         // 期待する Service 名を生成する（UUID ベース）
 	k8sService, err := fakeK8sClient.CoreV1().Services(projectData.Namespace).Get(
 		context.Background(), expectedServiceName, metav1.GetOptions{},
 	)

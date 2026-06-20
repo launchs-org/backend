@@ -49,6 +49,21 @@ func (mock *mockIngressRouteService) DeletePathRule(ctx context.Context, userID 
 	return mock.deletePathRuleFunc(ctx, userID, pathRuleID) // モック関数を呼び出す
 }
 
+// mockApplyServiceForIngress は ApplyServiceInterface のテスト用スタブ実装
+type mockApplyServiceForIngress struct{}
+
+func (mock *mockApplyServiceForIngress) Apply(ctx context.Context, userID string, deploymentID string) (*service.ApplyResult, error) {
+	return &service.ApplyResult{}, nil // テストでは使用しないためデフォルト実装を返す
+}
+
+func (mock *mockApplyServiceForIngress) ApplyProject(ctx context.Context, userID string, projectID string) error {
+	return nil // テストでは使用しないためデフォルト実装を返す
+}
+
+func (mock *mockApplyServiceForIngress) ListApplyHistories(ctx context.Context, userID string, deploymentID string) ([]*models.ApplyHistory, error) {
+	return nil, nil // テストでは使用しないためデフォルト実装を返す
+}
+
 // setupIngressRouteEchoContext はテスト用の Echo コンテキストを生成するヘルパー関数
 func setupIngressRouteEchoContext(method, path, body string, params map[string]string) (echo.Context, *httptest.ResponseRecorder) {
 	echoInstance := echo.New()                                            // Echo インスタンスを生成する
@@ -88,7 +103,7 @@ func TestIngressRouteHandler_GetIngressRoute_正常に取得される(t *testing
 		},
 	}
 
-	ingressRouteHandler := NewIngressRouteHandler(mockSvc) // ハンドラーを生成する
+	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
 	echoCtx, responseRecorder := setupIngressRouteEchoContext(
 		http.MethodGet, "/api/v1/projects/project-id-1/ingress-route", "", map[string]string{"id": "project-id-1"},
 	) // テスト用コンテキストを生成する
@@ -117,7 +132,7 @@ func TestIngressRouteHandler_GetIngressRoute_存在しない場合は404にな�
 		},
 	}
 
-	ingressRouteHandler := NewIngressRouteHandler(mockSvc) // ハンドラーを生成する
+	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
 	echoCtx, responseRecorder := setupIngressRouteEchoContext(
 		http.MethodGet, "/api/v1/projects/project-id-1/ingress-route", "", map[string]string{"id": "project-id-1"},
 	) // テスト用コンテキストを生成する
@@ -138,7 +153,7 @@ func TestIngressRouteHandler_GetIngressRoute_権限がない場合は403にな�
 		},
 	}
 
-	ingressRouteHandler := NewIngressRouteHandler(mockSvc) // ハンドラーを生成する
+	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
 	echoCtx, responseRecorder := setupIngressRouteEchoContext(
 		http.MethodGet, "/api/v1/projects/project-id-1/ingress-route", "", map[string]string{"id": "project-id-1"},
 	) // テスト用コンテキストを生成する
@@ -166,7 +181,7 @@ func TestIngressRouteHandler_CreateIngressRoute_正常に作成される(t *test
 		},
 	}
 
-	ingressRouteHandler := NewIngressRouteHandler(mockSvc) // ハンドラーを生成する
+	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
 	echoCtx, responseRecorder := setupIngressRouteEchoContext(
 		http.MethodPost, "/api/v1/projects/project-id-1/ingress-route", "", map[string]string{"id": "project-id-1"},
 	) // テスト用コンテキストを生成する
@@ -203,7 +218,7 @@ func TestIngressRouteHandler_CreatePathRule_正常に作成される(t *testing.
 		},
 	}
 
-	ingressRouteHandler := NewIngressRouteHandler(mockSvc) // ハンドラーを生成する
+	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
 	requestJSON := `{"path_prefix":"/api","service_id":"service-id-1"}`    // リクエスト JSON を定義する
 	echoCtx, responseRecorder := setupIngressRouteEchoContext(
 		http.MethodPost, "/api/v1/ingress-routes/ingress-route-id-1/path-rules", requestJSON, map[string]string{"id": "ingress-route-id-1"},
@@ -236,7 +251,7 @@ func TestIngressRouteHandler_DeletePathRule_正常に204が返る(t *testing.T) 
 		},
 	}
 
-	ingressRouteHandler := NewIngressRouteHandler(mockSvc) // ハンドラーを生成する
+	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
 	echoCtx, responseRecorder := setupIngressRouteEchoContext(
 		http.MethodDelete, "/api/v1/ingress-routes/ingress-route-id-1/path-rules/path-rule-id-1", "",
 		map[string]string{"id": "ingress-route-id-1", "pathRuleID": "path-rule-id-1"},
@@ -258,7 +273,7 @@ func TestIngressRouteHandler_DeletePathRule_他ユーザーのリソースは403
 		},
 	}
 
-	ingressRouteHandler := NewIngressRouteHandler(mockSvc) // ハンドラーを生成する
+	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
 	echoCtx, responseRecorder := setupIngressRouteEchoContext(
 		http.MethodDelete, "/api/v1/ingress-routes/ingress-route-id-1/path-rules/path-rule-id-1", "",
 		map[string]string{"id": "ingress-route-id-1", "pathRuleID": "path-rule-id-1"},
@@ -285,7 +300,7 @@ func TestIngressRouteHandler_ListPathRules_正常に一覧が返る(t *testing.T
 		},
 	}
 
-	ingressRouteHandler := NewIngressRouteHandler(mockSvc) // ハンドラーを生成する
+	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
 	echoCtx, responseRecorder := setupIngressRouteEchoContext(
 		http.MethodGet, "/api/v1/ingress-routes/ingress-route-id-1/path-rules", "", map[string]string{"id": "ingress-route-id-1"},
 	) // テスト用コンテキストを生成する
@@ -314,7 +329,7 @@ func TestIngressRouteHandler_CreatePathRule_サービスエラーで500になる
 		},
 	}
 
-	ingressRouteHandler := NewIngressRouteHandler(mockSvc) // ハンドラーを生成する
+	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
 	echoCtx, responseRecorder := setupIngressRouteEchoContext(
 		http.MethodPost, "/api/v1/ingress-routes/ingress-route-id-1/path-rules",
 		`{"path_prefix":"/api","service_id":"service-id-1"}`,

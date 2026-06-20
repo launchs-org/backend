@@ -57,6 +57,10 @@ func (mock *mockApplyService) Apply(ctx context.Context, userID string, deployme
 	return &ApplyResult{}, nil // デフォルトは正常終了を返す
 }
 
+func (mock *mockApplyService) ApplyProject(ctx context.Context, userID string, projectID string) error {
+	return nil // テストでは使用しないためデフォルト実装を返す
+}
+
 func (mock *mockApplyService) ListApplyHistories(ctx context.Context, userID string, deploymentID string) ([]*models.ApplyHistory, error) {
 	return nil, nil // テストでは使用しないためデフォルト nil を返す
 }
