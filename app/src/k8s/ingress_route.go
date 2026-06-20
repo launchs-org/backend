@@ -28,40 +28,33 @@ func buildRouterRule(host, pathPrefix string) string {
 	return fmt.Sprintf("Host(`%s`) && PathPrefix(`%s`)", host, pathPrefix) // ホストとパスプレフィックスのルールを生成する
 }
 
+// PathRuleSpec は IngressRoute の1つのパスルールを表す
+type PathRuleSpec struct {
+	PathPrefix  string // ルーティング対象パスプレフィックス
+	ServiceName string // 転送先 Kubernetes Service 名
+	ServicePort int    // 転送先 Service ポート番号
+}
+
 // buildIngressRouteManifest は Traefik IngressRoute の unstructured マニフェストを生成する
-func buildIngressRouteManifest(ingressRouteData models.IngressRoute, namespace, serviceName string, servicePort int) *unstructured.Unstructured {
-	host := ingressRouteData.PendingHost // pending_host を使う
-	if host == "" {                      // pending が空の場合は current 値を使う
-		host = ingressRouteData.Host
-	}
-	pathPrefix := ingressRouteData.PendingPathPrefix // pending_path_prefix を使う
-	if pathPrefix == "" {                            // pending が空の場合は current 値を使う
-		pathPrefix = ingressRouteData.PathPrefix
-	}
-	if pathPrefix == "" { // pathPrefix が未設定の場合はデフォルト値を使う
-		pathPrefix = "/"
-	}
-	port := ingressRouteData.PendingPort // pending_port を使う
-	if port == 0 {                       // pending が 0 の場合は current 値を使う
-		port = ingressRouteData.Port
-	}
-
-	routeRule := buildRouterRule(host, pathPrefix) // ルールを生成する
-
-	routeSpec := map[string]interface{}{
-		"kind":  "Rule",
-		"match": routeRule, // ルールを設定する
-		"services": []interface{}{
-			map[string]interface{}{
-				"name": serviceName,  // サービス名を設定する
-				"port": int64(port),  // ポートを設定する
+func buildIngressRouteManifest(ingressRouteData models.IngressRoute, namespace string, pathRuleSpecList []PathRuleSpec) *unstructured.Unstructured {
+	routeList := make([]interface{}, 0, len(pathRuleSpecList)) // ルート一覧を初期化する
+	for _, pathRuleSpec := range pathRuleSpecList {            // PathRuleSpec ごとに Traefik ルートを生成する
+		routeRule := buildRouterRule(ingressRouteData.Host, pathRuleSpec.PathPrefix) // ルールを生成する
+		routeList = append(routeList, map[string]interface{}{
+			"kind":  "Rule",
+			"match": routeRule, // ルール文字列を設定する
+			"services": []interface{}{
+				map[string]interface{}{
+					"name": pathRuleSpec.ServiceName,         // サービス名を設定する
+					"port": int64(pathRuleSpec.ServicePort),  // ポートを設定する
+				},
 			},
-		},
+		})
 	}
 
 	spec := map[string]interface{}{
 		"entryPoints": []interface{}{"web", "websecure"}, // エントリーポイントを設定する
-		"routes":      []interface{}{routeSpec},          // ルートを設定する
+		"routes":      routeList,                         // 複数ルートを設定する
 	}
 
 	return &unstructured.Unstructured{
@@ -69,7 +62,7 @@ func buildIngressRouteManifest(ingressRouteData models.IngressRoute, namespace, 
 			"apiVersion": "traefik.io/v1alpha1",
 			"kind":       "IngressRoute",
 			"metadata": map[string]interface{}{
-				"name":      ingressRouteData.ID, // IngressRoute 名を設定する（deployment ID を使う）
+				"name":      ingressRouteData.ID, // IngressRoute 名を設定する（IngressRoute ID を使う）
 				"namespace": namespace,           // namespace を設定する
 				"labels": map[string]interface{}{
 					"launchs-managed": "true", // launchs が管理するリソースであることを示すラベル
@@ -82,8 +75,8 @@ func buildIngressRouteManifest(ingressRouteData models.IngressRoute, namespace, 
 }
 
 // ApplyIngressRoute は Traefik IngressRoute を作成または更新する
-func ApplyIngressRoute(ctx context.Context, client dynamic.Interface, ingressRouteData models.IngressRoute, namespace, serviceName string, servicePort int) error {
-	manifest := buildIngressRouteManifest(ingressRouteData, namespace, serviceName, servicePort) // マニフェストを生成する
+func ApplyIngressRoute(ctx context.Context, client dynamic.Interface, ingressRouteData models.IngressRoute, namespace string, pathRuleSpecList []PathRuleSpec) error {
+	manifest := buildIngressRouteManifest(ingressRouteData, namespace, pathRuleSpecList) // マニフェストを生成する
 
 	existing, err := client.Resource(traefikIngressRouteGVR).Namespace(namespace).Get(ctx, manifest.GetName(), metav1.GetOptions{}) // 既存の IngressRoute を取得する
 	if err != nil {
