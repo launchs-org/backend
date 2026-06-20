@@ -553,10 +553,10 @@ function NetworkingTab({ deploymentId }: { deploymentId: string }) {
     return () => clearInterval(intervalId) // クリーンアップ
   }, [deploymentId])
 
-  // port と pending_port が両方 0 の場合のみ「未設定」とする
-  const serviceConfigured = service && (service.port !== 0 || service.pending_port !== 0)
-  // 無効化が保留中（port は設定済みだが pending_port=0 に変更された）
-  const serviceDisablePending = service && service.port !== 0 && service.pending_port === 0
+  // status が pending でない（active）かつ port が設定済みの場合のみ「設定済み」とする
+  const serviceConfigured = service && service.status !== 'pending'
+  // 無効化が保留中：status=pending かつ port が設定済み（無効化を予約して Apply 前の状態）
+  const serviceDisablePending = service && service.status === 'pending' && service.port !== 0
 
   const handleDeleteService = async () => {
     if (!confirm('Serviceを無効化しますか？保留中になり、Applyで反映されます。')) return
@@ -575,10 +575,21 @@ function NetworkingTab({ deploymentId }: { deploymentId: string }) {
   const handleSaveService = async () => {
     setSavingSvc(true)
     try {
-      await put(`/deployments/${deploymentId}/service`, {
-        port: parseInt(svcForm.port, 10),
-        target_port: parseInt(svcForm.target_port, 10),
-      })
+      const portNum = parseInt(svcForm.port, 10)
+      const targetPortNum = parseInt(svcForm.target_port, 10)
+      if (service) {
+        // 既存 Service の更新は PUT を使う
+        await put(`/deployments/${deploymentId}/service`, {
+          port: portNum,
+          target_port: targetPortNum,
+        })
+      } else {
+        // Service が未作成の場合は POST で新規作成する
+        await post(`/deployments/${deploymentId}/service`, {
+          port: portNum,
+          target_port: targetPortNum,
+        })
+      }
       await fetchNetworking()
     } catch (saveError) {
       console.error(saveError)
@@ -681,6 +692,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 function HistoryTab({ deploymentId }: { deploymentId: string }) {
   const [historyList, setHistoryList] = useState<ApplyHistory[]>([]) // Apply履歴を管理する
+  const [expandedId, setExpandedId] = useState<string | null>(null) // 展開中の履歴ID
 
   useEffect(() => {
     get<ApplyHistory[]>(`/deployments/${deploymentId}/apply-histories`)
@@ -688,32 +700,61 @@ function HistoryTab({ deploymentId }: { deploymentId: string }) {
       .catch(console.error)
   }, [deploymentId])
 
+  if (historyList.length === 0) {
+    return <div className="py-12 text-center text-sm text-gray-400">Apply 履歴がありません</div>
+  }
+
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-      {historyList.length === 0 ? (
-        <div className="py-12 text-center text-sm text-gray-400">Apply 履歴がありません</div>
-      ) : (
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-100">
-            <tr>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-400">Apply日時</th>
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-400">ID</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-50">
-            {historyList.map((historyItem) => (
-              <tr key={historyItem.id} className="hover:bg-gray-50">
-                <td className="px-4 py-2.5 text-gray-600">
+    <div className="space-y-2">
+      {historyList.map((historyItem) => {
+        const isExpanded = expandedId === historyItem.id
+        const isSuccess = historyItem.status === 'applied'
+        return (
+          <div
+            key={historyItem.id}
+            className={`rounded-lg border overflow-hidden ${isSuccess ? 'border-gray-200' : 'border-red-200'}`}
+          >
+            {/* ヘッダー行 */}
+            <button
+              className="w-full flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50 transition-colors text-left"
+              onClick={() => setExpandedId(isExpanded ? null : historyItem.id)}
+            >
+              <div className="flex items-center gap-3">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${isSuccess ? 'bg-green-500' : 'bg-red-500'}`} />
+                <span className="text-sm text-gray-700">
                   {new Date(historyItem.applied_at).toLocaleString('ja-JP')}
-                </td>
-                <td className="px-4 py-2.5 font-mono text-gray-400 text-xs">
-                  {historyItem.id.slice(0, 12)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+                </span>
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isSuccess ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                  {isSuccess ? '成功' : '失敗'}
+                </span>
+              </div>
+              <span className="font-mono text-xs text-gray-400">{historyItem.id.slice(0, 8)}</span>
+            </button>
+
+            {/* 展開コンテンツ */}
+            {isExpanded && (
+              <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-3">
+                {/* エラーメッセージ */}
+                {historyItem.error_message && (
+                  <div className="bg-red-50 border border-red-200 rounded-md px-3 py-2 text-sm text-red-700 font-mono whitespace-pre-wrap">
+                    {historyItem.error_message}
+                  </div>
+                )}
+
+                {/* manifest スナップショット */}
+                {historyItem.manifests && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 mb-1">適用された Manifest</p>
+                    <pre className="text-xs font-mono bg-[#111827] text-gray-200 rounded-md p-3 overflow-x-auto whitespace-pre-wrap max-h-96">
+                      {JSON.stringify(historyItem.manifests, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

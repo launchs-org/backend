@@ -1,19 +1,22 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Globe, Plus } from 'lucide-react'
+import { Globe } from 'lucide-react'
 import { StatusBadge } from '@/components/StatusBadge'
 import type { IngressRoute, PathRule } from '@/lib/types'
 
 export type IngressNodeData = {
   ingress: IngressRoute
   pathRules: PathRule[]
-  onAddPathRule?: () => void // パスルール追加ボタンのコールバック
+  onSelect?: () => void // ノードクリック時のコールバック
 }
 
 export function IngressNode({ data }: NodeProps) {
-  const { ingress, pathRules, onAddPathRule } = data as IngressNodeData
+  const { ingress, pathRules, onSelect } = data as IngressNodeData
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg shadow-sm w-56">
+    <div
+      onClick={onSelect} // クリックでサイドバーを開く
+      className="bg-white border border-gray-200 rounded-lg shadow-sm w-56 cursor-pointer hover:border-purple-400 hover:shadow-md transition-all"
+    >
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
 
       <div className="p-3">
@@ -44,15 +47,6 @@ export function IngressNode({ data }: NodeProps) {
             ))}
           </div>
         )}
-
-        {/* パスルール追加ボタン */}
-        <button
-          onClick={(clickEvent) => { clickEvent.stopPropagation(); onAddPathRule?.() }} // ReactFlow のノード選択と干渉しないように止める
-          className="mt-2 w-full flex items-center justify-center gap-1 text-xs text-purple-600 hover:text-purple-800 border border-purple-200 hover:border-purple-400 rounded-md py-1 transition-colors"
-        >
-          <Plus className="w-3 h-3" />
-          パスを追加
-        </button>
       </div>
     </div>
   )

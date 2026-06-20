@@ -126,9 +126,10 @@ export type PathRule = {
 export type ApplyHistory = {
   id: string
   deployment_id: string
-  manifest_snapshot: string
+  manifests: unknown
+  status: 'applied' | 'failed'
+  error_message: string
   applied_at: string
-  created_at: string
 }
 
 // ── Logs ──────────────────────────────────────────────────────
