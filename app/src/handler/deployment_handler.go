@@ -190,6 +190,41 @@ func (deploymentHandler *DeploymentHandler) ListApplyHistories(echoCtx echo.Cont
 	return echoCtx.JSON(http.StatusOK, historyList) // 履歴一覧を返す
 }
 
+// CreateService は POST /deployments/:id/service のハンドラー
+func (deploymentHandler *DeploymentHandler) CreateService(echoCtx echo.Context) error {
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
+	deploymentID := echoCtx.Param("id")      // パスパラメータから deployment ID を取得する
+
+	var requestBody service.CreateServiceRequest        // リクエストボディの構造体を定義する
+	if err := echoCtx.Bind(&requestBody); err != nil { // リクエストをバインドする
+		logger.PrintHandlerError("DeploymentHandler", "CreateService", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
+		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+			"error": "リクエストが不正です",
+		})
+	}
+
+	serviceData, err := deploymentHandler.deploymentService.CreateService(echoCtx.Request().Context(), userID, deploymentID, requestBody) // サービスを呼び出して service を作成する
+	if err != nil {                                                                                                                         // エラーが発生した場合
+		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("DeploymentHandler", "CreateService", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusForbidden, map[string]string{
+				"error": "アクセスが禁止されています",
+			})
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("DeploymentHandler", "CreateService", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusNotFound, map[string]string{
+				"error": "リソースが見つかりません",
+			})
+		}
+		logger.PrintHandlerError("DeploymentHandler", "CreateService", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "内部サーバーエラー",
+		})
+	}
+	return echoCtx.JSON(http.StatusCreated, serviceData) // 作成した service を返す
+}
+
 // GetService は GET /deployments/:id/service のハンドラー
 func (deploymentHandler *DeploymentHandler) GetService(echoCtx echo.Context) error {
 	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する

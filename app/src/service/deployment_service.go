@@ -20,6 +20,7 @@ type DeploymentService interface {
 	UpdateDeployment(ctx context.Context, userID string, deploymentID string, req UpdateDeploymentRequest) (*models.Deployment, error)          // deployment を更新する
 	DeleteDeployment(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)                                       // deployment を削除（deleting 状態に変更）する
 	GetService(ctx context.Context, userID string, deploymentID string) (*models.Service, error)                                                // service 設定を取得する
+	CreateService(ctx context.Context, userID string, deploymentID string, req CreateServiceRequest) (*models.Service, error)                   // service を作成する
 	UpdateService(ctx context.Context, userID string, deploymentID string, req UpdateServiceRequest) (*models.Service, error)                   // service の pending フィールドを更新する
 	GetIngressRoute(ctx context.Context, userID string, deploymentID string) (*models.IngressRoute, error)                                      // ingress_route 設定を取得する
 	CreateIngressRoute(ctx context.Context, userID string, deploymentID string, req CreateIngressRouteRequest) (*models.IngressRoute, error)    // ingress_route を作成する
@@ -41,6 +42,13 @@ type CreateDeploymentRequest struct {
 	DockerfilePath      string   `json:"dockerfile_path"`   // Dockerfile パス
 	InstanceSize        string   `json:"instance_size"`     // インスタンスサイズ
 	Replicas            int32    `json:"replicas"`          // レプリカ数
+}
+
+// CreateServiceRequest は POST /deployments/:id/service のリクエスト構造体
+type CreateServiceRequest struct {
+	Port       int    `json:"port"`        // 公開ポート番号
+	TargetPort int    `json:"target_port"` // コンテナ内ポート番号
+	Type       string `json:"type"`        // ClusterIP / NodePort / LoadBalancer
 }
 
 // UpdateServiceRequest は PUT /deployments/:id/service のリクエスト構造体
@@ -126,7 +134,7 @@ func (svc *deploymentServiceImpl) ListDeployments(ctx context.Context, projectID
 	return svc.deploymentRepo.FindAllByProjectID(ctx, projectID) // リポジトリ経由で取得する
 }
 
-// CreateDeployment は Deployment レコードと Service レコードを作成する
+// CreateDeployment は Deployment レコードを作成する
 func (svc *deploymentServiceImpl) CreateDeployment(ctx context.Context, req CreateDeploymentRequest) (*models.Deployment, error) {
 	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, req.ProjectID) // project を取得してuserIDを解決する
 	if err != nil {
@@ -168,18 +176,6 @@ func (svc *deploymentServiceImpl) CreateDeployment(ctx context.Context, req Crea
 	}
 
 	if err := svc.deploymentRepo.Create(ctx, deploymentData); err != nil { // リポジトリ経由で Deployment レコードを作成する
-		return nil, err // 作成エラーを返す
-	}
-
-	// Deployment に紐づく Service レコードをデフォルト作成する（port=0 は未設定）
-	serviceData := &models.Service{
-		DeploymentID: deploymentData.ID,    // デプロイメント ID を設定する
-		Port:         0,                    // 未設定
-		TargetPort:   0,                    // 未設定
-		Type:         models.ServiceTypeClusterIP, // デフォルトタイプを設定する
-		Status:       models.ServiceStatusPending, // 初期ステータスを設定する
-	}
-	if err := svc.serviceRepo.Create(ctx, serviceData); err != nil { // リポジトリ経由で Service レコードを作成する
 		return nil, err // 作成エラーを返す
 	}
 
@@ -310,6 +306,32 @@ func (svc *deploymentServiceImpl) GetService(ctx context.Context, userID string,
 	return svc.serviceRepo.FindByDeploymentID(ctx, deploymentID) // リポジトリ経由で service を取得する
 }
 
+// CreateService は deploymentID に紐づく service を作成する
+func (svc *deploymentServiceImpl) CreateService(ctx context.Context, userID string, deploymentID string, req CreateServiceRequest) (*models.Service, error) {
+	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得して所有権チェック用に使う
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	if err := svc.checkOwnership(ctx, userID, deploymentData.ProjectID); err != nil { // 所有権を確認する
+		return nil, err
+	}
+	serviceType := models.ServiceType(req.Type)         // リクエストのタイプを変換する
+	if serviceType == "" {                               // タイプが未指定の場合はデフォルトを設定する
+		serviceType = models.ServiceTypeClusterIP        // デフォルトは ClusterIP にする
+	}
+	serviceData := &models.Service{
+		DeploymentID:      deploymentID,                  // deployment ID を設定する
+		PendingPort:       req.Port,                      // pending_port を設定する（apply で反映される）
+		PendingTargetPort: req.TargetPort,                // pending_target_port を設定する
+		Type:              serviceType,                   // サービスタイプを設定する
+		Status:            models.ServiceStatusPending,   // 初期ステータスを設定する
+	}
+	if err := svc.serviceRepo.Create(ctx, serviceData); err != nil { // リポジトリ経由で作成する
+		return nil, err // 作成エラーを返す
+	}
+	return serviceData, nil // 作成した service を返す
+}
+
 // UpdateService は送られてきたフィールドのみ pending_* を更新する
 func (svc *deploymentServiceImpl) UpdateService(ctx context.Context, userID string, deploymentID string, req UpdateServiceRequest) (*models.Service, error) {
 	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得して所有権チェック用に使う
@@ -419,9 +441,10 @@ func (svc *deploymentServiceImpl) DeleteService(ctx context.Context, userID stri
 	if err != nil {
 		return err // 取得エラーを返す
 	}
-	serviceData.PendingPort = 0       // pending_port を 0 にして無効化を予約する
-	serviceData.PendingTargetPort = 0 // pending_target_port を 0 にする
-	return svc.serviceRepo.Update(ctx, serviceData) // DB に保存する（apply 後に k8s から削除される）
+	serviceData.PendingPort = 0                         // pending_port を 0 にして無効化を予約する
+	serviceData.PendingTargetPort = 0                   // pending_target_port を 0 にする
+	serviceData.Status = models.ServiceStatusDeleting   // 削除待ち状態に変更する（apply で k8s から削除される）
+	return svc.serviceRepo.Update(ctx, serviceData)     // DB に保存する
 }
 
 // DeleteIngressRoute は pending_port=0 にして apply 待ちにする（レコードは残す）
@@ -437,8 +460,9 @@ func (svc *deploymentServiceImpl) DeleteIngressRoute(ctx context.Context, userID
 	if err != nil {
 		return err // 取得エラーを返す
 	}
-	ingressRouteData.PendingPort = 0 // pending_port を 0 にして無効化を予約する
-	return svc.ingressRouteRepo.Update(ctx, ingressRouteData) // DB に保存する（apply 後に k8s から削除される）
+	ingressRouteData.PendingPort = 0                                    // pending_port を 0 にして無効化を予約する
+	ingressRouteData.Status = models.IngressRouteStatusDeleting         // 削除待ち状態に変更する（apply で k8s から削除される）
+	return svc.ingressRouteRepo.Update(ctx, ingressRouteData)           // DB に保存する
 }
 
 // ErrDeploymentNotFound は deployment が見つからない場合のエラー

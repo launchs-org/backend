@@ -50,6 +50,7 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.POST("/deployments/:id/apply", opts.DeploymentHandler.ApplyDeployment)               // deployment apply エンドポイント
 	apiGroup.GET("/deployments/:id/apply-histories", opts.DeploymentHandler.ListApplyHistories)   // apply 履歴一覧取得エンドポイント
 	apiGroup.GET("/deployments/:id/service", opts.DeploymentHandler.GetService)                   // service 設定取得エンドポイント
+	apiGroup.POST("/deployments/:id/service", opts.DeploymentHandler.CreateService)               // service 作成エンドポイント
 	apiGroup.PUT("/deployments/:id/service", opts.DeploymentHandler.UpdateService)                // service 設定更新エンドポイント
 	apiGroup.DELETE("/deployments/:id/service", opts.DeploymentHandler.DeleteService)             // service 削除エンドポイント
 
