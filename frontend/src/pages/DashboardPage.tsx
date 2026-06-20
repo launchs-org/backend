@@ -1,127 +1,171 @@
-import { useEffect } from 'react'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
-import { IconUploadDialog } from '@/components/IconUploadDialog'
-import { authbase, type UserInfo } from '@/lib/authbase'
-import { LogOut, Mail, ShieldCheck, User } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Plus, FolderOpen, Clock } from 'lucide-react'
+import { Layout } from '@/components/Layout'
+import { StatusBadge } from '@/components/StatusBadge'
+import { get } from '@/lib/api'
+import type { Project, Quota } from '@/lib/types'
 
-type Props = {
-  user: UserInfo
-  token: string
-  onLogout: () => void
-  onRefresh: () => void
-}
+export function DashboardPage() {
+  const navigate = useNavigate()
+  const [projectList, setProjectList] = useState<Project[]>([]) // プロジェクト一覧を管理する
+  const [quota, setQuota] = useState<Quota | null>(null) // クォータ情報を管理する
+  const [loading, setLoading] = useState(true) // ローディング状態を管理する
+  const [error, setError] = useState<string | null>(null) // エラー状態を管理する
 
-const PROVIDER_LABEL: Record<string, string> = {
-  google: 'Google',
-  github: 'GitHub',
-  discord: 'Discord',
-  microsoftonline: 'Microsoft',
-  basic: 'メール / パスワード',
-}
+  const fetchData = async () => {
+    try {
+      const [projectsData, quotaData] = await Promise.all([
+        get<Project[]>('/projects'), // プロジェクト一覧を取得する
+        get<Quota>('/users/quota'), // クォータ情報を取得する
+      ])
+      setProjectList(projectsData ?? [])
+      setQuota(quotaData)
+    } catch (fetchError) {
+      setError('データの取得に失敗しました')
+      console.error(fetchError)
+    } finally {
+      setLoading(false)
+    }
+  }
 
-export function DashboardPage({ user, token, onLogout, onRefresh }: Props) {
   useEffect(() => {
-    onRefresh()
+    void fetchData() // 初回データ取得
+
+    const intervalId = setInterval(() => {
+      void fetchData() // 30秒ごとにポーリングする
+    }, 30_000)
+
+    return () => clearInterval(intervalId) // クリーンアップ
   }, [])
 
-  const initials = user.name
-    .split(' ')
-    .map((n) => n[0])
-    .join('')
-    .toUpperCase()
-    .slice(0, 2)
+  const formatRelativeTime = (dateStr: string) => {
+    if (!dateStr) return '—' // 日付が未設定の場合はダッシュを返す
+    const timestamp = new Date(dateStr).getTime() // 日付をタイムスタンプに変換する
+    if (isNaN(timestamp)) return '—' // 無効な日付の場合はダッシュを返す
+    const diff = Date.now() - timestamp // 経過時間を計算する
+    const minutes = Math.floor(diff / 60_000)
+    if (minutes < 60) return `${minutes}分前`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}時間前`
+    return `${Math.floor(hours / 24)}日前`
+  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-zinc-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-md space-y-4">
-
-        {/* ヘッダー */}
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-2">
-            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-600">
-              <ShieldCheck className="w-4 h-4 text-white" />
-            </div>
-            <span className="text-sm font-semibold text-zinc-700">AuthBase</span>
-          </div>
-          <Button variant="ghost" size="sm" onClick={onLogout} className="text-zinc-500 hover:text-red-500">
-            <LogOut className="w-4 h-4" />
-            ログアウト
-          </Button>
+    <Layout
+      actions={
+        <button
+          onClick={() => navigate('/projects/new')}
+          className="flex items-center gap-1.5 bg-[#111827] text-white text-sm px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          New Project
+        </button>
+      }
+    >
+      <div className="space-y-6">
+        {/* ページタイトル */}
+        <div>
+          <h1 className="text-xl font-semibold text-[#111827]">Projects</h1>
+          {quota && (
+            <p className="text-sm text-gray-500 mt-1">
+              {quota.current_projects} / {quota.max_projects} projects used
+            </p>
+          )}
         </div>
 
-        {/* プロフィールカード */}
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex flex-col items-center gap-4">
-              <div className="relative">
-                <Avatar className="h-20 w-20 ring-4 ring-indigo-100">
-                  <AvatarImage
-                    src={`${authbase.iconUrl(user.user_id)}?t=${Date.now()}`}
-                    alt={user.name}
-                  />
-                  <AvatarFallback className="text-xl">{initials}</AvatarFallback>
-                </Avatar>
-                <IconUploadDialog user={user} token={token} onUpdated={onRefresh} />
-              </div>
-              <div className="text-center">
-                <h2 className="text-lg font-semibold text-zinc-900">{user.name}</h2>
-                <p className="text-sm text-zinc-500">{user.email}</p>
-              </div>
+        {/* クォータバー */}
+        {quota && (
+          <div className="bg-white rounded-lg border border-gray-200 p-4">
+            <h2 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">リソース使用状況</h2>
+            <div className="grid grid-cols-3 gap-4">
+              <QuotaBar label="プロジェクト" current={quota.current_projects} max={quota.max_projects} />
+              <QuotaBar label="デプロイメント" current={quota.current_deployments} max={quota.max_deployments} />
+              <QuotaBar label="ボリューム" current={quota.current_volume_mb} max={quota.max_volume_mb} />
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        )}
 
-        {/* ユーザー情報カード */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">アカウント情報</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-0">
-            <InfoRow
-              icon={<User className="w-4 h-4 text-zinc-400" />}
-              label="ユーザー ID"
-              value={user.user_id}
-              mono
-            />
-            <Separator />
-            <InfoRow
-              icon={<Mail className="w-4 h-4 text-zinc-400" />}
-              label="メールアドレス"
-              value={user.email}
-            />
-            <Separator />
-            <InfoRow
-              icon={<ShieldCheck className="w-4 h-4 text-zinc-400" />}
-              label="認証方法"
-              value={PROVIDER_LABEL[user.prov_code] ?? user.prov_code}
-            />
-          </CardContent>
-        </Card>
+        {/* エラー表示 */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+            {error} — <button onClick={() => void fetchData()} className="underline">再試行</button>
+          </div>
+        )}
 
+        {/* ローディング */}
+        {loading && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[...Array(3)].map((_, skeletonIndex) => (
+              <div key={skeletonIndex} className="bg-white rounded-lg border border-gray-200 p-4 animate-pulse">
+                <div className="h-4 bg-gray-200 rounded w-2/3 mb-2" />
+                <div className="h-3 bg-gray-100 rounded w-1/3" />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* プロジェクト一覧 */}
+        {!loading && projectList.length === 0 && !error && (
+          <div className="text-center py-16 bg-white rounded-lg border border-dashed border-gray-200">
+            <FolderOpen className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+            <p className="text-sm font-medium text-gray-500">まだプロジェクトがありません</p>
+            <p className="text-xs text-gray-400 mt-1 mb-4">最初のプロジェクトを作成してデプロイを始めましょう</p>
+            <button
+              onClick={() => navigate('/projects/new')}
+              className="inline-flex items-center gap-1.5 bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              New Project
+            </button>
+          </div>
+        )}
+
+        {!loading && projectList.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {projectList.map((project, projectIndex) => (
+              <Link
+                key={project.id || String(projectIndex)}
+                to={`/projects/${project.id}`}
+                className="group bg-white rounded-lg border border-gray-200 p-4 hover:border-[#00C2D1] hover:shadow-sm transition-all"
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <h2 className="font-medium text-[#111827] group-hover:text-[#00C2D1] transition-colors truncate">
+                    {project.name}
+                  </h2>
+                  <StatusBadge status={project.status} />
+                </div>
+                <div className="flex items-center gap-1 text-xs text-gray-400">
+                  <Clock className="w-3 h-3" />
+                  {formatRelativeTime(project.updated_at)}
+                </div>
+                <div className="mt-2 text-xs text-gray-400 font-mono truncate">
+                  {project.namespace}
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
-    </div>
+    </Layout>
   )
 }
 
-type InfoRowProps = {
-  icon: React.ReactNode
-  label: string
-  value: string
-  mono?: boolean
-}
+function QuotaBar({ label, current, max }: { label: string; current: number; max: number }) {
+  const pct = max > 0 ? Math.min((current / max) * 100, 100) : 0 // 使用率を計算する
+  const isWarning = pct >= 80 // 80%以上で警告色にする
 
-function InfoRow({ icon, label, value, mono = false }: InfoRowProps) {
   return (
-    <div className="flex items-center gap-3 py-3">
-      <span className="flex-shrink-0">{icon}</span>
-      <div className="flex-1 min-w-0">
-        <p className="text-xs text-zinc-400 mb-0.5">{label}</p>
-        <p className={`text-sm text-zinc-700 truncate ${mono ? 'font-mono text-xs' : ''}`}>
-          {value}
-        </p>
+    <div>
+      <div className="flex justify-between text-xs mb-1">
+        <span className="text-gray-500">{label}</span>
+        <span className={isWarning ? 'text-amber-600 font-medium' : 'text-gray-400'}>{current}/{max}</span>
+      </div>
+      <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${isWarning ? 'bg-amber-400' : 'bg-[#00C2D1]'}`}
+          style={{ width: `${pct}%` }}
+        />
       </div>
     </div>
   )

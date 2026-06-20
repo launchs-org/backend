@@ -1,69 +1,194 @@
-const BASE = '/auth'
+export const API_BASE = '/app/api/v1'
 
-export type UserInfo = {
-  user_id: string
-  name: string
-  email: string
-  prov_code: string
-  prov_uid: string
+const REFRESH_PATH = '/auth/token'
+const CACHE_DURATION = 5 * 60 * 1000 // 5分
+
+// ── トークン管理 ──────────────────────────────────────────────
+
+const getRefreshToken = (): string | null => localStorage.getItem('token') // リフレッシュトークンを取得する
+
+const getAccessToken = (): string | null => sessionStorage.getItem('access_token') // アクセストークンを取得する
+
+const setAccessToken = (token: string): void => {
+  sessionStorage.setItem('access_token', token) // アクセストークンを保存する
+  sessionStorage.setItem('access_token_timestamp', String(Date.now())) // タイムスタンプを保存する
 }
 
-export type Provider = 'google' | 'github' | 'discord' | 'microsoftonline' | 'basic'
+const clearTokens = (): void => {
+  localStorage.removeItem('token') // リフレッシュトークンを削除する
+  sessionStorage.removeItem('access_token') // アクセストークンを削除する
+  sessionStorage.removeItem('access_token_timestamp') // タイムスタンプを削除する
+}
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, init)
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error((body as { error: string }).error ?? res.statusText)
+const isAccessTokenFresh = (): boolean => {
+  const ts = parseInt(sessionStorage.getItem('access_token_timestamp') ?? '0', 10) // タイムスタンプを取得する
+  return !!getAccessToken() && Date.now() - ts < CACHE_DURATION // キャッシュ有効期限内かどうかを確認する
+}
+
+let refreshPromise: Promise<void> | null = null // リフレッシュ中の重複呼び出しを防止する
+
+/** リフレッシュトークンでアクセストークンを取得・キャッシュする */
+async function refreshAccessToken(): Promise<void> {
+  const refreshToken = getRefreshToken() // リフレッシュトークンを取得する
+  if (!refreshToken) {
+    throw new Error('no_refresh_token') // リフレッシュトークンがない場合はエラー
   }
-  return res.json() as Promise<T>
+
+  const res = await fetch(REFRESH_PATH, {
+    method: 'GET',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: refreshToken, // リフレッシュトークンをヘッダーに設定する
+    },
+  })
+
+  if (!res.ok) {
+    throw new Error(`refresh_failed:${res.status}`) // リフレッシュ失敗時はエラーをスローする
+  }
+
+  const data = await res.json() // レスポンスを解析する
+  if (data?.token) {
+    setAccessToken(data.token) // アクセストークンを保存する
+  } else {
+    throw new Error('refresh_no_token') // トークンがない場合はエラーをスローする
+  }
 }
 
-export const api = {
-  login(email: string, password: string) {
-    return request<{ token: string }>('/basic/login', {
+/** アクセストークンを取得（必要に応じてリフレッシュ） */
+async function ensureAccessToken(): Promise<string | null> {
+  if (isAccessTokenFresh()) {
+    return getAccessToken() // キャッシュが有効な場合はそのまま返す
+  }
+
+  if (!refreshPromise) {
+    refreshPromise = refreshAccessToken().finally(() => {
+      refreshPromise = null // リフレッシュ完了後にプロミスをクリアする
+    })
+  }
+  try {
+    await refreshPromise // リフレッシュを待機する
+  } catch {
+    // リフレッシュ失敗 → 401ハンドラが処理する
+  }
+
+  return getAccessToken() // アクセストークンを返す
+}
+
+// ── 認証状態チェック（起動時用） ──────────────────────────────
+
+/** リフレッシュトークンが存在してアクセストークンが取得できるか確認する */
+export async function checkAuth(): Promise<boolean> {
+  if (!getRefreshToken()) return false // リフレッシュトークンがない場合は未認証
+  try {
+    await refreshAccessToken() // アクセストークンを取得する
+    return true // 認証成功
+  } catch {
+    return false // 認証失敗
+  }
+}
+
+/** ログアウト：トークンをクリアして /auth/login へリダイレクトする */
+export async function logout(): Promise<void> {
+  const refreshToken = getRefreshToken() // リフレッシュトークンを取得する
+  if (refreshToken) {
+    fetch('/auth/logout', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    })
-  },
+      credentials: 'include',
+      headers: { Authorization: refreshToken }, // ベストエフォートでサーバー側ログアウトする
+    }).catch(() => {})
+  }
+  clearTokens() // トークンをクリアする
+  window.location.href = '/auth/login' // ログインページへリダイレクトする
+}
 
-  signup(name: string, email: string, password: string) {
-    return request<{ token: string }>('/basic/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password }),
-    })
-  },
+// ── エラークラス ──────────────────────────────────────────────
 
-  me(token: string) {
-    return request<UserInfo>('/me', {
-      headers: { Authorization: token },
-    })
-  },
+export class ApiError extends Error {
+  code: string
+  status: number
 
-  logout(token: string) {
-    return request<{ message: string }>('/logout', {
-      method: 'POST',
-      headers: { Authorization: token },
-    })
-  },
+  constructor(code: string, message: string, status: number) {
+    super(message)
+    this.code = code
+    this.status = status
+    this.name = 'ApiError'
+  }
+}
 
-  uploadIcon(token: string, file: File) {
-    const form = new FormData()
-    form.append('file', file)
-    return request<{ result: string }>('/icon', {
-      method: 'POST',
-      headers: { Authorization: token },
-      body: form,
-    })
-  },
+// ── fetch ラッパー ────────────────────────────────────────────
 
-  iconUrl(userId: string) {
-    return `${BASE}/icon/${userId}`
-  },
+async function buildHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json', // JSONコンテンツタイプを設定する
+  }
+  const token = await ensureAccessToken() // アクセストークンを取得する
+  if (token) {
+    headers['Authorization'] = token // Authorizationヘッダーを設定する
+  }
+  return headers
+}
 
-  providers() {
-    return request<Provider[]>('/login/providers')
-  },
+async function handleResponse<T>(res: Response): Promise<T> {
+  if (res.status === 401) {
+    clearTokens() // トークンをクリアする
+    window.location.href = '/auth/login' // ログインページへリダイレクトする
+    throw new ApiError('UNAUTHORIZED', 'Unauthorized', 401)
+  }
+
+  if (res.status === 204) {
+    return undefined as unknown as T // No Content の場合はundefinedを返す
+  }
+
+  const json = await res.json() // レスポンスをJSONとして解析する
+
+  if (!res.ok) {
+    const err = json?.error ?? { code: 'UNKNOWN', message: `HTTP ${res.status}` }
+    throw new ApiError(err.code ?? 'UNKNOWN', err.message ?? String(res.status), res.status)
+  }
+
+  return json as T // レスポンスデータを返す
+}
+
+export async function get<T>(path: string, params?: Record<string, string>): Promise<T> {
+  const url = new URL(`${API_BASE}${path}`, window.location.origin) // URLを構築する
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v)) // クエリパラメータを設定する
+  }
+  const res = await fetch(url.toString(), {
+    method: 'GET',
+    credentials: 'include',
+    headers: await buildHeaders(), // ヘッダーを構築する
+  })
+  return handleResponse<T>(res) // レスポンスを処理する
+}
+
+export async function post<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: await buildHeaders(), // ヘッダーを構築する
+    body: body !== undefined ? JSON.stringify(body) : undefined, // ボディをJSON文字列に変換する
+  })
+  return handleResponse<T>(res) // レスポンスを処理する
+}
+
+export async function put<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: await buildHeaders(), // ヘッダーを構築する
+    body: body !== undefined ? JSON.stringify(body) : undefined, // ボディをJSON文字列に変換する
+  })
+  return handleResponse<T>(res) // レスポンスを処理する
+}
+
+export async function del<T = void>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: await buildHeaders(), // ヘッダーを構築する
+    body: body !== undefined ? JSON.stringify(body) : undefined, // ボディをJSON文字列に変換する
+  })
+  return handleResponse<T>(res) // レスポンスを処理する
 }

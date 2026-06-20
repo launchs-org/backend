@@ -1,56 +1,22 @@
-import { useState, useCallback, useEffect } from 'react'
-import { authbase, type UserInfo, type AuthToken } from '@/lib/authbase'
+import { useState, useEffect } from 'react'
+import { checkAuth } from '@/lib/api'
 
-const TOKEN_KEY = 'token'
-
-type AuthState =
-  | { status: 'loading' }
-  | { status: 'unauthenticated' }
-  | { status: 'authenticated'; token: AuthToken; user: UserInfo }
+type AuthState = 'loading' | 'authenticated' | 'unauthenticated'
 
 export function useAuth() {
-  const [state, setState] = useState<AuthState>({ status: 'loading' })
+  const [authState, setAuthState] = useState<AuthState>('loading') // 認証状態を管理する
 
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false // コンポーネントアンマウント時のstate更新を防ぐ
 
-    async function init() {
-      const token = localStorage.getItem(TOKEN_KEY)
-      if (!token) {
-        if (!cancelled) setState({ status: 'unauthenticated' })
-        return
+    checkAuth().then((ok) => { // 認証状態を確認する
+      if (!cancelled) {
+        setAuthState(ok ? 'authenticated' : 'unauthenticated') // 認証結果を設定する
       }
+    })
 
-      try {
-        const user = await authbase.me(token)
-        if (!cancelled) setState({ status: 'authenticated', token, user })
-      } catch {
-        localStorage.removeItem(TOKEN_KEY)
-        if (!cancelled) setState({ status: 'unauthenticated' })
-      }
-    }
-
-    void init()
-    return () => { cancelled = true }
+    return () => { cancelled = true } // クリーンアップ
   }, [])
 
-  const logout = useCallback(async () => {
-    if (state.status !== 'authenticated') return
-    await authbase.logout(state.token).catch(() => {})
-    localStorage.removeItem(TOKEN_KEY)
-    setState({ status: 'unauthenticated' })
-  }, [state])
-
-  const refreshUser = useCallback(async () => {
-    if (state.status !== 'authenticated') return
-    try {
-      const user = await authbase.me(state.token)
-      setState({ status: 'authenticated', token: state.token, user })
-    } catch {
-      localStorage.removeItem(TOKEN_KEY)
-      setState({ status: 'unauthenticated' })
-    }
-  }, [state])
-
-  return { state, logout, refreshUser }
+  return { authState } // 認証状態を返す
 }
