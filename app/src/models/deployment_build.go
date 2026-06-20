@@ -20,28 +20,28 @@ const (
 )
 
 type DeploymentBuild struct {
-	ID           string      `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	DeploymentID string      `gorm:"type:uuid;not null;index"`
-	BuildType    BuildType   `gorm:"type:varchar(32);not null"`           // ビルドタイプ（dockerfile / railpack）
-	Status       BuildStatus `gorm:"type:varchar(32);not null;default:'pending'"`
+	ID           string      `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+	DeploymentID string      `gorm:"type:uuid;not null;index"                       json:"deployment_id"`
+	BuildType    BuildType   `gorm:"type:varchar(32);not null"                      json:"build_type"`           // ビルドタイプ（dockerfile / railpack）
+	Status       BuildStatus `gorm:"type:varchar(32);not null;default:'pending'"    json:"status"`
 
-	K8sJobName string `gorm:"type:varchar(63)"` // k8s Job 名。キャンセル時に Job を削除するために使用
+	K8sJobName string `gorm:"type:varchar(63)" json:"k8s_job_name"` // k8s Job 名。キャンセル時に Job を削除するために使用
 
-	BuiltImageURL string `gorm:"type:text"` // ビルド成功時の push 先 URL
+	BuiltImageURL string `gorm:"type:text" json:"built_image_url"` // ビルド成功時の push 先 URL
 
 	// ビルド時点のソーススナップショット（HEAD は解決済みの実 SHA）
-	CommitSHA      string `gorm:"type:varchar(40)"`
-	CommitMessage  string `gorm:"type:text"`
-	Branch         string `gorm:"type:varchar(255)"`
-	Author         string `gorm:"type:varchar(255)"`
-	Directory      string `gorm:"type:varchar(255)"` // build_directory スナップショット
-	DockerfilePath string `gorm:"type:varchar(255)"`
+	CommitSHA      string `gorm:"type:varchar(40)"   json:"commit_sha"`
+	CommitMessage  string `gorm:"type:text"          json:"commit_message"`
+	Branch         string `gorm:"type:varchar(255)"  json:"branch"`
+	Author         string `gorm:"type:varchar(255)"  json:"author"`
+	Directory      string `gorm:"type:varchar(255)"  json:"directory"` // build_directory スナップショット
+	DockerfilePath string `gorm:"type:varchar(255)"  json:"dockerfile_path"`
 
-	BuildLog string `gorm:"type:text"` // k8s Job の Pod ログを収集して保存
+	BuildLog string `gorm:"type:text" json:"build_log"` // k8s Job の Pod ログを収集して保存
 
-	StartedAt  *time.Time
-	FinishedAt *time.Time
-	CreatedAt  time.Time
+	StartedAt  *time.Time `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 func (DeploymentBuild) TableName() string { return "deployment_builds" }

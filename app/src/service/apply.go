@@ -301,40 +301,65 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 			return fmt.Errorf("k8s deployment apply: %w", err) // k8s Deployment apply エラーを返す
 		}
 
-		// 7-2. k8s に Service を apply する
+		// 7-2. k8s に Service を apply する（pending_port=0 の場合は k8s から削除する）
 		var serviceData *models.Service                                                            // Service レコードを格納する変数を宣言する
 		serviceData, _ = applyService.ServiceRepo.FindByDeploymentID(ctx, deploymentID)           // Service レコードを取得する（存在しない場合は nil）
-		if serviceData != nil {                                                                    // Service レコードが存在する場合は apply する
-			serviceManifest := manifestGenerator.GenerateService(*serviceData, deploymentData.Name, projectData.Namespace) // Service マニフェストを生成する
-			if err := k8s.ApplyService(ctx, applyService.K8s, serviceManifest); err != nil {                              // k8s に Service を apply する
-				applyHistoryRecord.Status = models.ApplyStatusFailed                                                                                  // k8s Service apply 失敗時はステータスを failed に変更する
-				applyHistoryRecord.ErrorMessage = err.Error()                                                                                         // エラーメッセージを記録する
-				if updateErr := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); updateErr != nil { // ステータスを更新する
-					return fmt.Errorf("apply_history update: %w", updateErr) // 更新エラーを返す
+		if serviceData != nil {
+			pendingPort := serviceData.PendingPort // pending_port を取得する
+			if pendingPort == 0 && serviceData.Port != 0 {
+				// pending_port=0 かつ現在値が設定済みの場合は k8s から Service を削除する（無効化）
+				k8sServiceName := deploymentData.Name + "-svc"
+				if delErr := k8s.DeleteService(ctx, applyService.K8s, projectData.Namespace, k8sServiceName); delErr != nil { // k8s Service を削除する
+					if updateErr := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); updateErr != nil {
+						return fmt.Errorf("apply_history update: %w", updateErr)
+					}
+					return fmt.Errorf("k8s service delete: %w", delErr)
 				}
-				return fmt.Errorf("k8s service apply: %w", err) // k8s Service apply エラーを返す
+			} else if pendingPort != 0 {
+				// pending_port が設定されている場合は k8s に apply する
+				serviceManifest := manifestGenerator.GenerateService(*serviceData, deploymentData.Name, projectData.Namespace) // Service マニフェストを生成する
+				if err := k8s.ApplyService(ctx, applyService.K8s, serviceManifest); err != nil {                              // k8s に Service を apply する
+					applyHistoryRecord.Status = models.ApplyStatusFailed                                                                                  // k8s Service apply 失敗時はステータスを failed に変更する
+					applyHistoryRecord.ErrorMessage = err.Error()                                                                                         // エラーメッセージを記録する
+					if updateErr := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); updateErr != nil { // ステータスを更新する
+						return fmt.Errorf("apply_history update: %w", updateErr) // 更新エラーを返す
+					}
+					return fmt.Errorf("k8s service apply: %w", err) // k8s Service apply エラーを返す
+				}
 			}
 		}
 
-		// 7-3. k8s に IngressRoute を apply する（IngressRoute レコードが存在する場合のみ）
+		// 7-3. k8s に IngressRoute を apply する（pending_port=0 の場合は k8s から削除する）
 		var ingressRouteData *models.IngressRoute                                                             // IngressRoute レコードを格納する変数を宣言する
 		ingressRouteData, _ = applyService.IngressRouteRepo.FindByDeploymentID(ctx, deploymentID)            // IngressRoute レコードを取得する（存在しない場合は nil）
-		if ingressRouteData != nil {                                                                         // IngressRoute レコードが存在する場合は apply する
-			serviceName := deploymentData.Name + "-svc"                                                                                // Service 名を生成する
-			servicePort := 80                                                                                                           // デフォルトの Service ポートを設定する
-			if serviceData != nil {                                                                                                     // Service レコードが存在する場合はそのポートを使う
-				servicePort = serviceData.PendingPort
-				if servicePort == 0 { // pending が 0 の場合は current 値を使う
-					servicePort = serviceData.Port
+		if ingressRouteData != nil {
+			pendingIngressPort := ingressRouteData.PendingPort // pending_port を取得する
+			if pendingIngressPort == 0 && ingressRouteData.Port != 0 {
+				// pending_port=0 かつ現在値が設定済みの場合は k8s から IngressRoute を削除する（無効化）
+				if delErr := k8s.DeleteIngressRoute(ctx, applyService.DynamicClient, projectData.Namespace, ingressRouteData.ID); delErr != nil { // k8s IngressRoute を削除する
+					if updateErr := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); updateErr != nil {
+						return fmt.Errorf("apply_history update: %w", updateErr)
+					}
+					return fmt.Errorf("k8s ingress_route delete: %w", delErr)
 				}
-			}
-			if err := k8s.ApplyIngressRoute(ctx, applyService.DynamicClient, *ingressRouteData, projectData.Namespace, serviceName, servicePort); err != nil { // k8s に IngressRoute を apply する
-				applyHistoryRecord.Status = models.ApplyStatusFailed                                                                                  // k8s IngressRoute apply 失敗時はステータスを failed に変更する
-				applyHistoryRecord.ErrorMessage = err.Error()                                                                                         // エラーメッセージを記録する
-				if updateErr := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); updateErr != nil { // ステータスを更新する
-					return fmt.Errorf("apply_history update: %w", updateErr) // 更新エラーを返す
+			} else if pendingIngressPort != 0 {
+				// pending_port が設定されている場合は k8s に apply する
+				serviceName := deploymentData.Name + "-svc"                                                                                // Service 名を生成する
+				servicePort := 80                                                                                                           // デフォルトの Service ポートを設定する
+				if serviceData != nil {                                                                                                     // Service レコードが存在する場合はそのポートを使う
+					servicePort = serviceData.PendingPort
+					if servicePort == 0 { // pending が 0 の場合は current 値を使う
+						servicePort = serviceData.Port
+					}
 				}
-				return fmt.Errorf("k8s ingress_route apply: %w", err) // k8s IngressRoute apply エラーを返す
+				if err := k8s.ApplyIngressRoute(ctx, applyService.DynamicClient, *ingressRouteData, projectData.Namespace, serviceName, servicePort); err != nil { // k8s に IngressRoute を apply する
+					applyHistoryRecord.Status = models.ApplyStatusFailed                                                                                  // k8s IngressRoute apply 失敗時はステータスを failed に変更する
+					applyHistoryRecord.ErrorMessage = err.Error()                                                                                         // エラーメッセージを記録する
+					if updateErr := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); updateErr != nil { // ステータスを更新する
+						return fmt.Errorf("apply_history update: %w", updateErr) // 更新エラーを返す
+					}
+					return fmt.Errorf("k8s ingress_route apply: %w", err) // k8s IngressRoute apply エラーを返す
+				}
 			}
 		}
 
@@ -371,11 +396,15 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 
 		// 9. Service の pending_*** を昇格させる
 		if serviceData != nil { // Service レコードが存在する場合のみ昇格する
-			serviceData.Port = serviceData.PendingPort           // pending_port を昇格する
-			serviceData.PendingPort = 0                          // pending_port をクリアする
+			serviceData.Port = serviceData.PendingPort             // pending_port を昇格する（0=無効化も含む）
+			serviceData.PendingPort = 0                            // pending_port をクリアする
 			serviceData.TargetPort = serviceData.PendingTargetPort // pending_target_port を昇格する
-			serviceData.PendingTargetPort = 0                    // pending_target_port をクリアする
-			serviceData.Status = models.ServiceStatusActive      // status を active に更新する
+			serviceData.PendingTargetPort = 0                      // pending_target_port をクリアする
+			if serviceData.Port == 0 {
+				serviceData.Status = models.ServiceStatusPending // port=0 は未設定（pending）に戻す
+			} else {
+				serviceData.Status = models.ServiceStatusActive // port が設定されている場合は active にする
+			}
 			if err := applyService.ServiceRepo.Update(ctx, serviceData); err != nil { // Service を更新する
 				return fmt.Errorf("service update: %w", err) // 更新エラーを返す
 			}
@@ -391,11 +420,14 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 				ingressRouteData.PathPrefix = ingressRouteData.PendingPathPrefix
 				ingressRouteData.PendingPathPrefix = ""
 			}
-			if ingressRouteData.PendingPort != 0 { // pending_port が設定されている場合は昇格する
-				ingressRouteData.Port = ingressRouteData.PendingPort
-				ingressRouteData.PendingPort = 0
+			// pending_port は 0（無効化）も含めて常に昇格させる
+			ingressRouteData.Port = ingressRouteData.PendingPort
+			ingressRouteData.PendingPort = 0
+			if ingressRouteData.Port == 0 {
+				ingressRouteData.Status = models.IngressRouteStatusPending // port=0 は未設定（pending）に戻す
+			} else {
+				ingressRouteData.Status = models.IngressRouteStatusActive // port が設定されている場合は active にする
 			}
-			ingressRouteData.Status = models.IngressRouteStatusActive             // status を active に更新する
 			if err := applyService.IngressRouteRepo.Update(ctx, ingressRouteData); err != nil { // IngressRoute を更新する
 				return fmt.Errorf("ingress_route update: %w", err) // 更新エラーを返す
 			}

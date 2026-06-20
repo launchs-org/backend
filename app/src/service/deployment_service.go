@@ -167,14 +167,16 @@ func (svc *deploymentServiceImpl) CreateDeployment(ctx context.Context, req Crea
 		PendingReplicas:            req.Replicas,                               // pending に設定する
 	}
 
-	// TODO: Deployment と Service の作成をトランザクションでまとめ、Service 作成失敗時に Deployment もロールバックする
 	if err := svc.deploymentRepo.Create(ctx, deploymentData); err != nil { // リポジトリ経由で Deployment レコードを作成する
 		return nil, err // 作成エラーを返す
 	}
 
-	// Service レコードを同時に作成する（ports は空）
+	// Deployment に紐づく Service レコードをデフォルト作成する（port=0 は未設定）
 	serviceData := &models.Service{
-		DeploymentID: deploymentData.ID,           // デプロイメント ID を設定する
+		DeploymentID: deploymentData.ID,    // デプロイメント ID を設定する
+		Port:         0,                    // 未設定
+		TargetPort:   0,                    // 未設定
+		Type:         models.ServiceTypeClusterIP, // デフォルトタイプを設定する
 		Status:       models.ServiceStatusPending, // 初期ステータスを設定する
 	}
 	if err := svc.serviceRepo.Create(ctx, serviceData); err != nil { // リポジトリ経由で Service レコードを作成する
@@ -404,7 +406,7 @@ func (svc *deploymentServiceImpl) UpdateIngressRoute(ctx context.Context, userID
 	return ingressRouteData, nil // 更新後の ingress_route を返す
 }
 
-// DeleteService は deploymentID に紐づく k8s Service と DB レコードを削除する
+// DeleteService は pending_port=0・pending_target_port=0 にして apply 待ちにする（レコードは残す）
 func (svc *deploymentServiceImpl) DeleteService(ctx context.Context, userID string, deploymentID string) error {
 	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得して所有権チェック用に使う
 	if err != nil {
@@ -413,22 +415,16 @@ func (svc *deploymentServiceImpl) DeleteService(ctx context.Context, userID stri
 	if err := svc.checkOwnership(ctx, userID, deploymentData.ProjectID); err != nil { // 所有権を確認する
 		return err
 	}
-	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // namespace 解決のために project を取得する
-	if err != nil {
-		return err // 取得エラーを返す
-	}
 	serviceData, err := svc.serviceRepo.FindByDeploymentID(ctx, deploymentID) // service を取得する
 	if err != nil {
 		return err // 取得エラーを返す
 	}
-	k8sServiceName := deploymentData.Name + "-svc"                                                                    // k8s Service 名を生成する
-	if err := k8s.DeleteService(ctx, svc.k8sClient, projectData.Namespace, k8sServiceName); err != nil {             // k8s から Service を削除する
-		return err // 削除エラーを返す
-	}
-	return svc.serviceRepo.Delete(ctx, serviceData.ID) // DB レコードを削除する
+	serviceData.PendingPort = 0       // pending_port を 0 にして無効化を予約する
+	serviceData.PendingTargetPort = 0 // pending_target_port を 0 にする
+	return svc.serviceRepo.Update(ctx, serviceData) // DB に保存する（apply 後に k8s から削除される）
 }
 
-// DeleteIngressRoute は deploymentID に紐づく k8s IngressRoute と DB レコードを削除する
+// DeleteIngressRoute は pending_port=0 にして apply 待ちにする（レコードは残す）
 func (svc *deploymentServiceImpl) DeleteIngressRoute(ctx context.Context, userID string, deploymentID string) error {
 	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得して所有権チェック用に使う
 	if err != nil {
@@ -437,18 +433,12 @@ func (svc *deploymentServiceImpl) DeleteIngressRoute(ctx context.Context, userID
 	if err := svc.checkOwnership(ctx, userID, deploymentData.ProjectID); err != nil { // 所有権を確認する
 		return err
 	}
-	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // namespace 解決のために project を取得する
-	if err != nil {
-		return err // 取得エラーを返す
-	}
 	ingressRouteData, err := svc.ingressRouteRepo.FindByDeploymentID(ctx, deploymentID) // ingress_route を取得する
 	if err != nil {
 		return err // 取得エラーを返す
 	}
-	if err := k8s.DeleteIngressRoute(ctx, svc.dynamicClient, projectData.Namespace, ingressRouteData.ID); err != nil { // k8s から IngressRoute を削除する
-		return err // 削除エラーを返す
-	}
-	return svc.ingressRouteRepo.Delete(ctx, ingressRouteData.ID) // DB レコードを削除する
+	ingressRouteData.PendingPort = 0 // pending_port を 0 にして無効化を予約する
+	return svc.ingressRouteRepo.Update(ctx, ingressRouteData) // DB に保存する（apply 後に k8s から削除される）
 }
 
 // ErrDeploymentNotFound は deployment が見つからない場合のエラー
