@@ -287,103 +287,6 @@ func (deploymentHandler *DeploymentHandler) UpdateService(echoCtx echo.Context) 
 	return echoCtx.JSON(http.StatusOK, serviceData) // 更新後の service を返す
 }
 
-// GetIngressRoute は GET /deployments/:id/ingress-route のハンドラー
-func (deploymentHandler *DeploymentHandler) GetIngressRoute(echoCtx echo.Context) error {
-	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
-	deploymentID := echoCtx.Param("id")      // パスパラメータから deployment ID を取得する
-
-	ingressRouteData, err := deploymentHandler.deploymentService.GetIngressRoute(echoCtx.Request().Context(), userID, deploymentID) // サービスを呼び出して ingress_route 設定を取得する
-	if err != nil {                                                                                                                   // エラーが発生した場合
-		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
-			logger.PrintHandlerError("DeploymentHandler", "GetIngressRoute", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
-			return echoCtx.JSON(http.StatusForbidden, map[string]string{
-				"error": "アクセスが禁止されています",
-			})
-		}
-		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
-			logger.PrintHandlerError("DeploymentHandler", "GetIngressRoute", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
-			return echoCtx.JSON(http.StatusNotFound, map[string]string{
-				"error": "リソースが見つかりません",
-			})
-		}
-		logger.PrintHandlerError("DeploymentHandler", "GetIngressRoute", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
-		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "内部サーバーエラー",
-		})
-	}
-	return echoCtx.JSON(http.StatusOK, ingressRouteData) // ingress_route 設定を返す
-}
-
-// CreateIngressRoute は POST /deployments/:id/ingress-route のハンドラー
-func (deploymentHandler *DeploymentHandler) CreateIngressRoute(echoCtx echo.Context) error {
-	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
-	deploymentID := echoCtx.Param("id")      // パスパラメータから deployment ID を取得する
-
-	var requestBody service.CreateIngressRouteRequest             // リクエストボディの構造体を定義する
-	if err := echoCtx.Bind(&requestBody); err != nil {           // リクエストをバインドする
-		logger.PrintHandlerError("DeploymentHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
-		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
-			"error": "リクエストが不正です",
-		})
-	}
-
-	ingressRouteData, err := deploymentHandler.deploymentService.CreateIngressRoute(echoCtx.Request().Context(), userID, deploymentID, requestBody) // サービスを呼び出して ingress_route を作成する
-	if err != nil {                                                                                                                                    // エラーが発生した場合
-		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
-			logger.PrintHandlerError("DeploymentHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
-			return echoCtx.JSON(http.StatusForbidden, map[string]string{
-				"error": "アクセスが禁止されています",
-			})
-		}
-		if errors.Is(err, gorm.ErrRecordNotFound) { // deployment が存在しない場合は 404 を返す
-			logger.PrintHandlerError("DeploymentHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
-			return echoCtx.JSON(http.StatusNotFound, map[string]string{
-				"error": "リソースが見つかりません",
-			})
-		}
-		logger.PrintHandlerError("DeploymentHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
-		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "内部サーバーエラー",
-		})
-	}
-	return echoCtx.JSON(http.StatusCreated, ingressRouteData) // 作成した ingress_route を返す
-}
-
-// UpdateIngressRoute は PUT /deployments/:id/ingress-route のハンドラー
-func (deploymentHandler *DeploymentHandler) UpdateIngressRoute(echoCtx echo.Context) error {
-	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
-	deploymentID := echoCtx.Param("id")      // パスパラメータから deployment ID を取得する
-
-	var requestBody service.UpdateIngressRouteRequest             // リクエストボディの構造体を定義する
-	if err := echoCtx.Bind(&requestBody); err != nil {           // リクエストをバインドする
-		logger.PrintHandlerError("DeploymentHandler", "UpdateIngressRoute", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
-		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
-			"error": "リクエストが不正です",
-		})
-	}
-
-	ingressRouteData, err := deploymentHandler.deploymentService.UpdateIngressRoute(echoCtx.Request().Context(), userID, deploymentID, requestBody) // サービスを呼び出して ingress_route を更新する
-	if err != nil {                                                                                                                                   // エラーが発生した場合
-		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
-			logger.PrintHandlerError("DeploymentHandler", "UpdateIngressRoute", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
-			return echoCtx.JSON(http.StatusForbidden, map[string]string{
-				"error": "アクセスが禁止されています",
-			})
-		}
-		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
-			logger.PrintHandlerError("DeploymentHandler", "UpdateIngressRoute", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
-			return echoCtx.JSON(http.StatusNotFound, map[string]string{
-				"error": "リソースが見つかりません",
-			})
-		}
-		logger.PrintHandlerError("DeploymentHandler", "UpdateIngressRoute", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
-		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "内部サーバーエラー",
-		})
-	}
-	return echoCtx.JSON(http.StatusOK, ingressRouteData) // 更新後の ingress_route を返す
-}
-
 // DeleteService は DELETE /deployments/:id/service のハンドラー
 func (deploymentHandler *DeploymentHandler) DeleteService(echoCtx echo.Context) error {
 	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
@@ -399,26 +302,6 @@ func (deploymentHandler *DeploymentHandler) DeleteService(echoCtx echo.Context) 
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{"error": "リソースが見つかりません"})
 		}
 		logger.PrintHandlerError("DeploymentHandler", "DeleteService", echoCtx.Request().URL.Path, http.StatusInternalServerError, err)
-		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{"error": "内部サーバーエラー"})
-	}
-	return echoCtx.NoContent(http.StatusNoContent) // 204 No Content を返す
-}
-
-// DeleteIngressRoute は DELETE /deployments/:id/ingress-route のハンドラー
-func (deploymentHandler *DeploymentHandler) DeleteIngressRoute(echoCtx echo.Context) error {
-	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
-	deploymentID := echoCtx.Param("id")      // パスパラメータから deployment ID を取得する
-
-	if err := deploymentHandler.deploymentService.DeleteIngressRoute(echoCtx.Request().Context(), userID, deploymentID); err != nil { // サービスを呼び出して ingress_route を削除する
-		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
-			logger.PrintHandlerError("DeploymentHandler", "DeleteIngressRoute", echoCtx.Request().URL.Path, http.StatusForbidden, err)
-			return echoCtx.JSON(http.StatusForbidden, map[string]string{"error": "アクセスが禁止されています"})
-		}
-		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが存在しない場合は 404 を返す
-			logger.PrintHandlerError("DeploymentHandler", "DeleteIngressRoute", echoCtx.Request().URL.Path, http.StatusNotFound, err)
-			return echoCtx.JSON(http.StatusNotFound, map[string]string{"error": "リソースが見つかりません"})
-		}
-		logger.PrintHandlerError("DeploymentHandler", "DeleteIngressRoute", echoCtx.Request().URL.Path, http.StatusInternalServerError, err)
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{"error": "内部サーバーエラー"})
 	}
 	return echoCtx.NoContent(http.StatusNoContent) // 204 No Content を返す
