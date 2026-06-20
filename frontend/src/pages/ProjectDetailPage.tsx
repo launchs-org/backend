@@ -18,7 +18,6 @@ import { DeploymentNode } from '@/components/flow/DeploymentNode'
 import { ServiceNode } from '@/components/flow/ServiceNode'
 import { IngressNode } from '@/components/flow/IngressNode'
 import { get, post, del } from '@/lib/api'
-import { StatusBadge } from '@/components/StatusBadge'
 import type { Project, Deployment, K8sService, IngressRoute, PathRule } from '@/lib/types'
 
 const NODE_TYPES = {
@@ -57,9 +56,9 @@ export function ProjectDetailPage() {
   const [deletingProject, setDeletingProject] = useState(false) // プロジェクト削除中フラグ
   const [ingressRoute, setIngressRoute] = useState<IngressRoute | null>(null) // プロジェクト単位のIngressRouteを管理する
   const [pathRules, setPathRules] = useState<PathRule[]>([]) // IngressRouteのパスルール一覧を管理する
-  const [ingressLoaded, setIngressLoaded] = useState(false) // IngressRoute読み込み完了フラグ
   const [creatingIngress, setCreatingIngress] = useState(false) // IngressRoute作成中フラグ
   const [deletingIngress, setDeletingIngress] = useState(false) // IngressRoute削除中フラグ
+  const [showPathRuleModal, setShowPathRuleModal] = useState(false) // パスルール追加モーダルの表示フラグ
   const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null) // 選択中のデプロイメントIDを管理する
   const [iframeLoaded, setIframeLoaded] = useState(false) // iframe読み込み完了フラグ
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH) // サイドバー幅を管理する
@@ -67,12 +66,22 @@ export function ProjectDetailPage() {
   const startXRef = useRef(0) // リサイズ開始X座標
   const startWidthRef = useRef(DEFAULT_SIDEBAR_WIDTH) // リサイズ開始時の幅
 
-  const buildGraph = useCallback((relations: DeploymentWithRelations[], pid: string) => {
+  // パスルール追加モーダルを開くコールバック（グラフ再描画で参照が変わらないよう useRef で保持）
+  const openPathRuleModalRef = useRef(() => { setShowPathRuleModal(true) })
+  openPathRuleModalRef.current = () => { setShowPathRuleModal(true) }
+
+  const buildGraph = useCallback((
+    relations: DeploymentWithRelations[],
+    pid: string,
+    currentIngressRoute: IngressRoute | null,
+    currentPathRules: PathRule[],
+  ) => {
     const newNodes: Node[] = []
     const newEdges: Edge[] = []
 
     const ROW_HEIGHT = 200 // 行の高さを定義する
     const COL_WIDTH = 300 // 列の幅を定義する
+    const INGRESS_COL = COL_WIDTH * 2 // IngressRoute ノードのX座標
 
     relations.forEach((relation, relationIndex) => {
       const baseY = relationIndex * ROW_HEIGHT // Y座標を計算する
@@ -109,9 +118,34 @@ export function ProjectDetailPage() {
           style: EDGE_STYLE,
           markerEnd: EDGE_MARKER,
         })
-      }
 
+        // IngressRoute が存在する場合、Service → IngressRoute のエッジを追加する
+        if (currentIngressRoute) {
+          newEdges.push({
+            id: `edge-svc-ing-${relation.service.id}`,
+            source: `svc-${relation.service.id}`,
+            target: 'ingress-node',
+            style: EDGE_STYLE,
+            markerEnd: EDGE_MARKER,
+          })
+        }
+      }
     })
+
+    // IngressRoute ノードをグラフ右側中央に1つ配置する
+    if (currentIngressRoute) {
+      const ingressY = Math.max(0, ((relations.length - 1) * ROW_HEIGHT) / 2) // 縦方向中央に配置する
+      newNodes.push({
+        id: 'ingress-node',
+        type: 'ingress',
+        position: { x: INGRESS_COL, y: ingressY },
+        data: {
+          ingress: currentIngressRoute,
+          pathRules: currentPathRules,
+          onAddPathRule: () => { openPathRuleModalRef.current() }, // パスルール追加モーダルを開く
+        },
+      })
+    }
 
     setNodes(newNodes) // ノードを更新する
     setEdges(newEdges) // エッジを更新する
@@ -140,18 +174,20 @@ export function ProjectDetailPage() {
       )
 
       setDeploymentRelations(relations) // デプロイメント関連リソースを更新する
-      buildGraph(relations, projectId) // グラフを更新する
 
       // プロジェクト単位のIngressRouteを取得する
       const ingressResult = await get<IngressRoute>(`/projects/${projectId}/ingress-route`).catch(() => null) // IngressRouteを取得する
       setIngressRoute(ingressResult) // IngressRoute情報を設定する
+
+      let currentPathRules: PathRule[] = []
       if (ingressResult) {
-        const pathRuleResult = await get<PathRule[]>(`/ingress-routes/${ingressResult.id}/path-rules`).catch(() => []) // パスルール一覧を取得する
-        setPathRules(pathRuleResult ?? []) // パスルールを設定する
+        currentPathRules = await get<PathRule[]>(`/ingress-routes/${ingressResult.id}/path-rules`).catch(() => []) ?? [] // パスルール一覧を取得する
+        setPathRules(currentPathRules) // パスルールを設定する
       } else {
         setPathRules([]) // パスルールを空にする
       }
-      setIngressLoaded(true) // IngressRoute読み込み完了を記録する
+
+      buildGraph(relations, projectId, ingressResult, currentPathRules) // グラフを更新する
     } catch (fetchError) {
       console.error(fetchError)
     } finally {
@@ -325,64 +361,31 @@ export function ProjectDetailPage() {
                 />
               </ReactFlow>
 
-              {/* IngressRoute オーバーレイパネル */}
-              {ingressLoaded && (
-                <div className="absolute top-3 right-3 z-10 bg-white rounded-lg border border-gray-200 shadow-sm p-3 w-72">
-                  <h3 className="text-xs font-semibold text-[#111827] mb-2">IngressRoute</h3>
-                  {ingressRoute ? (
-                    <div className="space-y-1 text-xs">
-                      <div className="flex items-center gap-1">
-                        <span className="text-gray-400">ホスト:</span>
-                        <a href={`http://${ingressRoute.host}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[#00C2D1] hover:underline truncate">
-                          {ingressRoute.host}
-                        </a>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <span className="text-gray-400">ステータス:</span>
-                        <StatusBadge status={ingressRoute.status} size="sm" />
-                      </div>
-                      {pathRules.length > 0 && (
-                        <div className="pt-1 border-t border-gray-100 mt-1">
-                          <p className="text-gray-400 mb-1">パスルール ({pathRules.length})</p>
-                          {pathRules.map(pathRule => (
-                            <div key={pathRule.id} className="font-mono text-xs text-gray-600 flex items-center justify-between">
-                              <span>{pathRule.path_prefix}</span>
-                              <span className="text-gray-300 text-[10px]">{pathRule.status}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <p className="text-xs text-gray-400">IngressRouteが未設定です</p>
-                      <button
-                        onClick={() => void handleCreateIngressRoute()}
-                        disabled={creatingIngress}
-                        className="w-full bg-[#111827] text-white text-xs px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
-                      >
-                        {creatingIngress ? '作成中...' : 'IngressRouteを作成'}
-                      </button>
-                    </div>
-                  )}
-                  {ingressRoute && (
-                    <div className="pt-2 border-t border-gray-100 mt-2 space-y-2">
-                      <IngressPathRuleForm
-                        ingressRouteId={ingressRoute.id}
-                        deploymentRelations={deploymentRelations}
-                        onCreated={() => void fetchData()}
-                      />
-                      {ingressRoute.status !== 'deleting' && (
-                        <button
-                          onClick={() => void handleDeleteIngressRoute()}
-                          disabled={deletingIngress}
-                          className="w-full text-xs text-red-500 hover:text-red-700 disabled:opacity-50 py-1"
-                        >
-                          {deletingIngress ? '削除中...' : 'IngressRouteを削除'}
-                        </button>
-                      )}
-                    </div>
-                  )}
+              {/* IngressRoute 未作成時の作成ボタン */}
+              {!ingressRoute && (
+                <div className="absolute bottom-4 right-4 z-10">
+                  <button
+                    onClick={() => void handleCreateIngressRoute()}
+                    disabled={creatingIngress}
+                    className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white text-sm px-4 py-2 rounded-lg shadow-md transition-colors disabled:opacity-50"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    {creatingIngress ? 'IngressRoute作成中...' : 'IngressRoute を作成'}
+                  </button>
+                </div>
+              )}
+
+              {/* IngressRoute 存在時の削除ボタン */}
+              {ingressRoute && ingressRoute.status !== 'deleting' && (
+                <div className="absolute bottom-4 right-4 z-10">
+                  <button
+                    onClick={() => void handleDeleteIngressRoute()}
+                    disabled={deletingIngress}
+                    className="flex items-center gap-1.5 text-red-500 hover:text-red-700 bg-white border border-red-200 text-sm px-3 py-1.5 rounded-lg shadow-sm transition-colors disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    {deletingIngress ? '削除中...' : 'IngressRoute を削除'}
+                  </button>
                 </div>
               )}
             </div>
@@ -441,19 +444,31 @@ export function ProjectDetailPage() {
           </div>
         )}
       </div>
+
+      {/* パスルール追加モーダル */}
+      {showPathRuleModal && ingressRoute && (
+        <PathRuleModal
+          ingressRouteId={ingressRoute.id}
+          deploymentRelations={deploymentRelations}
+          onClose={() => setShowPathRuleModal(false)}
+          onCreated={() => { setShowPathRuleModal(false); void fetchData() }}
+        />
+      )}
     </Layout>
   )
 }
 
-// ── IngressPathRuleForm ────────────────────────────────────────
+// ── PathRuleModal ────────────────────────────────────────────
 
-function IngressPathRuleForm({
+function PathRuleModal({
   ingressRouteId,
   deploymentRelations,
+  onClose,
   onCreated,
 }: {
   ingressRouteId: string
   deploymentRelations: DeploymentWithRelations[]
+  onClose: () => void
   onCreated: () => void
 }) {
   const [pathPrefix, setPathPrefix] = useState('/') // パスプレフィックスを管理する
@@ -472,9 +487,7 @@ function IngressPathRuleForm({
         path_prefix: pathPrefix,
         service_id: serviceId,
       }) // パスルールを追加する
-      setPathPrefix('/') // フォームをリセットする
-      setServiceId('') // 選択をリセットする
-      onCreated() // 親コンポーネントにデータ再取得を通知する
+      onCreated() // 作成完了を通知する
     } catch (saveError) {
       console.error(saveError)
       alert('パスルールの追加に失敗しました')
@@ -483,37 +496,62 @@ function IngressPathRuleForm({
     }
   }
 
-  if (servicesWithId.length === 0) {
-    return <p className="text-xs text-gray-400">パスルールを追加するにはまず Service を設定してください</p>
-  }
-
   return (
-    <div className="space-y-1.5">
-      <p className="text-xs font-medium text-gray-500">パスルールを追加</p>
-      <input
-        type="text"
-        value={pathPrefix}
-        onChange={ev => setPathPrefix(ev.target.value)}
-        placeholder="/"
-        className="w-full rounded border border-gray-200 px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-[#00C2D1]"
-      />
-      <select
-        value={serviceId}
-        onChange={ev => setServiceId(ev.target.value)}
-        className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-[#00C2D1]"
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="bg-white rounded-xl shadow-xl w-96 p-5 space-y-4"
+        onClick={clickEvent => clickEvent.stopPropagation()} // 背景クリックでの閉じる動作と干渉しないようにする
       >
-        <option value="">対象 Service を選択</option>
-        {servicesWithId.map(svc => (
-          <option key={svc.id} value={svc.id}>{svc.name}</option>
-        ))}
-      </select>
-      <button
-        onClick={() => void handleAdd()}
-        disabled={saving || !serviceId}
-        className="w-full bg-[#00C2D1] text-white text-xs px-3 py-1.5 rounded-md hover:bg-[#00b3c0] transition-colors disabled:opacity-50"
-      >
-        {saving ? '追加中...' : '追加'}
-      </button>
+        {/* モーダルヘッダー */}
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-[#111827]">パスルールを追加</h2>
+          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {servicesWithId.length === 0 ? (
+          <p className="text-sm text-gray-400">パスルールを追加するには、まず Deployment の Networking タブで Service を設定してください。</p>
+        ) : (
+          <div className="space-y-3">
+            {/* パスプレフィックス入力 */}
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">パスプレフィックス</label>
+              <input
+                type="text"
+                value={pathPrefix}
+                onChange={ev => setPathPrefix(ev.target.value)}
+                placeholder="/"
+                className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#00C2D1]/50 focus:border-[#00C2D1] transition-colors"
+              />
+            </div>
+
+            {/* 対象サービス選択 */}
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">転送先 Service</label>
+              <select
+                value={serviceId}
+                onChange={ev => setServiceId(ev.target.value)}
+                className="w-full rounded-md border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00C2D1]/50 focus:border-[#00C2D1] transition-colors"
+              >
+                <option value="">デプロイメントを選択</option>
+                {servicesWithId.map(svc => (
+                  <option key={svc.id} value={svc.id}>{svc.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* 追加ボタン */}
+            <button
+              onClick={() => void handleAdd()}
+              disabled={saving || !serviceId || !pathPrefix}
+              className="w-full bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
+            >
+              {saving ? '追加中...' : 'パスルールを追加'}
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
