@@ -35,61 +35,61 @@ const (
 )
 
 type Deployment struct {
-	ID        string         `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	ProjectID string         `gorm:"type:uuid;not null;index"`
-	Name      string         `gorm:"type:varchar(63);not null"`
-	Type      DeploymentType `gorm:"type:varchar(32);not null"` // 作成後変更不可
+	ID        string         `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+	ProjectID string         `gorm:"type:uuid;not null;index"                       json:"project_id"`
+	Name      string         `gorm:"type:varchar(63);not null"                      json:"name"`
+	Type      DeploymentType `gorm:"type:varchar(32);not null"                      json:"type"` // 作成後変更不可
 
 	// --- image_url 専用 ---
-	ImageURL        string `gorm:"type:text"`
-	PendingImageURL string `gorm:"type:text"`
+	ImageURL        string `gorm:"type:text" json:"image_url"`
+	PendingImageURL string `gorm:"type:text" json:"pending_image_url"`
 
 	// --- dockerfile / railpack 共通（GitHub）---
-	GithubRepoURL        string `gorm:"type:text"`
-	PendingGithubRepoURL string `gorm:"type:text"`
+	GithubRepoURL        string `gorm:"type:text"          json:"github_repo_url"`
+	PendingGithubRepoURL string `gorm:"type:text"          json:"pending_github_repo_url"`
 
-	GithubBranch        string `gorm:"type:varchar(255)"`
-	PendingGithubBranch string `gorm:"type:varchar(255)"`
+	GithubBranch        string `gorm:"type:varchar(255)"  json:"github_branch"`
+	PendingGithubBranch string `gorm:"type:varchar(255)"  json:"pending_github_branch"`
 
 	// "HEAD" 指定可。apply 時に最新 SHA を取得して上書き
-	GithubCommitSHA        string `gorm:"type:varchar(40)"`
-	PendingGithubCommitSHA string `gorm:"type:varchar(40)"`
+	GithubCommitSHA        string `gorm:"type:varchar(40)"   json:"github_commit_sha"`
+	PendingGithubCommitSHA string `gorm:"type:varchar(40)"   json:"pending_github_commit_sha"`
 
 	// ビルド作業ディレクトリ。このディレクトリに CD した状態でビルドを開始する
-	GithubRepoDirectory        string `gorm:"type:varchar(255);default:'./'"`
-	PendingGithubRepoDirectory string `gorm:"type:varchar(255)"`
+	GithubRepoDirectory        string `gorm:"type:varchar(255);default:'./'"  json:"github_repo_directory"`
+	PendingGithubRepoDirectory string `gorm:"type:varchar(255)"              json:"pending_github_repo_directory"`
 
 	// --- dockerfile 専用 ---
-	DockerfilePath        string `gorm:"type:varchar(255);default:'./Dockerfile'"`
-	PendingDockerfilePath string `gorm:"type:varchar(255)"`
+	DockerfilePath        string `gorm:"type:varchar(255);default:'./Dockerfile'" json:"dockerfile_path"`
+	PendingDockerfilePath string `gorm:"type:varchar(255)"                        json:"pending_dockerfile_path"`
 
 	// --- ビルド管理 ---
 	// nil = ビルドなし。完了時に build_id をセット
-	CurrentBuildID *string          `gorm:"type:uuid"`
-	CurrentBuild   *DeploymentBuild `gorm:"foreignKey:CurrentBuildID"`
+	CurrentBuildID *string          `gorm:"type:uuid"                    json:"current_build_id"`
+	CurrentBuild   *DeploymentBuild `gorm:"foreignKey:CurrentBuildID"    json:"current_build,omitempty"`
 
 	// --- デプロイ設定 ---
-	InstanceSize        string `gorm:"type:varchar(16);not null;default:'small'"`
-	PendingInstanceSize string `gorm:"type:varchar(16)"`
+	InstanceSize        string `gorm:"type:varchar(16);not null;default:'small'" json:"instance_size"`
+	PendingInstanceSize string `gorm:"type:varchar(16)"                          json:"pending_instance_size"`
 
-	Replicas        int32 `gorm:"not null;default:1"`
-	PendingReplicas int32
+	Replicas        int32 `gorm:"not null;default:1" json:"replicas"`
+	PendingReplicas int32 `json:"pending_replicas"`
 
 	// --- 起動設定 ---
-	Command        pq.StringArray `gorm:"type:text[]"` // k8s command（ENTRYPOINT 上書き）
-	PendingCommand pq.StringArray `gorm:"type:text[]"`
+	Command        pq.StringArray `gorm:"type:text[]" json:"command"`  // k8s command（ENTRYPOINT 上書き）
+	PendingCommand pq.StringArray `gorm:"type:text[]" json:"pending_command"`
 
-	Args        pq.StringArray `gorm:"type:text[]"` // k8s args（CMD 上書き）
-	PendingArgs pq.StringArray `gorm:"type:text[]"`
+	Args        pq.StringArray `gorm:"type:text[]" json:"args"`  // k8s args（CMD 上書き）
+	PendingArgs pq.StringArray `gorm:"type:text[]" json:"pending_args"`
 
 	// --- ステータス ---
-	Status    DeploymentStatus `gorm:"type:varchar(32);not null;default:'pending'"`
-	AppStatus AppStatus        `gorm:"type:varchar(32);not null;default:'pending'"`
-	K8sStatus datatypes.JSON   `gorm:"type:jsonb"` // null = 未同期
-	AppliedAt *time.Time
+	Status    DeploymentStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
+	AppStatus AppStatus        `gorm:"type:varchar(32);not null;default:'pending'" json:"app_status"`
+	K8sStatus datatypes.JSON   `gorm:"type:jsonb"                                  json:"k8s_status"` // null = 未同期
+	AppliedAt *time.Time       `json:"applied_at"`
 
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (Deployment) TableName() string { return "deployments" }

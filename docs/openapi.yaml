@@ -446,6 +446,22 @@ components:
           type: string
           format: date-time
 
+    CreateServiceRequest:
+      type: object
+      required: [port, target_port]
+      description: Service 作成リクエスト（ポート設定は pending に書き込まれ apply で反映される）
+      properties:
+        port:
+          type: integer
+          description: k8s Service port
+        target_port:
+          type: integer
+          description: コンテナ側ポート
+        type:
+          type: string
+          enum: [ClusterIP, NodePort, LoadBalancer]
+          description: Service タイプ（省略時は ClusterIP）
+
     UpdateServiceRequest:
       type: object
       description: 指定フィールドのみ更新（null/省略は変更なし）
@@ -1432,6 +1448,54 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Service が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    post:
+      summary: Service 作成
+      description: |
+        デプロイメントに紐づく k8s Service を作成します。
+        ポート設定は `pending_*` フィールドに書き込まれ、次回 `apply` で k8s に反映されます。
+      tags: [Service]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateServiceRequest"
+            example:
+              port: 80
+              target_port: 8080
+              type: ClusterIP
+      responses:
+        "201":
+          description: 作成した Service 情報
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Service"
+        "400":
+          description: リクエストが不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: アクセス権限なし
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Deployment が見つからない
           content:
             application/json:
               schema:

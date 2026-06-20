@@ -3,14 +3,14 @@ package models
 import "time"
 
 type EnvVar struct {
-	ID        string `gorm:"primaryKey;type:uuid;default:gen_random_uuid()"`
-	ProjectID string `gorm:"type:uuid;not null;index"`
-	Key       string `gorm:"type:varchar(255);not null"`
-	Value     string `gorm:"type:text"`    // 即時更新。k8s 反映は apply 時
-	IsSecret  bool   `gorm:"not null;default:false"` // true → k8s Secret / UI マスク
-	Status    string `gorm:"type:varchar(32);not null;default:'active'"` // active / deleting
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        string    `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`
+	ProjectID string    `gorm:"type:uuid;not null;index"                       json:"project_id"`
+	Key       string    `gorm:"type:varchar(255);not null"                     json:"key"`
+	Value     string    `gorm:"type:text"                                      json:"value"`    // 即時更新。k8s 反映は apply 時
+	IsSecret  bool      `gorm:"not null;default:false"                         json:"is_secret"` // true → k8s Secret / UI マスク
+	Status    string    `gorm:"type:varchar(32);not null;default:'active'"     json:"status"` // active / deleting
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (EnvVar) TableName() string { return "env_vars" }

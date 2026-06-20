@@ -10,14 +10,15 @@ import (
 
 // RouterOptions はルーター生成に必要なハンドラーをまとめた構造体
 type RouterOptions struct {
-	UserQuotaHandler   *handler.UserQuotaHandler   // quota ハンドラー
-	ProjectHandler     *handler.ProjectHandler     // project ハンドラー
-	DeploymentHandler  *handler.DeploymentHandler  // deployment ハンドラー
-	EnvVarHandler      *handler.EnvVarHandler      // env_var ハンドラー
-	VolumeHandler      *handler.VolumeHandler      // volume ハンドラー
-	BuildHandler       *handler.BuildHandler       // build ハンドラー
-	WebhookHandler     *handler.WebhookHandler     // webhook ハンドラー
-	LogHandler         *handler.LogHandler         // log ハンドラー
+	UserQuotaHandler    *handler.UserQuotaHandler    // quota ハンドラー
+	ProjectHandler      *handler.ProjectHandler      // project ハンドラー
+	DeploymentHandler   *handler.DeploymentHandler   // deployment ハンドラー
+	IngressRouteHandler *handler.IngressRouteHandler // ingress_route ハンドラー
+	EnvVarHandler       *handler.EnvVarHandler       // env_var ハンドラー
+	VolumeHandler       *handler.VolumeHandler       // volume ハンドラー
+	BuildHandler        *handler.BuildHandler        // build ハンドラー
+	WebhookHandler      *handler.WebhookHandler      // webhook ハンドラー
+	LogHandler          *handler.LogHandler          // log ハンドラー
 }
 
 // New はミドルウェアとルーティングを設定した Echo インスタンスを返す
@@ -50,6 +51,7 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.POST("/deployments/:id/apply", opts.DeploymentHandler.ApplyDeployment)               // deployment apply エンドポイント
 	apiGroup.GET("/deployments/:id/apply-histories", opts.DeploymentHandler.ListApplyHistories)   // apply 履歴一覧取得エンドポイント
 	apiGroup.GET("/deployments/:id/service", opts.DeploymentHandler.GetService)                   // service 設定取得エンドポイント
+	apiGroup.POST("/deployments/:id/service", opts.DeploymentHandler.CreateService)               // service 作成エンドポイント
 	apiGroup.PUT("/deployments/:id/service", opts.DeploymentHandler.UpdateService)                // service 設定更新エンドポイント
 	apiGroup.DELETE("/deployments/:id/service", opts.DeploymentHandler.DeleteService)             // service 削除エンドポイント
 
@@ -70,10 +72,12 @@ func New(opts RouterOptions) *echo.Echo {
 	router.POST("/webhooks/:deployment_id/github", opts.WebhookHandler.ReceiveGithubWebhook) // GitHub push イベントレシーバーエンドポイント
 
 	// ingress-route エンドポイントを登録する
-	apiGroup.GET("/deployments/:id/ingress-route", opts.DeploymentHandler.GetIngressRoute)           // ingress-route 設定取得エンドポイント
-	apiGroup.POST("/deployments/:id/ingress-route", opts.DeploymentHandler.CreateIngressRoute)      // ingress-route 作成エンドポイント
-	apiGroup.PUT("/deployments/:id/ingress-route", opts.DeploymentHandler.UpdateIngressRoute)        // ingress-route 設定更新エンドポイント
-	apiGroup.DELETE("/deployments/:id/ingress-route", opts.DeploymentHandler.DeleteIngressRoute)     // ingress-route 削除エンドポイント
+	apiGroup.GET("/projects/:id/ingress-route", opts.IngressRouteHandler.GetIngressRoute)                                   // ingress-route 取得エンドポイント
+	apiGroup.POST("/projects/:id/ingress-route", opts.IngressRouteHandler.CreateIngressRoute)                               // ingress-route 作成エンドポイント
+	apiGroup.DELETE("/projects/:id/ingress-route", opts.IngressRouteHandler.DeleteIngressRoute)                             // ingress-route 削除エンドポイント
+	apiGroup.GET("/ingress-routes/:id/path-rules", opts.IngressRouteHandler.ListPathRules)                                  // path-rule 一覧取得エンドポイント
+	apiGroup.POST("/ingress-routes/:id/path-rules", opts.IngressRouteHandler.CreatePathRule)                                // path-rule 作成エンドポイント
+	apiGroup.DELETE("/ingress-routes/:id/path-rules/:pathRuleID", opts.IngressRouteHandler.DeletePathRule)                  // path-rule 削除エンドポイント
 
 	// env-vars エンドポイントを登録する
 	apiGroup.GET("/projects/:id/env-vars", opts.EnvVarHandler.ListEnvVars)    // env_var 一覧取得エンドポイント

@@ -282,12 +282,4 @@ func (svc *projectServiceImpl) deleteDeploymentK8sResources(ctx context.Context,
 	if err := k8s.DeleteSecret(ctx, svc.k8sClient, namespace, deploymentData.Name); err != nil {
 		_ = err
 	}
-	// IngressRoute が存在する場合は削除する
-	ingressRouteData, ingressRouteErr := svc.ingressRouteRepo.FindByDeploymentID(ctx, deploymentData.ID)
-	if ingressRouteErr == nil && ingressRouteData != nil {
-		if err := k8s.DeleteIngressRoute(ctx, svc.dynamicClient, namespace, ingressRouteData.ID); err != nil { // k8s IngressRoute を削除する
-			_ = err
-		}
-	}
-
 }

@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 )
 
@@ -32,6 +34,10 @@ func (client *HarborClient) AdminCredential() HarborRobotCredential {
 
 // NewHarborClient は HarborClient を生成して返す
 func NewHarborClient(endpoint, robotName, robotSecret string) *HarborClient {
+	// robotName が base64 エンコード済みの場合はデコードして平文に戻す
+	if decoded, err := base64.StdEncoding.DecodeString(robotName); err == nil {
+		robotName = string(decoded)
+	}
 	return &HarborClient{
 		endpoint:    endpoint,             // エンドポイントを設定する
 		robotName:   robotName,            // robot アカウント名を設定する
@@ -110,7 +116,8 @@ func (client *HarborClient) CreateHarborProject(ctx context.Context, projectName
 	defer response.Body.Close() // レスポンスボディを閉じる
 
 	if response.StatusCode != http.StatusCreated { // 作成成功以外はエラーとする
-		return fmt.Errorf("harbor project 作成が失敗しました: status=%d", response.StatusCode)
+		responseBody, _ := io.ReadAll(response.Body) // エラーレスポンスボディを読み込む
+		return fmt.Errorf("harbor project 作成が失敗しました: status=%d body=%s", response.StatusCode, string(responseBody))
 	}
 	return nil
 }
@@ -138,7 +145,7 @@ func (client *HarborClient) CreateHarborRobotAccount(ctx context.Context, projec
 		return nil, fmt.Errorf("harbor robot account リクエストのシリアライズに失敗しました: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/api/v2.0/projects/%s/robots", client.endpoint, projectName) // Harbor API の URL を組み立てる
+	url := fmt.Sprintf("%s/api/v2.0/robots", client.endpoint) // Harbor API の URL を組み立てる（v2.14 では /robots エンドポイントを使う）
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes)) // リクエストを生成する
 	if err != nil {
 		return nil, fmt.Errorf("harbor robot account 作成リクエストの生成に失敗しました: %w", err)
@@ -153,7 +160,8 @@ func (client *HarborClient) CreateHarborRobotAccount(ctx context.Context, projec
 	defer response.Body.Close() // レスポンスボディを閉じる
 
 	if response.StatusCode != http.StatusCreated { // 作成成功以外はエラーとする
-		return nil, fmt.Errorf("harbor robot account 作成が失敗しました: status=%d", response.StatusCode)
+		responseBody, _ := io.ReadAll(response.Body) // エラーレスポンスボディを読み込む
+		return nil, fmt.Errorf("harbor robot account 作成が失敗しました: status=%d body=%s", response.StatusCode, string(responseBody))
 	}
 
 	var robotResponse harborRobotResponse
