@@ -17,8 +17,9 @@ import { Layout } from '@/components/Layout'
 import { DeploymentNode } from '@/components/flow/DeploymentNode'
 import { ServiceNode } from '@/components/flow/ServiceNode'
 import { IngressNode } from '@/components/flow/IngressNode'
-import { get, del } from '@/lib/api'
-import type { Project, Deployment, K8sService, IngressRoute } from '@/lib/types'
+import { get, post, del } from '@/lib/api'
+import { StatusBadge } from '@/components/StatusBadge'
+import type { Project, Deployment, K8sService, IngressRoute, PathRule } from '@/lib/types'
 
 const NODE_TYPES = {
   deployment: DeploymentNode,
@@ -39,7 +40,6 @@ const EDGE_MARKER = {
 type DeploymentWithRelations = {
   deployment: Deployment
   service: K8sService | null
-  ingress: IngressRoute | null
 }
 
 const MIN_SIDEBAR_WIDTH = 280 // サイドバー最小幅
@@ -55,6 +55,11 @@ export function ProjectDetailPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]) // ReactFlowのノードを管理する
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]) // ReactFlowのエッジを管理する
   const [deletingProject, setDeletingProject] = useState(false) // プロジェクト削除中フラグ
+  const [ingressRoute, setIngressRoute] = useState<IngressRoute | null>(null) // プロジェクト単位のIngressRouteを管理する
+  const [pathRules, setPathRules] = useState<PathRule[]>([]) // IngressRouteのパスルール一覧を管理する
+  const [ingressLoaded, setIngressLoaded] = useState(false) // IngressRoute読み込み完了フラグ
+  const [creatingIngress, setCreatingIngress] = useState(false) // IngressRoute作成中フラグ
+  const [deletingIngress, setDeletingIngress] = useState(false) // IngressRoute削除中フラグ
   const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null) // 選択中のデプロイメントIDを管理する
   const [iframeLoaded, setIframeLoaded] = useState(false) // iframe読み込み完了フラグ
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH) // サイドバー幅を管理する
@@ -106,27 +111,6 @@ export function ProjectDetailPage() {
         })
       }
 
-      if (relation.ingress) {
-        // イングレスノードを追加する（Service の有無に関わらず表示する）
-        newNodes.push({
-          id: `ing-${relation.ingress.id}`,
-          type: 'ingress',
-          position: { x: COL_WIDTH * 2, y: baseY },
-          data: { ingress: relation.ingress },
-        })
-
-        // Service が設定済みの場合は Service → Ingress、未設定の場合は Deployment → Ingress のエッジを追加する
-        const ingressEdgeSource = serviceConfigured && relation.service
-          ? `svc-${relation.service.id}`
-          : `dep-${relation.deployment.id}`
-        newEdges.push({
-          id: `edge-src-ing-${relation.ingress.id}`,
-          source: ingressEdgeSource,
-          target: `ing-${relation.ingress.id}`,
-          style: EDGE_STYLE,
-          markerEnd: EDGE_MARKER,
-        })
-      }
     })
 
     setNodes(newNodes) // ノードを更新する
@@ -144,24 +128,30 @@ export function ProjectDetailPage() {
 
       setProject(projectData)
 
-      // 各デプロイメントのサービスとイングレスを並行取得する
+      // 各デプロイメントのサービスを並行取得する
       const relations = await Promise.all(
         (deploymentList ?? []).map(async (deployment) => {
-          const [serviceData, ingressData] = await Promise.allSettled([
-            get<K8sService>(`/deployments/${deployment.id}/service`),
-            get<IngressRoute>(`/deployments/${deployment.id}/ingress-route`),
-          ])
-
+          const serviceResult = await get<K8sService>(`/deployments/${deployment.id}/service`).catch(() => null) // サービス情報を取得する
           return {
             deployment,
-            service: serviceData.status === 'fulfilled' ? serviceData.value : null,
-            ingress: ingressData.status === 'fulfilled' ? ingressData.value : null,
+            service: serviceResult,
           } as DeploymentWithRelations
         })
       )
 
       setDeploymentRelations(relations) // デプロイメント関連リソースを更新する
       buildGraph(relations, projectId) // グラフを更新する
+
+      // プロジェクト単位のIngressRouteを取得する
+      const ingressResult = await get<IngressRoute>(`/projects/${projectId}/ingress-route`).catch(() => null) // IngressRouteを取得する
+      setIngressRoute(ingressResult) // IngressRoute情報を設定する
+      if (ingressResult) {
+        const pathRuleResult = await get<PathRule[]>(`/ingress-routes/${ingressResult.id}/path-rules`).catch(() => []) // パスルール一覧を取得する
+        setPathRules(pathRuleResult ?? []) // パスルールを設定する
+      } else {
+        setPathRules([]) // パスルールを空にする
+      }
+      setIngressLoaded(true) // IngressRoute読み込み完了を記録する
     } catch (fetchError) {
       console.error(fetchError)
     } finally {
@@ -209,6 +199,35 @@ export function ProjectDetailPage() {
     startWidthRef.current = sidebarWidth
     document.body.style.cursor = 'col-resize' // リサイズカーソルを設定する
     document.body.style.userSelect = 'none' // ドラッグ中のテキスト選択を無効化する
+  }
+
+  const handleCreateIngressRoute = async () => {
+    if (!projectId) return
+    setCreatingIngress(true) // 作成中フラグを立てる
+    try {
+      await post(`/projects/${projectId}/ingress-route`) // IngressRouteを作成する
+      await fetchData() // データを再取得する
+    } catch (createError) {
+      console.error(createError)
+      alert('IngressRouteの作成に失敗しました')
+    } finally {
+      setCreatingIngress(false) // 作成中フラグを下げる
+    }
+  }
+
+  const handleDeleteIngressRoute = async () => {
+    if (!projectId || !ingressRoute) return
+    if (!confirm('IngressRouteを削除しますか？Apply後にk8sから削除されます。')) return
+    setDeletingIngress(true) // 削除中フラグを立てる
+    try {
+      await del(`/projects/${projectId}/ingress-route`) // IngressRouteを削除する
+      await fetchData() // データを再取得する
+    } catch (deleteError) {
+      console.error(deleteError)
+      alert('IngressRouteの削除に失敗しました')
+    } finally {
+      setDeletingIngress(false) // 削除中フラグを下げる
+    }
   }
 
   const handleDeleteProject = async () => {
@@ -284,7 +303,7 @@ export function ProjectDetailPage() {
           /* ReactFlow グラフ + サイドバー */
           <div className="flex overflow-hidden bg-white" style={{ height: 'calc(100vh - 48px)' }}>
             {/* ReactFlow 全画面 */}
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 relative">
               <ReactFlow
                 nodes={nodes}
                 edges={edges}
@@ -305,6 +324,67 @@ export function ProjectDetailPage() {
                   }}
                 />
               </ReactFlow>
+
+              {/* IngressRoute オーバーレイパネル */}
+              {ingressLoaded && (
+                <div className="absolute top-3 right-3 z-10 bg-white rounded-lg border border-gray-200 shadow-sm p-3 w-72">
+                  <h3 className="text-xs font-semibold text-[#111827] mb-2">IngressRoute</h3>
+                  {ingressRoute ? (
+                    <div className="space-y-1 text-xs">
+                      <div className="flex items-center gap-1">
+                        <span className="text-gray-400">ホスト:</span>
+                        <a href={`http://${ingressRoute.host}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[#00C2D1] hover:underline truncate">
+                          {ingressRoute.host}
+                        </a>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-gray-400">ステータス:</span>
+                        <StatusBadge status={ingressRoute.status} size="sm" />
+                      </div>
+                      {pathRules.length > 0 && (
+                        <div className="pt-1 border-t border-gray-100 mt-1">
+                          <p className="text-gray-400 mb-1">パスルール ({pathRules.length})</p>
+                          {pathRules.map(pathRule => (
+                            <div key={pathRule.id} className="font-mono text-xs text-gray-600 flex items-center justify-between">
+                              <span>{pathRule.path_prefix}</span>
+                              <span className="text-gray-300 text-[10px]">{pathRule.status}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-400">IngressRouteが未設定です</p>
+                      <button
+                        onClick={() => void handleCreateIngressRoute()}
+                        disabled={creatingIngress}
+                        className="w-full bg-[#111827] text-white text-xs px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
+                      >
+                        {creatingIngress ? '作成中...' : 'IngressRouteを作成'}
+                      </button>
+                    </div>
+                  )}
+                  {ingressRoute && (
+                    <div className="pt-2 border-t border-gray-100 mt-2 space-y-2">
+                      <IngressPathRuleForm
+                        ingressRouteId={ingressRoute.id}
+                        deploymentRelations={deploymentRelations}
+                        onCreated={() => void fetchData()}
+                      />
+                      {ingressRoute.status !== 'deleting' && (
+                        <button
+                          onClick={() => void handleDeleteIngressRoute()}
+                          disabled={deletingIngress}
+                          className="w-full text-xs text-red-500 hover:text-red-700 disabled:opacity-50 py-1"
+                        >
+                          {deletingIngress ? '削除中...' : 'IngressRouteを削除'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* リサイズハンドル */}
@@ -362,5 +442,78 @@ export function ProjectDetailPage() {
         )}
       </div>
     </Layout>
+  )
+}
+
+// ── IngressPathRuleForm ────────────────────────────────────────
+
+function IngressPathRuleForm({
+  ingressRouteId,
+  deploymentRelations,
+  onCreated,
+}: {
+  ingressRouteId: string
+  deploymentRelations: DeploymentWithRelations[]
+  onCreated: () => void
+}) {
+  const [pathPrefix, setPathPrefix] = useState('/') // パスプレフィックスを管理する
+  const [serviceId, setServiceId] = useState('') // 対象サービスIDを管理する
+  const [saving, setSaving] = useState(false) // 保存中フラグ
+
+  const servicesWithId = deploymentRelations
+    .filter(rel => rel.service)
+    .map(rel => ({ id: rel.service!.id, name: rel.deployment.name })) // サービスが存在するデプロイメントを抽出する
+
+  const handleAdd = async () => {
+    if (!serviceId) return
+    setSaving(true) // 保存中フラグを立てる
+    try {
+      await post(`/ingress-routes/${ingressRouteId}/path-rules`, {
+        path_prefix: pathPrefix,
+        service_id: serviceId,
+      }) // パスルールを追加する
+      setPathPrefix('/') // フォームをリセットする
+      setServiceId('') // 選択をリセットする
+      onCreated() // 親コンポーネントにデータ再取得を通知する
+    } catch (saveError) {
+      console.error(saveError)
+      alert('パスルールの追加に失敗しました')
+    } finally {
+      setSaving(false) // 保存中フラグを下げる
+    }
+  }
+
+  if (servicesWithId.length === 0) {
+    return <p className="text-xs text-gray-400">パスルールを追加するにはまず Service を設定してください</p>
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs font-medium text-gray-500">パスルールを追加</p>
+      <input
+        type="text"
+        value={pathPrefix}
+        onChange={ev => setPathPrefix(ev.target.value)}
+        placeholder="/"
+        className="w-full rounded border border-gray-200 px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-[#00C2D1]"
+      />
+      <select
+        value={serviceId}
+        onChange={ev => setServiceId(ev.target.value)}
+        className="w-full rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-[#00C2D1]"
+      >
+        <option value="">対象 Service を選択</option>
+        {servicesWithId.map(svc => (
+          <option key={svc.id} value={svc.id}>{svc.name}</option>
+        ))}
+      </select>
+      <button
+        onClick={() => void handleAdd()}
+        disabled={saving || !serviceId}
+        className="w-full bg-[#00C2D1] text-white text-xs px-3 py-1.5 rounded-md hover:bg-[#00b3c0] transition-colors disabled:opacity-50"
+      >
+        {saving ? '追加中...' : '追加'}
+      </button>
+    </div>
   )
 }

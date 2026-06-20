@@ -101,19 +101,22 @@ export type IngressStatus = 'pending' | 'active' | 'deleting'
 
 export type IngressRoute = {
   id: string
-  deployment_id: string
+  project_id: string
   host: string
-  path_prefix: string
-  tls_enabled: boolean
-  certificate_resolver: string
-  port: number
-  pending_host: string
-  pending_path_prefix: string
-  pending_port: number
-  pending_tls_enabled: boolean | null
-  pending_certificate_resolver: string
   status: IngressStatus
   k8s_status: Record<string, unknown> | null
+  created_at: string
+  updated_at: string
+}
+
+export type PathRuleStatus = 'pending' | 'active' | 'deleting'
+
+export type PathRule = {
+  id: string
+  ingress_route_id: string
+  path_prefix: string
+  service_id: string
+  status: PathRuleStatus
   created_at: string
   updated_at: string
 }

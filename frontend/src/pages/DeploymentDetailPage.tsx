@@ -9,7 +9,6 @@ import type {
   Deployment,
   Build,
   K8sService,
-  IngressRoute,
   ApplyHistory,
   PodLogsResponse,
 } from '@/lib/types'
@@ -539,21 +538,13 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
 
 function NetworkingTab({ deploymentId }: { deploymentId: string }) {
   const [service, setService] = useState<K8sService | null>(null) // サービス情報を管理する
-  const [ingress, setIngress] = useState<IngressRoute | null>(null) // イングレス情報を管理する
   const [svcForm, setSvcForm] = useState({ port: '', target_port: '' }) // サービス設定フォーム
-  const [ingressForm, setIngressForm] = useState({ path_prefix: '/', port: '' }) // イングレス設定フォーム（ホストは自動払い出し）
   const [savingSvc, setSavingSvc] = useState(false) // サービス保存中フラグ
-  const [savingIngress, setSavingIngress] = useState(false) // イングレス保存中フラグ
   const [deletingSvc, setDeletingSvc] = useState(false) // サービス削除中フラグ
-  const [deletingIngress, setDeletingIngress] = useState(false) // イングレス削除中フラグ
 
   const fetchNetworking = async () => {
-    const [svcResult, ingResult] = await Promise.allSettled([
-      get<K8sService>(`/deployments/${deploymentId}/service`),
-      get<IngressRoute>(`/deployments/${deploymentId}/ingress-route`),
-    ])
-    if (svcResult.status === 'fulfilled') setService(svcResult.value) // サービス情報を設定する
-    if (ingResult.status === 'fulfilled') setIngress(ingResult.value) // イングレス情報を設定する
+    const svcResult = await get<K8sService>(`/deployments/${deploymentId}/service`).catch(() => null) // サービス情報を取得する
+    setService(svcResult) // サービス情報を設定する
   }
 
   useEffect(() => {
@@ -566,8 +557,6 @@ function NetworkingTab({ deploymentId }: { deploymentId: string }) {
   const serviceConfigured = service && (service.port !== 0 || service.pending_port !== 0)
   // 無効化が保留中（port は設定済みだが pending_port=0 に変更された）
   const serviceDisablePending = service && service.port !== 0 && service.pending_port === 0
-  // IngressRoute が存在するが port=0（無効化保留中または未設定）
-  const ingressDisablePending = ingress && ingress.port !== 0 && ingress.pending_port === 0
 
   const handleDeleteService = async () => {
     if (!confirm('Serviceを無効化しますか？保留中になり、Applyで反映されます。')) return
@@ -580,20 +569,6 @@ function NetworkingTab({ deploymentId }: { deploymentId: string }) {
       alert('Serviceの無効化に失敗しました')
     } finally {
       setDeletingSvc(false)
-    }
-  }
-
-  const handleDeleteIngress = async () => {
-    if (!confirm('IngressRouteを無効化しますか？保留中になり、Applyで反映されます。')) return
-    setDeletingIngress(true)
-    try {
-      await del(`/deployments/${deploymentId}/ingress-route`) // pending_port=0 にして無効化を予約する
-      await fetchNetworking() // 最新状態を再取得する
-    } catch (deleteError) {
-      console.error(deleteError)
-      alert('IngressRouteの無効化に失敗しました')
-    } finally {
-      setDeletingIngress(false)
     }
   }
 
@@ -610,29 +585,6 @@ function NetworkingTab({ deploymentId }: { deploymentId: string }) {
       alert('サービスの保存に失敗しました')
     } finally {
       setSavingSvc(false)
-    }
-  }
-
-  const handleSaveIngress = async () => {
-    setSavingIngress(true)
-    try {
-      if (ingress) {
-        await put(`/deployments/${deploymentId}/ingress-route`, {
-          path_prefix: ingressForm.path_prefix || undefined,
-          port: ingressForm.port ? parseInt(ingressForm.port, 10) : undefined,
-        })
-      } else {
-        await post(`/deployments/${deploymentId}/ingress-route`, {
-          path_prefix: ingressForm.path_prefix,
-          port: parseInt(ingressForm.port, 10),
-        })
-      }
-      await fetchNetworking()
-    } catch (saveError) {
-      console.error(saveError)
-      alert('IngressRouteの保存に失敗しました')
-    } finally {
-      setSavingIngress(false)
     }
   }
 
@@ -707,76 +659,10 @@ function NetworkingTab({ deploymentId }: { deploymentId: string }) {
         )}
       </div>
 
-      {/* IngressRoute セクション */}
-      <div className={`bg-white rounded-lg border p-4 space-y-3 ${ingressDisablePending ? 'border-amber-300' : 'border-gray-200'}`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h3 className="text-sm font-semibold text-[#111827]">IngressRoute</h3>
-            {ingressDisablePending && (
-              <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">無効化 Apply 待ち</span>
-            )}
-          </div>
-          {ingress && !ingressDisablePending && (
-            <button onClick={() => void handleDeleteIngress()} disabled={deletingIngress} className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50">
-              {deletingIngress ? '処理中...' : '無効化'}
-            </button>
-          )}
-        </div>
-        {ingressDisablePending ? (
-          <div className="bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-sm text-amber-800">
-            無効化が保留中です。現在のURL: <span className="font-mono font-medium">{ingress!.host}{ingress!.path_prefix}</span>。Apply を実行すると k8s から削除されます。
-          </div>
-        ) : ingress ? (
-          <>
-            <div className="space-y-2 text-sm">
-              <Row label="ステータス"><StatusBadge status={ingress.status} /></Row>
-              <Row label="URL">
-                <a href={`http://${ingress.host}${ingress.path_prefix}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[#00C2D1] hover:underline flex items-center gap-1">
-                  {ingress.host}{ingress.path_prefix}<ExternalLink className="w-3 h-3" />
-                </a>
-              </Row>
-              {ingress.pending_host && ingress.pending_host !== ingress.host && (
-                <Row label="保留中のホスト"><span className="font-mono text-amber-600">{ingress.pending_host}</span></Row>
-              )}
-              <Row label="転送先ポート"><span className="font-mono">{ingress.port}</span></Row>
-              {ingress.pending_port !== 0 && ingress.pending_port !== ingress.port && (
-                <Row label="保留中のポート"><span className="font-mono text-amber-600">{ingress.pending_port}</span></Row>
-              )}
-            </div>
-            <div className="pt-3 border-t border-gray-100 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className={labelClass}>パスプレフィックス</label>
-                  <input type="text" className={inputClass} placeholder={ingress.pending_path_prefix || ingress.path_prefix || '/'} value={ingressForm.path_prefix} onChange={ev => setIngressForm(prev => ({ ...prev, path_prefix: ev.target.value }))} />
-                </div>
-                <div>
-                  <label className={labelClass}>転送先ポート</label>
-                  <input type="number" className={inputClass} placeholder={String(ingress.pending_port || ingress.port)} value={ingressForm.port} onChange={ev => setIngressForm(prev => ({ ...prev, port: ev.target.value }))} />
-                </div>
-              </div>
-              <button onClick={() => void handleSaveIngress()} disabled={savingIngress} className="bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50">
-                {savingIngress ? '保存中...' : '変更を保存'}
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-gray-400">IngressRouteが設定されていません。ドメインは自動で払い出されます。</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelClass}>パスプレフィックス</label>
-                <input type="text" className={inputClass} placeholder="/" value={ingressForm.path_prefix} onChange={ev => setIngressForm(prev => ({ ...prev, path_prefix: ev.target.value }))} />
-              </div>
-              <div>
-                <label className={labelClass}>転送先ポート</label>
-                <input type="number" className={inputClass} placeholder="80" value={ingressForm.port} onChange={ev => setIngressForm(prev => ({ ...prev, port: ev.target.value }))} />
-              </div>
-            </div>
-            <button onClick={() => void handleSaveIngress()} disabled={savingIngress || !ingressForm.port} className="bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50">
-              {savingIngress ? '保存中...' : 'IngressRouteを作成'}
-            </button>
-          </div>
-        )}
+      {/* IngressRoute */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <h3 className="text-sm font-semibold text-[#111827] mb-2">IngressRoute</h3>
+        <p className="text-sm text-gray-400">IngressRoute はプロジェクト単位で管理されます。プロジェクトページから設定してください。</p>
       </div>
     </div>
   )
