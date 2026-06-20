@@ -43,6 +43,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		&models.DeploymentWebhook{},
 		&models.Service{},
 		&models.IngressRoute{},
+		&models.PathRule{},
 		&models.EnvVar{},
 		&models.EnvVarMount{},
 		&models.Volume{},
