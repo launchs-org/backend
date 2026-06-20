@@ -161,7 +161,7 @@ func (generator *Generator) GenerateService(
 
 	return &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      deploymentName + "-svc", // Service 名をデプロイメント名から生成する
+			Name:      serviceData.ID + "-svc", // Service 名を Service UUID から生成する（Deployment 名変更の影響を受けないようにする）
 			Namespace: namespace,               // namespace を設定する
 			Labels: map[string]string{
 				"launchs.org/service-id": serviceData.ID, // サービス ID ラベルを設定する
@@ -171,13 +171,13 @@ func (generator *Generator) GenerateService(
 		Spec: corev1.ServiceSpec{
 			Type: serviceType, // Service タイプを設定する
 			Selector: map[string]string{
-				"app": deploymentName, // Pod セレクターを設定する
+				"app": deploymentName, // Deployment Pod の app ラベルに合わせてセレクターを設定する
 			},
 			Ports: []corev1.ServicePort{
 				{
-					Port:       int32(port),                    // 公開ポートを設定する
+					Port:       int32(port),                         // 公開ポートを設定する
 					TargetPort: intstr.FromInt32(int32(targetPort)), // ターゲットポートを設定する
-					Protocol:   corev1.ProtocolTCP,             // プロトコルを TCP に設定する
+					Protocol:   corev1.ProtocolTCP,                  // プロトコルを TCP に設定する
 				},
 			},
 		},
