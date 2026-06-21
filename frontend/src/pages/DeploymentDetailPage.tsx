@@ -4,16 +4,26 @@ import { Play, Trash2, GitBranch, Container, Package, ExternalLink } from 'lucid
 import { Layout } from '@/components/Layout'
 import { StatusBadge } from '@/components/StatusBadge'
 import { LogViewer } from '@/components/LogViewer'
-import { get, post, put, del } from '@/lib/api'
+import { get, post, put, del, ApiError } from '@/lib/api'
 import type {
   Deployment,
   Build,
   K8sService,
   ApplyHistory,
   PodLogsResponse,
+  Volume,
+  VolumeMount,
+  EnvVar,
+  EnvVarMount,
 } from '@/lib/types'
 
-type Tab = 'overview' | 'logs' | 'builds' | 'settings' | 'networking' | 'history'
+type Tab = 'overview' | 'logs' | 'builds' | 'settings' | 'networking' | 'env-vars' | 'volumes' | 'history'
+
+// pending 項目の種類と redo 操作を保持する型
+type PendingItem = {
+  label: string           // 表示ラベル
+  onDiscard: () => Promise<void> // 取り消し操作
+}
 
 const TYPE_ICON = {
   image_url: Container,
@@ -30,6 +40,10 @@ export function DeploymentDetailPage() {
   const [loading, setLoading] = useState(true) // ローディング状態を管理する
   const [applying, setApplying] = useState(false) // Apply中フラグ
   const [deleting, setDeleting] = useState(false) // 削除中フラグ
+  const [deleted, setDeleted] = useState(false) // 削除完了フラグ
+  const [allPendingItems, setAllPendingItems] = useState<PendingItem[]>([]) // 全pending項目を管理する
+  const [discardingLabel, setDiscardingLabel] = useState<string | null>(null) // 取り消し中の項目ラベル
+  const [fastPolling, setFastPolling] = useState(false) // 高速ポーリングフラグ（操作後に有効化する）
 
   const fetchDeployment = useCallback(async () => {
     if (!deploymentId) return
@@ -37,7 +51,11 @@ export function DeploymentDetailPage() {
       const data = await get<Deployment>(`/deployments/${deploymentId}`) // デプロイメント情報を取得する
       setDeployment(data)
     } catch (fetchError) {
-      console.error(fetchError)
+      if (fetchError instanceof ApiError && fetchError.status === 404) {
+        setDeleted(true) // 404 は物理削除完了とみなして完了画面を表示する
+      } else {
+        console.error(fetchError)
+      }
     } finally {
       setLoading(false)
     }
@@ -45,35 +63,110 @@ export function DeploymentDetailPage() {
 
   useEffect(() => {
     void fetchDeployment() // 初回データ取得
-
-    const intervalId = setInterval(() => {
-      void fetchDeployment() // 10秒ごとにポーリングする
-    }, 10_000)
-
+    const pollInterval = fastPolling ? 3_000 : 5_000 // 操作後は3秒、通常は5秒ポーリングする
+    const intervalId = setInterval(() => { void fetchDeployment() }, pollInterval)
     return () => clearInterval(intervalId) // クリーンアップ
-  }, [fetchDeployment])
+  }, [fetchDeployment, fastPolling])
 
-  const hasPending = deployment && !!(
-    deployment.pending_image_url ||
-    deployment.pending_github_repo_url ||
-    deployment.pending_github_branch ||
-    deployment.pending_replicas ||
-    deployment.pending_instance_size ||
-    deployment.pending_command?.length ||
-    deployment.pending_dockerfile_path
-  ) // 保留中の変更があるかどうかを確認する
+  // deployment・service・env-var-mounts・volume-mounts を一括取得して pending 項目を生成する
+  const fetchAllPending = useCallback(async () => {
+    if (!deploymentId || !projectId) return
+    const [deploymentData, serviceData, envVarMounts, volumeMounts, envVars, volumes] = await Promise.all([
+      get<Deployment>(`/deployments/${deploymentId}`).catch(() => null),
+      get<K8sService>(`/deployments/${deploymentId}/service`).catch(() => null),
+      get<EnvVarMount[]>(`/deployments/${deploymentId}/env-var-mounts`).catch(() => [] as EnvVarMount[]),
+      get<VolumeMount[]>(`/deployments/${deploymentId}/volume-mounts`).catch(() => [] as VolumeMount[]),
+      get<EnvVar[]>(`/projects/${projectId}/env-vars`).catch(() => [] as EnvVar[]),
+      get<Volume[]>(`/projects/${projectId}/volumes`).catch(() => [] as Volume[]),
+    ])
+
+    const items: PendingItem[] = []
+
+    // deployment の pending フィールドを確認する
+    if (deploymentData) {
+      if (deploymentData.pending_image_url && deploymentData.pending_image_url !== deploymentData.image_url)
+        items.push({ label: `イメージURL: ${deploymentData.pending_image_url}`, onDiscard: async () => { await post(`/deployments/${deploymentId}/discard-pending`) } })
+      if (deploymentData.pending_github_repo_url && deploymentData.pending_github_repo_url !== deploymentData.github_repo_url)
+        items.push({ label: `リポジトリURL: ${deploymentData.pending_github_repo_url}`, onDiscard: async () => { await post(`/deployments/${deploymentId}/discard-pending`) } })
+      if (deploymentData.pending_github_branch && deploymentData.pending_github_branch !== deploymentData.github_branch)
+        items.push({ label: `ブランチ: ${deploymentData.pending_github_branch}`, onDiscard: async () => { await post(`/deployments/${deploymentId}/discard-pending`) } })
+      if (deploymentData.pending_instance_size && deploymentData.pending_instance_size !== deploymentData.instance_size)
+        items.push({ label: `インスタンスサイズ: ${deploymentData.pending_instance_size}`, onDiscard: async () => { await post(`/deployments/${deploymentId}/discard-pending`) } })
+      if (deploymentData.pending_replicas && deploymentData.pending_replicas !== deploymentData.replicas)
+        items.push({ label: `レプリカ数: ${deploymentData.pending_replicas}`, onDiscard: async () => { await post(`/deployments/${deploymentId}/discard-pending`) } })
+      if (deploymentData.pending_dockerfile_path && deploymentData.pending_dockerfile_path !== deploymentData.dockerfile_path)
+        items.push({ label: `Dockerfileパス: ${deploymentData.pending_dockerfile_path}`, onDiscard: async () => { await post(`/deployments/${deploymentId}/discard-pending`) } })
+      setDeployment(deploymentData) // deployment 情報も更新する
+    }
+
+    // service の pending 状態を確認する
+    if (serviceData) {
+      if (serviceData.status === 'pending' && serviceData.port === 0)
+        items.push({ label: `Service 追加: ${serviceData.pending_port} → ${serviceData.pending_target_port}`, onDiscard: async () => { await del(`/deployments/${deploymentId}/service`) } })
+      else if (serviceData.status === 'deleting')
+        items.push({ label: `Service 無効化待ち (現在: ${serviceData.port} → ${serviceData.target_port})`, onDiscard: async () => { await put(`/deployments/${deploymentId}/service`, { port: serviceData.port, target_port: serviceData.target_port }) } })
+      else if (serviceData.pending_port !== 0 && serviceData.pending_port !== serviceData.port)
+        items.push({ label: `Serviceポート変更: ${serviceData.port} → ${serviceData.pending_port}`, onDiscard: async () => { await put(`/deployments/${deploymentId}/service`, { port: serviceData.port, target_port: serviceData.target_port }) } })
+    }
+
+    // env-var-mounts の pending 状態を確認する
+    for (const mount of (envVarMounts ?? [])) {
+      const envVar = (envVars ?? []).find(ev => ev.id === mount.env_var_id) // 対応する環境変数を取得する
+      const keyLabel = mount.override_key || envVar?.key || mount.env_var_id.slice(0, 8) // 表示キーを決定する
+      if (mount.status === 'pending')
+        items.push({ label: `環境変数マウント追加: ${keyLabel}`, onDiscard: async () => { await del(`/env-var-mounts/${mount.id}`) } })
+      else if (mount.status === 'deleting')
+        items.push({ label: `環境変数マウント削除待ち: ${keyLabel}`, onDiscard: async () => { await post(`/deployments/${deploymentId}/env-var-mounts`, { env_var_id: mount.env_var_id, override_key: mount.override_key }) } })
+    }
+
+    // volume-mounts の pending 状態を確認する
+    for (const mount of (volumeMounts ?? [])) {
+      const volume = (volumes ?? []).find(vol => vol.id === mount.volume_id) // 対応するボリュームを取得する
+      const volumeLabel = volume?.name ?? mount.volume_id.slice(0, 8) // 表示名を決定する
+      if (mount.status === 'pending')
+        items.push({ label: `ボリュームマウント追加: ${volumeLabel} → ${mount.mount_path}`, onDiscard: async () => { await del(`/volume-mounts/${mount.id}`) } })
+      else if (mount.status === 'deleting')
+        items.push({ label: `ボリュームマウント削除待ち: ${volumeLabel} → ${mount.mount_path}`, onDiscard: async () => { await post(`/deployments/${deploymentId}/volume-mounts`, { volume_id: mount.volume_id, mount_path: mount.mount_path }) } })
+    }
+
+    setAllPendingItems(items) // pending 項目一覧を更新する
+  }, [deploymentId, projectId])
+
+  useEffect(() => {
+    void fetchAllPending() // 初回 pending 一括取得
+    const pollInterval = fastPolling ? 3_000 : 5_000 // 操作後は3秒、通常は5秒ポーリングする
+    const intervalId = setInterval(() => { void fetchAllPending() }, pollInterval)
+    return () => clearInterval(intervalId) // クリーンアップ
+  }, [fetchAllPending, fastPolling])
+
+  const hasPending = allPendingItems.length > 0 // pending項目が1件以上あればtrueにする
+
+  const handleDiscard = async (item: PendingItem) => {
+    setDiscardingLabel(item.label) // 取り消し中の項目を記録する
+    try {
+      await item.onDiscard() // 取り消し操作を実行する
+      await Promise.all([fetchDeployment(), fetchAllPending()]) // 取り消し後に全データを再取得する
+    } catch (discardError) {
+      console.error(discardError)
+      alert('取り消しに失敗しました')
+    } finally {
+      setDiscardingLabel(null) // 取り消し中フラグをリセットする
+    }
+  }
 
   const handleApply = async () => {
     if (!deploymentId) return
     setApplying(true)
+    setFastPolling(true) // Apply後はポーリングを高速化する
     try {
       await post(`/deployments/${deploymentId}/apply`) // Applyを実行する
-      await fetchDeployment() // デプロイメント情報を再取得する
+      await Promise.all([fetchDeployment(), fetchAllPending()]) // デプロイメント情報と pending 一覧を再取得する
     } catch (applyError) {
       console.error(applyError)
       alert('Apply に失敗しました')
     } finally {
       setApplying(false)
+      setTimeout(() => setFastPolling(false), 30_000) // 30秒後に通常ポーリングへ戻す
     }
   }
 
@@ -82,12 +175,14 @@ export function DeploymentDetailPage() {
     if (!confirm(`「${deployment.name}」を削除しますか？この操作は取り消せません。`)) return
 
     setDeleting(true)
+    setFastPolling(true) // 削除後はポーリングを高速化する
     try {
       await del(`/deployments/${deploymentId}`) // デプロイメントを削除する
-      navigate(`/projects/${projectId}`) // プロジェクト詳細へ遷移する
+      setDeleted(true) // 削除完了画面を表示する（navigate しない）
     } catch (deleteError) {
       console.error(deleteError)
       alert('削除に失敗しました')
+      setFastPolling(false)
     } finally {
       setDeleting(false)
     }
@@ -101,6 +196,8 @@ export function DeploymentDetailPage() {
         ...(deployment.type !== 'image_url' ? (['builds'] as Tab[]) : []),
         'settings',
         'networking',
+        'env-vars',
+        'volumes',
         'history',
       ]
     : ['overview']
@@ -109,6 +206,51 @@ export function DeploymentDetailPage() {
     return (
       <Layout>
         <div className="h-48 flex items-center justify-center text-sm text-gray-400">読み込み中...</div>
+      </Layout>
+    )
+  }
+
+  if (deleted) {
+    return (
+      <Layout>
+        <div className="h-96 flex flex-col items-center justify-center gap-4">
+          <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+            <Trash2 className="w-6 h-6 text-green-600" />
+          </div>
+          <div className="text-center">
+            <p className="text-lg font-semibold text-[#111827]">削除が完了しました</p>
+            <p className="text-sm text-gray-400 mt-1">デプロイメントが正常に削除されました</p>
+          </div>
+          <button
+            onClick={() => navigate(`/projects/${projectId}`)}
+            className="text-sm px-4 py-2 rounded-md bg-[#111827] text-white hover:bg-gray-800 transition-colors"
+          >
+            プロジェクトへ戻る
+          </button>
+        </div>
+      </Layout>
+    )
+  }
+
+  if (deployment?.status === 'deleting') {
+    return (
+      <Layout
+        breadcrumbs={[
+          { label: 'Project', href: `/projects/${projectId}` },
+          { label: deployment.name },
+        ]}
+      >
+        <div className="h-96 flex flex-col items-center justify-center gap-4">
+          <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center animate-pulse">
+            <Trash2 className="w-6 h-6 text-red-400" />
+          </div>
+          <div className="text-center">
+            <p className="text-lg font-semibold text-[#111827]">削除中...</p>
+            {deployment.delete_progress && (
+              <p className="text-sm text-gray-400 mt-1 font-mono">{deployment.delete_progress}</p>
+            )}
+          </div>
+        </div>
       </Layout>
     )
   }
@@ -173,18 +315,34 @@ export function DeploymentDetailPage() {
 
         {/* 保留中バナー */}
         {hasPending && (
-          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm text-amber-800">
-              <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-              設定変更が保留中です。Apply を実行すると Kubernetes リソースに反映されます。
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-amber-800">
+                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                <span className="font-medium">Apply 待ちの変更が {allPendingItems.length} 件あります</span>
+              </div>
+              <button
+                onClick={() => void handleApply()}
+                disabled={applying}
+                className="text-xs font-medium text-amber-700 hover:text-amber-900 underline"
+              >
+                今すぐ Apply
+              </button>
             </div>
-            <button
-              onClick={() => void handleApply()}
-              disabled={applying}
-              className="text-xs font-medium text-amber-700 hover:text-amber-900 underline"
-            >
-              今すぐ Apply
-            </button>
+            <ul className="space-y-1 pl-4">
+              {allPendingItems.map((item, itemIndex) => (
+                <li key={itemIndex} className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-amber-700 font-mono truncate">{item.label}</span>
+                  <button
+                    onClick={() => void handleDiscard(item)}
+                    disabled={discardingLabel !== null}
+                    className="text-[11px] text-amber-600 hover:text-red-600 underline shrink-0 disabled:opacity-50"
+                  >
+                    {discardingLabel === item.label ? '取り消し中...' : '取り消す'}
+                  </button>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
@@ -201,7 +359,7 @@ export function DeploymentDetailPage() {
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                {{ overview: '概要', logs: 'ログ', builds: 'ビルド', settings: '設定', networking: 'ネットワーク', history: '履歴' }[tab]}
+                {{ overview: '概要', logs: 'ログ', builds: 'ビルド', settings: '設定', networking: 'ネットワーク', 'env-vars': '環境変数', volumes: 'ボリューム', history: '履歴' }[tab]}
               </button>
             ))}
           </nav>
@@ -213,7 +371,9 @@ export function DeploymentDetailPage() {
           {activeTab === 'logs' && <LogsTab deploymentId={deploymentId!} />}
           {activeTab === 'builds' && <BuildsTab deploymentId={deploymentId!} projectId={projectId!} deployment={deployment} />}
           {activeTab === 'settings' && <SettingsTab deployment={deployment} onSaved={fetchDeployment} />}
-          {activeTab === 'networking' && <NetworkingTab deploymentId={deploymentId!} />}
+          {activeTab === 'networking' && <NetworkingTab deploymentId={deploymentId!} onUpdated={fetchAllPending} />}
+          {activeTab === 'env-vars' && <EnvVarsTab deploymentId={deploymentId!} projectId={projectId!} onUpdated={fetchAllPending} />}
+          {activeTab === 'volumes' && <VolumesTab deploymentId={deploymentId!} projectId={projectId!} onUpdated={fetchAllPending} />}
           {activeTab === 'history' && <HistoryTab deploymentId={deploymentId!} />}
         </div>
       </div>
@@ -302,9 +462,24 @@ function LogsTab({ deploymentId }: { deploymentId: string }) {
 
 // ── Builds タブ ───────────────────────────────────────────────
 
+const BUILD_STATUS_LABEL: Record<string, string> = {
+  pending: '待機中',
+  building: 'ビルド中',
+  succeeded: '成功',
+  failed: '失敗',
+  cancelled: 'キャンセル',
+}
+
+const BUILD_STATUS_COLOR: Record<string, string> = {
+  pending: 'text-yellow-500',
+  building: 'text-blue-500',
+  succeeded: 'text-green-600',
+  failed: 'text-red-500',
+  cancelled: 'text-gray-400',
+}
+
 function BuildsTab({
   deploymentId,
-  deployment,
 }: {
   deploymentId: string
   projectId: string
@@ -312,11 +487,28 @@ function BuildsTab({
 }) {
   const navigate = useNavigate()
   const [building, setBuilding] = useState(false) // ビルド中フラグ
+  const [buildList, setBuildList] = useState<Build[]>([]) // ビルド一覧を管理する
+
+  const fetchBuilds = useCallback(async () => {
+    try {
+      const data = await get<Build[]>(`/deployments/${deploymentId}/builds`) // ビルド一覧を取得する
+      setBuildList(data ?? [])
+    } catch (fetchError) {
+      console.error(fetchError)
+    }
+  }, [deploymentId])
+
+  useEffect(() => {
+    void fetchBuilds() // 初回取得
+    const intervalId = setInterval(() => void fetchBuilds(), 10_000) // 10秒ごとにポーリングする
+    return () => clearInterval(intervalId)
+  }, [fetchBuilds])
 
   const handleBuild = async () => {
     setBuilding(true)
     try {
       const result = await post<Build>(`/deployments/${deploymentId}/build`) // ビルドを開始する
+      await fetchBuilds() // 一覧を即座に更新する
       navigate(`/builds/${result.id}/logs`) // ビルドログページへ遷移する
     } catch (buildError) {
       console.error(buildError)
@@ -338,27 +530,42 @@ function BuildsTab({
         </button>
       </div>
 
-      {deployment.current_build_id ? (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 text-xs font-medium text-gray-400 uppercase tracking-wider">
-            最新ビルド
-          </div>
-          <Link
-            to={`/builds/${deployment.current_build_id}/logs`}
-            className="block px-4 py-3 hover:bg-gray-50 transition-colors"
-          >
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-sm text-[#111827]">
-                #{deployment.current_build_id.slice(0, 8)}
-              </span>
-              <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
-            </div>
-            <p className="text-xs text-gray-400 mt-1">クリックしてビルドログを表示</p>
-          </Link>
-        </div>
-      ) : (
+      {buildList.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg border border-dashed border-gray-200">
           <p className="text-sm text-gray-400">ビルド履歴がありません</p>
+        </div>
+      ) : (
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 text-xs font-medium text-gray-400 uppercase tracking-wider">
+            ビルド履歴
+          </div>
+          <div className="divide-y divide-gray-100">
+            {buildList.map(buildItem => (
+              <Link
+                key={buildItem.id}
+                to={`/builds/${buildItem.id}/logs`}
+                className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="font-mono text-sm text-[#111827]">#{buildItem.id.slice(0, 8)}</span>
+                  <span className={`text-xs font-medium ${BUILD_STATUS_COLOR[buildItem.status] ?? 'text-gray-400'}`}>
+                    {BUILD_STATUS_LABEL[buildItem.status] ?? buildItem.status}
+                  </span>
+                  {buildItem.branch && (
+                    <span className="text-xs text-gray-400 truncate">{buildItem.branch}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {buildItem.created_at && (
+                    <span className="text-xs text-gray-400">
+                      {new Date(buildItem.created_at).toLocaleString('ja-JP')}
+                    </span>
+                  )}
+                  <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                </div>
+              </Link>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -366,6 +573,47 @@ function BuildsTab({
 }
 
 // ── Settings タブ ─────────────────────────────────────────────
+
+// GitHub URL からオーナー/リポジトリ名を抽出する
+function extractGitHubRepo(url: string): string | null {
+  try {
+    const parsed = new URL(url.trim())
+    if (parsed.hostname !== 'github.com') return null // github.com 以外は無効
+    const parts = parsed.pathname.split('/').filter(Boolean) // パスを分割する
+    if (parts.length < 2) return null // owner/repo の形式でない場合は無効
+    return `${parts[0]}/${parts[1]}` // owner/repo を返す
+  } catch {
+    return null // URL パース失敗時は null を返す
+  }
+}
+
+type GitHubBranch = { name: string }
+type GitHubCommit = { sha: string; commit: { message: string } }
+type GitHubTree  = { path: string; type: string }
+
+// GitHub API からブランチ一覧を取得する
+async function fetchGitHubBranches(repo: string): Promise<GitHubBranch[]> {
+  const res = await fetch(`https://api.github.com/repos/${repo}/branches?per_page=100`) // GitHub API を呼ぶ
+  if (!res.ok) throw new Error(`branches fetch failed: ${res.status}`)
+  return res.json() as Promise<GitHubBranch[]>
+}
+
+// GitHub API からブランチの最新コミット一覧を取得する
+async function fetchGitHubCommits(repo: string, branch: string): Promise<GitHubCommit[]> {
+  const res = await fetch(`https://api.github.com/repos/${repo}/commits?sha=${branch}&per_page=30`) // GitHub API を呼ぶ
+  if (!res.ok) throw new Error(`commits fetch failed: ${res.status}`)
+  return res.json() as Promise<GitHubCommit[]>
+}
+
+// GitHub API からルートディレクトリ一覧を取得する
+async function fetchGitHubDirs(repo: string, branch: string): Promise<string[]> {
+  const res = await fetch(`https://api.github.com/repos/${repo}/git/trees/${branch}?recursive=0`) // ルートツリーを取得する
+  if (!res.ok) throw new Error(`tree fetch failed: ${res.status}`)
+  const data = await res.json() as { tree: GitHubTree[] }
+  return data.tree
+    .filter(item => item.type === 'tree') // ディレクトリのみ抽出する
+    .map(item => `./${item.path}`) // パス名を ./ スタートで取り出す
+}
 
 function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved: () => Promise<void> }) {
   const [formData, setFormData] = useState({
@@ -379,6 +627,62 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
     instance_size: deployment.pending_instance_size || deployment.instance_size || '',
   }) // フォームデータを管理する
   const [saving, setSaving] = useState(false) // 保存中フラグ
+
+  // GitHub API から取得したデータ
+  const [ghBranches, setGhBranches]   = useState<GitHubBranch[]>([]) // ブランチ一覧
+  const [ghCommits, setGhCommits]     = useState<GitHubCommit[]>([]) // コミット一覧
+  const [ghDirs, setGhDirs]           = useState<string[]>([])       // ディレクトリ一覧
+  const [ghLoading, setGhLoading]     = useState<'branches' | 'commits' | 'dirs' | null>(null) // ローディング中の対象
+  const [ghError, setGhError]         = useState<string | null>(null) // エラーメッセージ
+
+  // リポジトリURLが確定したときにブランチ一覧を取得する
+  const loadBranches = useCallback(async (repoUrl: string) => {
+    const repo = extractGitHubRepo(repoUrl) // owner/repo を抽出する
+    if (!repo) return
+    setGhLoading('branches') // ブランチ取得中を示す
+    setGhError(null)
+    setGhBranches([])
+    setGhCommits([])
+    setGhDirs([])
+    try {
+      const branches = await fetchGitHubBranches(repo) // ブランチ一覧を取得する
+      setGhBranches(branches)
+    } catch {
+      setGhError('ブランチの取得に失敗しました。リポジトリURLを確認してください。') // エラーを表示する
+    } finally {
+      setGhLoading(null)
+    }
+  }, [])
+
+  // 初回マウント時に既存URLからブランチ一覧を取得する
+  useEffect(() => {
+    if (formData.github_repo_url) {
+      void loadBranches(formData.github_repo_url)
+    }
+  }, []) // 意図的に初回のみ実行する
+
+  // ブランチが選択されたときにコミット一覧とディレクトリ一覧を取得する
+  const handleBranchSelect = async (branch: string) => {
+    setFormData(prev => ({ ...prev, github_branch: branch, github_commit_sha: '', github_repo_directory: './' })) // ブランチを設定しコミット・ディレクトリをリセットする
+    const repo = extractGitHubRepo(formData.github_repo_url)
+    if (!repo || !branch) return
+    setGhLoading('commits')
+    setGhError(null)
+    setGhCommits([])
+    setGhDirs([])
+    try {
+      const [commits, dirs] = await Promise.all([
+        fetchGitHubCommits(repo, branch), // コミット一覧を取得する
+        fetchGitHubDirs(repo, branch),    // ディレクトリ一覧を取得する
+      ])
+      setGhCommits(commits)
+      setGhDirs(dirs)
+    } catch {
+      setGhError('コミット一覧の取得に失敗しました。') // エラーを表示する
+    } finally {
+      setGhLoading(null)
+    }
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -438,48 +742,93 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
         {/* dockerfile / railpack タイプのフォーム */}
         {deployment.type !== 'image_url' && (
           <>
+            {/* リポジトリURL入力 */}
             <div>
               <label className={labelClass}>GitHubリポジトリURL</label>
-              <input
-                type="text"
-                value={formData.github_repo_url}
-                onChange={(event) => setFormData((prev) => ({ ...prev, github_repo_url: event.target.value }))}
-                placeholder="https://github.com/org/repo"
-                className={inputClass}
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={formData.github_repo_url}
+                  onChange={(event) => setFormData(prev => ({ ...prev, github_repo_url: event.target.value }))}
+                  placeholder="https://github.com/org/repo"
+                  className={inputClass}
+                />
+                <button
+                  type="button"
+                  onClick={() => void loadBranches(formData.github_repo_url)}
+                  disabled={ghLoading === 'branches'}
+                  className="shrink-0 px-3 py-2 text-xs rounded-md bg-[#111827] text-white hover:bg-gray-800 transition-colors disabled:opacity-50"
+                >
+                  {ghLoading === 'branches' ? '取得中...' : '読み込む'}
+                </button>
+              </div>
+              {ghError && <p className="text-xs text-red-500 mt-1">{ghError}</p>}
             </div>
-            <div className="grid grid-cols-2 gap-4">
+
+            {/* ブランチ選択（ブランチ一覧取得後に表示） */}
+            {ghBranches.length > 0 && (
               <div>
                 <label className={labelClass}>ブランチ</label>
-                <input
-                  type="text"
+                <select
                   value={formData.github_branch}
-                  onChange={(event) => setFormData((prev) => ({ ...prev, github_branch: event.target.value }))}
-                  placeholder="main"
+                  onChange={(event) => void handleBranchSelect(event.target.value)}
                   className={inputClass}
-                />
+                >
+                  <option value="">ブランチを選択してください</option>
+                  {ghBranches.map(branchItem => (
+                    <option key={branchItem.name} value={branchItem.name}>{branchItem.name}</option>
+                  ))}
+                </select>
               </div>
+            )}
+
+            {/* コミット選択（コミット一覧取得後に表示） */}
+            {ghLoading === 'commits' && (
+              <p className="text-xs text-gray-400">コミット・ディレクトリを取得中...</p>
+            )}
+            {ghCommits.length > 0 && (
               <div>
-                <label className={labelClass}>コミットSHA</label>
-                <input
-                  type="text"
+                <label className={labelClass}>コミット</label>
+                <select
                   value={formData.github_commit_sha}
-                  onChange={(event) => setFormData((prev) => ({ ...prev, github_commit_sha: event.target.value }))}
-                  placeholder="HEAD"
+                  onChange={(event) => setFormData(prev => ({ ...prev, github_commit_sha: event.target.value }))}
                   className={inputClass}
-                />
+                >
+                  <option value="">最新のコミット（HEAD）</option>
+                  {ghCommits.map(commitItem => (
+                    <option key={commitItem.sha} value={commitItem.sha}>
+                      {commitItem.sha.slice(0, 7)} — {commitItem.commit.message.split('\n')[0].slice(0, 60)}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </div>
-            <div>
-              <label className={labelClass}>ビルドディレクトリ</label>
-              <input
-                type="text"
-                value={formData.github_repo_directory}
-                onChange={(event) => setFormData((prev) => ({ ...prev, github_repo_directory: event.target.value }))}
-                placeholder="./"
-                className={inputClass}
-              />
-            </div>
+            )}
+
+            {/* ディレクトリ選択（ディレクトリ一覧取得後に表示） */}
+            {ghDirs.length > 0 && (
+              <div>
+                <label className={labelClass}>ビルドディレクトリ</label>
+                <select
+                  value={formData.github_repo_directory}
+                  onChange={(event) => setFormData(prev => ({ ...prev, github_repo_directory: event.target.value }))}
+                  className={inputClass}
+                >
+                  <option value="./">./（ルート）</option>
+                  {ghDirs.map(dirPath => (
+                    <option key={dirPath} value={dirPath}>{dirPath}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* ディレクトリが取得できてもサブディレクトリが存在しない場合 */}
+            {ghCommits.length > 0 && ghDirs.length === 0 && ghLoading === null && (
+              <div>
+                <label className={labelClass}>ビルドディレクトリ</label>
+                <p className="text-xs text-gray-400">サブディレクトリがないため、./（ルート）でビルドします</p>
+              </div>
+            )}
+
             {deployment.type === 'dockerfile' && (
               <div>
                 <label className={labelClass}>Dockerfileのパス</label>
@@ -536,7 +885,7 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
 
 // ── Networking タブ ───────────────────────────────────────────
 
-function NetworkingTab({ deploymentId }: { deploymentId: string }) {
+function NetworkingTab({ deploymentId, onUpdated }: { deploymentId: string; onUpdated: () => Promise<void> }) {
   const [service, setService] = useState<K8sService | null>(null) // サービス情報を管理する
   const [svcForm, setSvcForm] = useState({ port: '', target_port: '' }) // サービス設定フォーム
   const [savingSvc, setSavingSvc] = useState(false) // サービス保存中フラグ
@@ -563,7 +912,7 @@ function NetworkingTab({ deploymentId }: { deploymentId: string }) {
     setDeletingSvc(true)
     try {
       await del(`/deployments/${deploymentId}/service`) // pending_port=0 にして無効化を予約する
-      await fetchNetworking() // 最新状態を再取得する
+      await Promise.all([fetchNetworking(), onUpdated()]) // 最新状態を再取得する
     } catch (deleteError) {
       console.error(deleteError)
       alert('Serviceの無効化に失敗しました')
@@ -590,7 +939,7 @@ function NetworkingTab({ deploymentId }: { deploymentId: string }) {
           target_port: targetPortNum,
         })
       }
-      await fetchNetworking()
+      await Promise.all([fetchNetworking(), onUpdated()]) // 最新状態を再取得する
     } catch (saveError) {
       console.error(saveError)
       alert('サービスの保存に失敗しました')
@@ -684,6 +1033,360 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
     <div className="flex items-center gap-4">
       <span className="text-gray-400 w-28 shrink-0">{label}</span>
       <div className="text-[#111827]">{children}</div>
+    </div>
+  )
+}
+
+// ── EnvVars タブ ─────────────────────────────────────────────
+
+function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: string; projectId: string; onUpdated: () => Promise<void> }) {
+  const [envVarList, setEnvVarList] = useState<EnvVar[]>([]) // プロジェクトの環境変数一覧を管理する
+  const [mountList, setMountList] = useState<EnvVarMount[]>([]) // デプロイメントのマウント設定一覧を管理する
+  const [newMountEnvVarId, setNewMountEnvVarId] = useState('') // マウントする環境変数ID
+  const [newOverrideKey, setNewOverrideKey] = useState('') // オーバーライドキー（任意）
+  const [addingMount, setAddingMount] = useState(false) // マウント作成中フラグ
+  const [deletingMountId, setDeletingMountId] = useState<string | null>(null) // 削除中のマウントID
+
+  const fetchData = useCallback(async () => {
+    const [envVars, mounts] = await Promise.all([
+      get<EnvVar[]>(`/projects/${projectId}/env-vars`).catch(() => []), // 環境変数一覧を取得する
+      get<EnvVarMount[]>(`/deployments/${deploymentId}/env-var-mounts`).catch(() => []), // マウント設定一覧を取得する
+    ])
+    setEnvVarList(envVars ?? []) // 環境変数一覧を設定する
+    setMountList(mounts ?? []) // マウント設定を設定する
+  }, [projectId, deploymentId])
+
+  useEffect(() => {
+    void fetchData() // 初回データ取得
+  }, [fetchData])
+
+  const handleAddMount = async () => {
+    if (!newMountEnvVarId) return
+    setAddingMount(true) // マウント作成中フラグを立てる
+    try {
+      await post(`/deployments/${deploymentId}/env-var-mounts`, {
+        env_var_id: newMountEnvVarId,
+        override_key: newOverrideKey, // 空文字の場合はサーバー側で元のキーを使用する
+      })
+      setNewMountEnvVarId('') // フォームをリセットする
+      setNewOverrideKey('') // オーバーライドキーをリセットする
+      await Promise.all([fetchData(), onUpdated()]) // データと pending 一覧を再取得する
+    } catch (addError) {
+      console.error(addError)
+      alert('マウント設定の作成に失敗しました')
+    } finally {
+      setAddingMount(false) // マウント作成中フラグを下げる
+    }
+  }
+
+  const handleDeleteMount = async (mountId: string) => {
+    setDeletingMountId(mountId) // 削除中のマウントIDを設定する
+    try {
+      await del(`/env-var-mounts/${mountId}`) // マウント設定を削除する
+      await Promise.all([fetchData(), onUpdated()]) // データと pending 一覧を再取得する
+    } catch (deleteError) {
+      console.error(deleteError)
+      alert('マウント設定の削除に失敗しました')
+    } finally {
+      setDeletingMountId(null) // 削除中フラグをリセットする
+    }
+  }
+
+  const inputClass = 'w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00C2D1]/50 focus:border-[#00C2D1] transition-colors'
+  const labelClass = 'block text-xs font-medium text-gray-500 mb-1'
+  const unmountedEnvVars = envVarList.filter(ev => !mountList.some(mount => mount.env_var_id === ev.id)) // まだマウントされていない環境変数
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      {/* ── マウント設定 ─── */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+        <h3 className="text-sm font-semibold text-[#111827]">環境変数マウント</h3>
+        <p className="text-xs text-gray-400">Apply を実行すると Kubernetes の container.env に反映されます。</p>
+
+        {/* マウント一覧 */}
+        {mountList.length === 0 ? (
+          <p className="text-sm text-gray-400">マウント設定がありません</p>
+        ) : (
+          <div className="space-y-1.5">
+            {mountList.map(mount => {
+              const mountedEnvVar = envVarList.find(ev => ev.id === mount.env_var_id) // マウント対象の環境変数を取得する
+              const effectiveKey = mount.override_key || mountedEnvVar?.key || mount.env_var_id.slice(0, 8) // 実効キーを決定する
+              return (
+                <div key={mount.id} className="flex items-center justify-between bg-gray-50 rounded-md px-3 py-2 border border-gray-100">
+                  <div className="min-w-0 flex items-center gap-2">
+                    <span className="font-mono text-sm text-[#111827] truncate">{effectiveKey}</span>
+                    {mount.override_key && mountedEnvVar && (
+                      <span className="text-xs text-gray-400">← {mountedEnvVar.key}</span>
+                    )}
+                    {mountedEnvVar?.is_secret && (
+                      <span className="text-[10px] bg-purple-50 text-purple-500 px-1.5 py-0.5 rounded">secret</span>
+                    )}
+                    <span className={`text-[10px] ${mount.status === 'applied' ? 'text-green-500' : mount.status === 'deleting' ? 'text-red-400' : 'text-amber-500'}`}>
+                      {mount.status}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => void handleDeleteMount(mount.id)}
+                    disabled={deletingMountId === mount.id}
+                    className="p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-400 transition-colors disabled:opacity-50 shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* マウント追加フォーム */}
+        <div className="border-t border-gray-100 pt-3 space-y-3">
+          <h4 className="text-xs font-semibold text-[#111827]">マウントを追加</h4>
+          {envVarList.length === 0 ? (
+            <p className="text-sm text-gray-400">マウントするには、まずプロジェクトページで環境変数を作成してください。</p>
+          ) : unmountedEnvVars.length === 0 ? (
+            <p className="text-sm text-gray-400">すべての環境変数が既にマウントされています。</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelClass}>環境変数</label>
+                  <select
+                    value={newMountEnvVarId}
+                    onChange={ev => setNewMountEnvVarId(ev.target.value)}
+                    className={inputClass}
+                  >
+                    <option value="">選択してください</option>
+                    {unmountedEnvVars.map(ev => (
+                      <option key={ev.id} value={ev.id}>
+                        {ev.key}{ev.is_secret ? ' (secret)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClass}>コンテナ側のキー名（任意）</label>
+                  <input
+                    type="text"
+                    value={newOverrideKey}
+                    onChange={ev => setNewOverrideKey(ev.target.value)}
+                    placeholder="空欄なら元のキーを使用"
+                    className={`${inputClass} font-mono`}
+                  />
+                </div>
+              </div>
+              <button
+                onClick={() => void handleAddMount()}
+                disabled={addingMount || !newMountEnvVarId}
+                className="bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
+              >
+                {addingMount ? '追加中...' : 'マウントを追加'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── プロジェクトの環境変数一覧（参照用） ─── */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-[#111827]">プロジェクトの環境変数</h3>
+          <span className="text-xs text-gray-400">追加・編集はプロジェクトページの左パネルから</span>
+        </div>
+        {envVarList.length === 0 ? (
+          <p className="text-sm text-gray-400">環境変数がありません</p>
+        ) : (
+          <div className="space-y-1.5">
+            {envVarList.map(ev => {
+              const isMounted = mountList.some(mount => mount.env_var_id === ev.id) // マウント済みかどうかを確認する
+              return (
+                <div key={ev.id} className="flex items-center gap-2 bg-gray-50 rounded-md px-3 py-2 border border-gray-100">
+                  <span className="font-mono text-sm font-medium text-[#111827] truncate">{ev.key}</span>
+                  {ev.is_secret && (
+                    <span className="text-[10px] bg-purple-50 text-purple-500 px-1.5 py-0.5 rounded shrink-0">secret</span>
+                  )}
+                  {isMounted && (
+                    <span className="text-[10px] bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded shrink-0">マウント済み</span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Volumes タブ ──────────────────────────────────────────────
+
+function VolumesTab({ deploymentId, projectId, onUpdated }: { deploymentId: string; projectId: string; onUpdated: () => Promise<void> }) {
+  const [volumeList, setVolumeList] = useState<Volume[]>([]) // プロジェクトのボリューム一覧を管理する
+  const [mountList, setMountList] = useState<VolumeMount[]>([]) // デプロイメントのマウント設定一覧を管理する
+  const [newMountVolumeId, setNewMountVolumeId] = useState('') // マウントするボリュームID
+  const [newMountPath, setNewMountPath] = useState('') // マウントパス
+  const [addingMount, setAddingMount] = useState(false) // マウント作成中フラグ
+  const [deletingMountId, setDeletingMountId] = useState<string | null>(null) // 削除中のマウントID
+
+  const fetchData = useCallback(async () => {
+    const [volumes, mounts] = await Promise.all([
+      get<Volume[]>(`/projects/${projectId}/volumes`).catch(() => []), // プロジェクトのボリューム一覧を取得する
+      get<VolumeMount[]>(`/deployments/${deploymentId}/volume-mounts`).catch(() => []), // マウント設定一覧を取得する
+    ])
+    setVolumeList(volumes ?? []) // ボリューム一覧を設定する
+    setMountList(mounts ?? []) // マウント設定を設定する
+  }, [projectId, deploymentId])
+
+  useEffect(() => {
+    void fetchData() // 初回データ取得
+  }, [fetchData])
+
+  const handleAddMount = async () => {
+    if (!newMountVolumeId || !newMountPath) return
+    setAddingMount(true) // マウント作成中フラグを立てる
+    try {
+      await post(`/deployments/${deploymentId}/volume-mounts`, {
+        volume_id: newMountVolumeId,
+        mount_path: newMountPath,
+      })
+      setNewMountVolumeId('') // フォームをリセットする
+      setNewMountPath('') // パスをリセットする
+      await Promise.all([fetchData(), onUpdated()]) // データと pending 一覧を再取得する
+    } catch (addError) {
+      console.error(addError)
+      alert('マウント設定の作成に失敗しました')
+    } finally {
+      setAddingMount(false) // マウント作成中フラグを下げる
+    }
+  }
+
+  const handleDeleteMount = async (mountId: string) => {
+    setDeletingMountId(mountId) // 削除中のマウントIDを設定する
+    try {
+      await del(`/volume-mounts/${mountId}`) // マウント設定を削除する
+      await Promise.all([fetchData(), onUpdated()]) // データと pending 一覧を再取得する
+    } catch (deleteError) {
+      console.error(deleteError)
+      alert('マウント設定の削除に失敗しました')
+    } finally {
+      setDeletingMountId(null) // 削除中フラグをリセットする
+    }
+  }
+
+  const inputClass = 'w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00C2D1]/50 focus:border-[#00C2D1] transition-colors'
+  const labelClass = 'block text-xs font-medium text-gray-500 mb-1'
+  const unmountedVolumes = volumeList.filter(vol => !mountList.some(mount => mount.volume_id === vol.id)) // まだマウントされていないボリューム
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      {/* ── ボリュームマウント設定 ─── */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+        <h3 className="text-sm font-semibold text-[#111827]">ボリュームマウント</h3>
+        <p className="text-xs text-gray-400">Apply を実行すると Kubernetes の volumeMounts に反映されます。</p>
+
+        {/* マウント一覧 */}
+        {mountList.length === 0 ? (
+          <p className="text-sm text-gray-400">マウント設定がありません</p>
+        ) : (
+          <div className="space-y-1.5">
+            {mountList.map(mount => {
+              const mountedVolume = volumeList.find(vol => vol.id === mount.volume_id) // マウント先ボリュームを取得する
+              return (
+                <div key={mount.id} className="flex items-center justify-between bg-gray-50 rounded-md px-3 py-2 border border-gray-100">
+                  <div className="min-w-0 flex items-center gap-2">
+                    <span className="font-mono text-sm text-[#111827] truncate">{mount.mount_path}</span>
+                    <span className="text-xs text-gray-400">←</span>
+                    <span className="text-xs text-gray-500 truncate">{mountedVolume?.name ?? mount.volume_id.slice(0, 8)}</span>
+                    <span className={`text-[10px] ${mount.status === 'mounted' ? 'text-green-500' : mount.status === 'deleting' ? 'text-red-400' : 'text-amber-500'}`}>
+                      {mount.status}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => void handleDeleteMount(mount.id)}
+                    disabled={deletingMountId === mount.id}
+                    className="p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-400 transition-colors disabled:opacity-50 shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* マウント追加フォーム */}
+        <div className="border-t border-gray-100 pt-3 space-y-3">
+          <h4 className="text-xs font-semibold text-[#111827]">マウントを追加</h4>
+          {volumeList.length === 0 ? (
+            <p className="text-sm text-gray-400">マウントするには、まず下のセクションでボリュームを作成してください。</p>
+          ) : unmountedVolumes.length === 0 ? (
+            <p className="text-sm text-gray-400">すべてのボリュームが既にマウントされています。</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelClass}>ボリューム</label>
+                  <select
+                    value={newMountVolumeId}
+                    onChange={ev => setNewMountVolumeId(ev.target.value)}
+                    className={inputClass}
+                  >
+                    <option value="">選択してください</option>
+                    {unmountedVolumes.map(vol => (
+                      <option key={vol.id} value={vol.id}>{vol.name} ({vol.size_mb} MB)</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClass}>マウントパス</label>
+                  <input
+                    type="text"
+                    value={newMountPath}
+                    onChange={ev => setNewMountPath(ev.target.value)}
+                    placeholder="/data"
+                    className={`${inputClass} font-mono`}
+                  />
+                </div>
+              </div>
+              <button
+                onClick={() => void handleAddMount()}
+                disabled={addingMount || !newMountVolumeId || !newMountPath}
+                className="bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
+              >
+                {addingMount ? '追加中...' : 'マウントを追加'}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── プロジェクトのボリューム一覧（参照用） ─── */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-[#111827]">プロジェクトのボリューム</h3>
+          <span className="text-xs text-gray-400">追加はプロジェクトページの「追加」メニューから</span>
+        </div>
+        {volumeList.length === 0 ? (
+          <p className="text-sm text-gray-400">ボリュームがありません</p>
+        ) : (
+          <div className="space-y-1.5">
+            {volumeList.map(vol => {
+              const isMounted = mountList.some(mount => mount.volume_id === vol.id) // マウント済みかどうかを確認する
+              return (
+                <div key={vol.id} className="flex items-center gap-2 bg-gray-50 rounded-md px-3 py-2 border border-gray-100">
+                  <span className="text-sm font-medium text-[#111827] truncate">{vol.name}</span>
+                  <span className="text-xs text-gray-400">{vol.size_mb} MB</span>
+                  <span className={`text-[10px] ${vol.status === 'bound' ? 'text-green-500' : vol.status === 'deleting' ? 'text-red-400' : 'text-amber-500'}`}>
+                    {vol.status}
+                  </span>
+                  {isMounted && (
+                    <span className="text-[10px] bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded">マウント済み</span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

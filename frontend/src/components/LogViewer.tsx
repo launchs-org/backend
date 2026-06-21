@@ -102,15 +102,16 @@ export function LogViewer({
     return () => clearInterval(intervalId) // クリーンアップ
   }, [isLive, fetchLogs, pollInterval, autoStopLive])
 
-  // 自動スクロール
+  // 自動スクロール（Live 中は常に最下部へ、Paused 中は最下部付近のときのみ）
   useEffect(() => {
-    if (autoScroll && containerRef.current) {
+    if ((isLive || autoScroll) && containerRef.current) {
       containerRef.current.scrollTop = containerRef.current.scrollHeight // 最下部へスクロールする
     }
-  }, [logLines, autoScroll])
+  }, [logLines, isLive, autoScroll])
 
-  // スクロールイベントで自動スクロール制御
+  // スクロールイベントで自動スクロール制御（Paused 中のみ有効）
   const handleScroll = useCallback(() => {
+    if (isLiveRef.current) return // Live 中は手動スクロールで autoScroll を変えない
     const container = containerRef.current
     if (!container) return
     const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50

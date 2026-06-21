@@ -47,6 +47,7 @@ export type Deployment = {
   status: DeploymentStatus
   app_status: AppStatus
   k8s_status: Record<string, unknown> | null
+  delete_progress: string
   applied_at: string | null
   created_at: string
   updated_at: string
@@ -126,7 +127,7 @@ export type PathRule = {
 export type ApplyHistory = {
   id: string
   deployment_id: string
-  manifests: unknown
+  manifests: Record<string, unknown> | null
   status: 'applied' | 'failed'
   error_message: string
   applied_at: string
@@ -141,6 +142,7 @@ export type PodLogsResponse = {
 
 export type BuildLogsResponse = {
   logs: string
+  last_timestamp: string | null
 }
 
 // ── Quota ─────────────────────────────────────────────────────
@@ -163,6 +165,23 @@ export type EnvVar = {
   project_id: string
   key: string
   value: string
+  is_secret: boolean
+  status: 'active' | 'deleting'
+  created_at: string
+  updated_at: string
+}
+
+// ── EnvVarMount ───────────────────────────────────────────────
+
+export type EnvVarMountStatus = 'pending' | 'applied' | 'deleting'
+
+export type EnvVarMount = {
+  id: string
+  env_var_id: string
+  deployment_id: string
+  override_key: string
+  pending_override_key: string
+  status: EnvVarMountStatus
   created_at: string
   updated_at: string
 }
@@ -173,8 +192,23 @@ export type Volume = {
   id: string
   project_id: string
   name: string
-  size_gb: number
+  size_mb: number
   status: 'pending' | 'bound' | 'deleting'
+  created_at: string
+  updated_at: string
+}
+
+// ── VolumeMount ───────────────────────────────────────────────
+
+export type VolumeMountStatus = 'pending' | 'mounted' | 'deleting'
+
+export type VolumeMount = {
+  id: string
+  volume_id: string
+  deployment_id: string
+  mount_path: string
+  pending_mount_path: string
+  status: VolumeMountStatus
   created_at: string
   updated_at: string
 }

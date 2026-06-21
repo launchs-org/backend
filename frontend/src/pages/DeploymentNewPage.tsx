@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Container, GitBranch, Package } from 'lucide-react'
 import { Layout } from '@/components/Layout'
@@ -28,6 +28,42 @@ const DEPLOYMENT_TYPES: { type: DeploymentType; label: string; description: stri
   },
 ]
 
+// GitHub URL から owner/repo を抽出する
+function extractGitHubRepo(url: string): string | null {
+  try {
+    const parsed = new URL(url.trim())
+    if (parsed.hostname !== 'github.com') return null // github.com 以外は無効
+    const parts = parsed.pathname.split('/').filter(Boolean) // パスを分割する
+    if (parts.length < 2) return null // owner/repo の形式でない場合は無効
+    return `${parts[0]}/${parts[1]}` // owner/repo を返す
+  } catch {
+    return null // URL パース失敗時は null を返す
+  }
+}
+
+type GitHubBranch = { name: string }
+type GitHubCommit = { sha: string; commit: { message: string } }
+type GitHubTree   = { path: string; type: string }
+
+async function fetchGitHubBranches(repo: string): Promise<GitHubBranch[]> {
+  const res = await fetch(`https://api.github.com/repos/${repo}/branches?per_page=100`) // ブランチ一覧を取得する
+  if (!res.ok) throw new Error(`branches fetch failed: ${res.status}`)
+  return res.json() as Promise<GitHubBranch[]>
+}
+
+async function fetchGitHubCommits(repo: string, branch: string): Promise<GitHubCommit[]> {
+  const res = await fetch(`https://api.github.com/repos/${repo}/commits?sha=${branch}&per_page=30`) // コミット一覧を取得する
+  if (!res.ok) throw new Error(`commits fetch failed: ${res.status}`)
+  return res.json() as Promise<GitHubCommit[]>
+}
+
+async function fetchGitHubDirs(repo: string, branch: string): Promise<string[]> {
+  const res = await fetch(`https://api.github.com/repos/${repo}/git/trees/${branch}?recursive=0`) // ルートツリーを取得する
+  if (!res.ok) throw new Error(`tree fetch failed: ${res.status}`)
+  const data = await res.json() as { tree: GitHubTree[] }
+  return data.tree.filter(item => item.type === 'tree').map(item => `./${item.path}`) // ディレクトリのみ ./ スタートで返す
+}
+
 export function DeploymentNewPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
@@ -38,8 +74,8 @@ export function DeploymentNewPage() {
     name: '',
     image_url: '',
     github_repo_url: '',
-    github_branch: 'main',
-    github_commit_sha: 'HEAD',
+    github_branch: '',
+    github_commit_sha: '',
     github_repo_directory: './',
     dockerfile_path: './Dockerfile',
     replicas: '1',
@@ -47,6 +83,60 @@ export function DeploymentNewPage() {
   }) // フォームデータを管理する
   const [creating, setCreating] = useState(false) // 作成中フラグ
   const [error, setError] = useState<string | null>(null) // エラーメッセージを管理する
+
+  // GitHub API から取得したデータ
+  const [ghBranches, setGhBranches] = useState<GitHubBranch[]>([]) // ブランチ一覧
+  const [ghCommits, setGhCommits]   = useState<GitHubCommit[]>([]) // コミット一覧
+  const [ghDirs, setGhDirs]         = useState<string[]>([])       // ディレクトリ一覧
+  const [ghLoading, setGhLoading]   = useState<'branches' | 'commits' | null>(null) // ローディング中の対象
+  const [ghError, setGhError]       = useState<string | null>(null) // GitHub API エラー
+
+  // リポジトリURLからブランチ一覧を取得する
+  const loadBranches = useCallback(async (repoUrl: string) => {
+    const repo = extractGitHubRepo(repoUrl) // owner/repo を抽出する
+    if (!repo) {
+      setGhError('有効な GitHub リポジトリ URL を入力してください') // 無効な URL の場合はエラーを表示する
+      return
+    }
+    setGhLoading('branches')
+    setGhError(null)
+    setGhBranches([])
+    setGhCommits([])
+    setGhDirs([])
+    setFormData(prev => ({ ...prev, github_branch: '', github_commit_sha: '', github_repo_directory: './' })) // 選択をリセットする
+    try {
+      const branches = await fetchGitHubBranches(repo) // ブランチ一覧を取得する
+      setGhBranches(branches)
+      if (branches.length === 0) setGhError('ブランチが見つかりませんでした') // ブランチが空の場合はエラーを表示する
+    } catch {
+      setGhError('ブランチの取得に失敗しました。リポジトリURLを確認してください。') // エラーを表示する
+    } finally {
+      setGhLoading(null)
+    }
+  }, [])
+
+  // ブランチ選択時にコミット・ディレクトリを取得する
+  const handleBranchSelect = async (branch: string) => {
+    setFormData(prev => ({ ...prev, github_branch: branch, github_commit_sha: '', github_repo_directory: './' })) // ブランチをセットしコミット・ディレクトリをリセットする
+    const repo = extractGitHubRepo(formData.github_repo_url)
+    if (!repo || !branch) return
+    setGhLoading('commits')
+    setGhError(null)
+    setGhCommits([])
+    setGhDirs([])
+    try {
+      const [commits, dirs] = await Promise.all([
+        fetchGitHubCommits(repo, branch), // コミット一覧を取得する
+        fetchGitHubDirs(repo, branch),    // ディレクトリ一覧を取得する
+      ])
+      setGhCommits(commits)
+      setGhDirs(dirs)
+    } catch {
+      setGhError('コミット一覧の取得に失敗しました。') // エラーを表示する
+    } finally {
+      setGhLoading(null)
+    }
+  }
 
   const handleTypeSelect = (type: DeploymentType) => {
     setSelectedType(type) // タイプを選択する
@@ -75,7 +165,7 @@ export function DeploymentNewPage() {
         body.image_url = formData.image_url // image_url タイプのフォームデータを設定する
       } else {
         body.github_repo_url = formData.github_repo_url // GitHub URL を設定する
-        body.github_branch = formData.github_branch // ブランチを設定する
+        body.github_branch = formData.github_branch || 'main' // ブランチを設定する（未選択は main）
         body.github_commit_sha = formData.github_commit_sha // コミット SHA を設定する
         body.github_repo_directory = formData.github_repo_directory // ディレクトリを設定する
         if (selectedType === 'dockerfile') {
@@ -187,45 +277,91 @@ export function DeploymentNewPage() {
               {/* dockerfile / railpack タイプ */}
               {selectedType !== 'image_url' && (
                 <>
+                  {/* リポジトリURL入力 */}
                   <div>
                     <label className={labelClass}>GitHubリポジトリURL *</label>
-                    <input
-                      type="text"
-                      value={formData.github_repo_url}
-                      onChange={(event) => setFormData((prev) => ({ ...prev, github_repo_url: event.target.value }))}
-                      placeholder="https://github.com/org/repo"
-                      className={inputClass}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className={labelClass}>ブランチ</label>
+                    <div className="flex gap-2">
                       <input
                         type="text"
+                        value={formData.github_repo_url}
+                        onChange={(event) => setFormData((prev) => ({ ...prev, github_repo_url: event.target.value }))}
+                        onKeyDown={(event) => { if (event.key === 'Enter') void loadBranches(formData.github_repo_url) }} // Enter でも読み込む
+                        placeholder="https://github.com/org/repo"
+                        className={inputClass}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void loadBranches(formData.github_repo_url)}
+                        disabled={ghLoading === 'branches' || !formData.github_repo_url}
+                        className="shrink-0 px-3 py-2 text-xs rounded-md bg-[#111827] text-white hover:bg-gray-800 transition-colors disabled:opacity-50"
+                      >
+                        {ghLoading === 'branches' ? '取得中...' : '読み込む'}
+                      </button>
+                    </div>
+                    {ghError && <p className="text-xs text-red-500 mt-1">{ghError}</p>}
+                  </div>
+
+                  {/* ブランチ選択 */}
+                  {ghBranches.length > 0 && (
+                    <div>
+                      <label className={labelClass}>ブランチ *</label>
+                      <select
                         value={formData.github_branch}
-                        onChange={(event) => setFormData((prev) => ({ ...prev, github_branch: event.target.value }))}
-                        className={`${inputClass} font-mono`}
-                      />
+                        onChange={(event) => void handleBranchSelect(event.target.value)}
+                        className={inputClass}
+                      >
+                        <option value="">ブランチを選択してください</option>
+                        {ghBranches.map(branchItem => (
+                          <option key={branchItem.name} value={branchItem.name}>{branchItem.name}</option>
+                        ))}
+                      </select>
                     </div>
+                  )}
+
+                  {/* コミット選択 */}
+                  {ghLoading === 'commits' && (
+                    <p className="text-xs text-gray-400">コミット・ディレクトリを取得中...</p>
+                  )}
+                  {ghCommits.length > 0 && (
                     <div>
-                      <label className={labelClass}>コミットSHA</label>
-                      <input
-                        type="text"
+                      <label className={labelClass}>コミット</label>
+                      <select
                         value={formData.github_commit_sha}
-                        onChange={(event) => setFormData((prev) => ({ ...prev, github_commit_sha: event.target.value }))}
+                        onChange={(event) => setFormData(prev => ({ ...prev, github_commit_sha: event.target.value }))}
                         className={`${inputClass} font-mono`}
-                      />
+                      >
+                        <option value="">最新のコミット（HEAD）</option>
+                        {ghCommits.map(commitItem => (
+                          <option key={commitItem.sha} value={commitItem.sha}>
+                            {commitItem.sha.slice(0, 7)} — {commitItem.commit.message.split('\n')[0].slice(0, 55)}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                  </div>
-                  <div>
-                    <label className={labelClass}>ビルドディレクトリ</label>
-                    <input
-                      type="text"
-                      value={formData.github_repo_directory}
-                      onChange={(event) => setFormData((prev) => ({ ...prev, github_repo_directory: event.target.value }))}
-                      className={`${inputClass} font-mono`}
-                    />
-                  </div>
+                  )}
+
+                  {/* ディレクトリ選択 */}
+                  {ghCommits.length > 0 && ghLoading === null && (
+                    <div>
+                      <label className={labelClass}>ビルドディレクトリ</label>
+                      {ghDirs.length > 0 ? (
+                        <select
+                          value={formData.github_repo_directory}
+                          onChange={(event) => setFormData(prev => ({ ...prev, github_repo_directory: event.target.value }))}
+                          className={`${inputClass} font-mono`}
+                        >
+                          <option value="./">./（ルート）</option>
+                          {ghDirs.map(dirPath => (
+                            <option key={dirPath} value={dirPath}>{dirPath}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <p className="text-xs text-gray-400 py-2">サブディレクトリなし — ./（ルート）でビルドします</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Dockerfile パス */}
                   {selectedType === 'dockerfile' && (
                     <div>
                       <label className={labelClass}>Dockerfileのパス</label>
@@ -233,6 +369,7 @@ export function DeploymentNewPage() {
                         type="text"
                         value={formData.dockerfile_path}
                         onChange={(event) => setFormData((prev) => ({ ...prev, dockerfile_path: event.target.value }))}
+                        placeholder="./Dockerfile"
                         className={`${inputClass} font-mono`}
                       />
                     </div>
@@ -285,7 +422,7 @@ export function DeploymentNewPage() {
               </button>
               <button
                 onClick={() => void handleCreate()}
-                disabled={creating}
+                disabled={creating || (selectedType !== 'image_url' && !formData.github_branch)}
                 className="bg-[#111827] text-white text-sm px-6 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
               >
                 {creating ? '作成中...' : 'デプロイメントを作成 →'}
