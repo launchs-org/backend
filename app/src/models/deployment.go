@@ -18,7 +18,8 @@ const (
 type DeploymentStatus string
 
 const (
-	DeploymentStatusPending  DeploymentStatus = "pending" // 初回作成・未 apply
+	DeploymentStatusNotInit  DeploymentStatus = "not_init"  // 初回ビルド未完了（Githubビルド専用）
+	DeploymentStatusPending  DeploymentStatus = "pending"   // 初回作成・未 apply
 	DeploymentStatusRunning  DeploymentStatus = "running"
 	DeploymentStatusFailed   DeploymentStatus = "failed"
 	DeploymentStatusDeleting DeploymentStatus = "deleting"

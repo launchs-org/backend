@@ -128,12 +128,18 @@ func (svc *deploymentServiceImpl) CreateDeployment(ctx context.Context, req Crea
 		req.GithubRepoDirectory = "./" // ビルドディレクトリのデフォルトを設定する
 	}
 
+	// ImageURL が指定されている場合は即 pending、Githubビルド系は not_init にする
+	initialStatus := models.DeploymentStatusPending // イメージURL直接指定の場合は pending から開始する
+	if req.ImageURL == "" {                          // ImageURL が未指定の場合はビルドが必要なため not_init にする
+		initialStatus = models.DeploymentStatusNotInit
+	}
+
 	// Deployment レコードを作成する
 	deploymentData := &models.Deployment{
 		ProjectID:                  req.ProjectID,                               // プロジェクト ID を設定する
 		Name:                       req.Name,                                    // デプロイメント名を設定する
 		Type:                       models.DeploymentType(req.Type),             // デプロイメントタイプを設定する
-		Status:                     models.DeploymentStatusPending,              // 初期ステータスを設定する
+		Status:                     initialStatus,                               // 初期ステータスを設定する
 		AppStatus:                  models.AppStatusPending,                     // 初期アプリステータスを設定する
 		PendingImageURL:            req.ImageURL,                                // pending に設定する
 		PendingGithubRepoURL:       req.GithubRepoURL,                          // pending に設定する
@@ -172,6 +178,10 @@ func (svc *deploymentServiceImpl) UpdateDeployment(ctx context.Context, userID s
 	}
 	if err := svc.checkOwnership(ctx, userID, deploymentData.ProjectID); err != nil { // 所有権を確認する
 		return nil, err
+	}
+
+	if deploymentData.Status == models.DeploymentStatusNotInit { // not_init 状態では設定変更を禁止する
+		return nil, errors.New("not_init 状態のデプロイメントは設定変更できません。先にビルドを実行してください")
 	}
 
 	if req.Replicas != nil { // replicas が指定されている場合のみQuotaチェックを行う
@@ -226,6 +236,10 @@ func (svc *deploymentServiceImpl) DiscardPending(ctx context.Context, userID str
 	}
 	if err := svc.checkOwnership(ctx, userID, deploymentData.ProjectID); err != nil { // 所有権を確認する
 		return nil, err
+	}
+
+	if deploymentData.Status == models.DeploymentStatusNotInit { // not_init 状態では discard を禁止する
+		return nil, errors.New("not_init 状態のデプロイメントは discard できません")
 	}
 
 	// pending フィールドを現在の適用済み値で上書きしてクリアする

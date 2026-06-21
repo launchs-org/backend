@@ -23,6 +23,9 @@ var ErrDuplicateEnvKey = errors.New("duplicate env key: same key exists in env_v
 // ErrAlreadyApplying は apply 中の deployment に再 apply しようとした場合のエラー
 var ErrAlreadyApplying = errors.New("already applying")
 
+// ErrNotInitialized は not_init 状態の deployment に apply しようとした場合のエラー
+var ErrNotInitialized = errors.New("deployment is not initialized: build must succeed first")
+
 // ApplyServiceInterface は apply サービスのインターフェース
 type ApplyServiceInterface interface {
 	Apply(ctx context.Context, userID string, deploymentID string) (*ApplyResult, error)                          // apply を実行する
@@ -118,6 +121,11 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 		// 削除中の deployment への apply を防ぐ
 		if deploymentData.Status == models.DeploymentStatusDeleting { // 削除中の場合は競合エラーを返す
 			return ErrAlreadyApplying
+		}
+
+		// not_init の deployment への apply を防ぐ（初回ビルドが未完了のため apply 不可）
+		if deploymentData.Status == models.DeploymentStatusNotInit { // not_init 状態では apply を禁止する
+			return ErrNotInitialized
 		}
 
 		// 2. Project を取得する（namespace 解決のため）

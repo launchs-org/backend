@@ -156,6 +156,10 @@ func (mock *mockDeploymentRepo) Delete(ctx context.Context, deploymentID string)
 	return nil
 }
 
+func (mock *mockDeploymentRepo) UpdateDeploymentStatus(ctx context.Context, deploymentID string, status models.DeploymentStatus) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 // mockEnvVarMountRepoForDeployment は EnvVarMountRepository のテスト用モック
 type mockEnvVarMountRepoForDeployment struct {
 	findAllFunc func(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error)

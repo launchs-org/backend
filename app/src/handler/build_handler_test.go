@@ -18,6 +18,7 @@ type mockBuildService struct {
 	triggerBuildFunc func(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error)
 	cancelBuildFunc  func(ctx context.Context, userID string, buildID string) error
 	getBuildLogsFunc func(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error)
+	getBuildFunc     func(ctx context.Context, userID string, buildID string) (*models.DeploymentBuild, error)
 	listBuildsFunc   func(ctx context.Context, userID string, deploymentID string) ([]models.DeploymentBuild, error)
 }
 
@@ -31,6 +32,13 @@ func (mock *mockBuildService) CancelBuild(ctx context.Context, userID string, bu
 
 func (mock *mockBuildService) GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error) {
 	return mock.getBuildLogsFunc(ctx, userID, buildID, since) // モック関数を呼び出す
+}
+
+func (mock *mockBuildService) GetBuild(ctx context.Context, userID string, buildID string) (*models.DeploymentBuild, error) {
+	if mock.getBuildFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.getBuildFunc(ctx, userID, buildID)
+	}
+	return &models.DeploymentBuild{ID: buildID}, nil // デフォルトはビルドレコードを返す
 }
 
 func (mock *mockBuildService) ListBuilds(ctx context.Context, userID string, deploymentID string) ([]models.DeploymentBuild, error) {
