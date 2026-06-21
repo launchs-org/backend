@@ -27,8 +27,9 @@ type IngressRouteService interface {
 
 // CreatePathRuleRequest は POST /ingress-routes/:id/path-rules のリクエスト構造体
 type CreatePathRuleRequest struct {
-	PathPrefix string `json:"path_prefix"` // ルーティング対象パス
-	ServiceID  string `json:"service_id"`  // 対象 Service の ID
+	PathPrefix  string `json:"path_prefix"`  // ルーティング対象パス
+	ServiceID   string `json:"service_id"`   // 対象 Service の ID
+	StripPrefix bool   `json:"strip_prefix"` // パスプレフィックスを strip するか
 }
 
 // ingressRouteServiceImpl は IngressRouteService の実装
@@ -129,6 +130,7 @@ func (svc *ingressRouteServiceImpl) CreatePathRule(ctx context.Context, userID s
 		IngressRouteID: ingressRouteID,               // ingress_route ID を設定する
 		PathPrefix:     req.PathPrefix,               // パスプレフィックスを設定する
 		ServiceID:      req.ServiceID,                // 対象 Service ID を設定する
+		StripPrefix:    req.StripPrefix,              // strip_prefix フラグを設定する
 		Status:         models.PathRuleStatusPending, // 初期ステータスを pending にする
 	}
 	if err := svc.pathRuleRepo.Create(ctx, nil, pathRuleData); err != nil { // リポジトリ経由で作成する
