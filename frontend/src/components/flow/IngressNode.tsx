@@ -18,10 +18,10 @@ export function IngressNode({ data }: NodeProps) {
     <div
       onClick={onSelect} // クリックでサイドバーを開く
       className="bg-white rounded-xl shadow-md w-56 cursor-pointer hover:shadow-lg transition-all overflow-hidden border border-gray-100"
-      style={{ borderTopColor: '#7C3AED', borderTopWidth: 3 }}
+      style={{ borderTopColor: '#7C3AED', borderTopWidth: 3, height: 104 }}
     >
-      <Handle type="target" position={Position.Left} style={{ opacity: 0 }} /> {/* Internet からの接続を受け取る */}
-      <Handle type="source" position={Position.Right} style={{ opacity: 0 }} /> {/* Service へ接続する */}
+      <Handle type="target" position={Position.Left} style={{ opacity: 0, top: '50%' }} /> {/* Internet からの接続を受け取る */}
+      <Handle type="source" position={Position.Right} style={{ opacity: 0, top: '50%' }} /> {/* Service へ接続する */}
 
       {/* カラーヘッダー */}
       <div className="px-3 pt-3 pb-2 flex items-center gap-2">

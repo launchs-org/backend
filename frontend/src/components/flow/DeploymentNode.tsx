@@ -53,10 +53,12 @@ export function DeploymentNode({ data }: NodeProps) {
   const stackCount = Math.min(deployment.replicas, 3) - 1 // 背後カードの枚数（最大2枚）
   const OFFSET = 5 // カードごとのずれ量（px）
 
+  const nodeHeight = k8sStatus ? 148 : 132 // k8s行あり:148px、なし:132px（高さを固定してエッジを水平に揃える）
+
   return (
-    <div style={{ width: 220 + stackCount * OFFSET, height: 'fit-content', position: 'relative' }}>
-      <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
-      <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
+    <div style={{ width: 220 + stackCount * OFFSET, height: nodeHeight, position: 'relative' }}>
+      <Handle type="target" position={Position.Left} style={{ opacity: 0, top: '50%' }} />
+      <Handle type="source" position={Position.Right} style={{ opacity: 0, top: '50%' }} />
 
       {/* 背景スタックカード（後ろから順に描画する）*/}
       {Array.from({ length: stackCount }).map((_, stackIndex) => {

@@ -16,10 +16,10 @@ export function ServiceNode({ data }: NodeProps) {
   return (
     <div
       className="bg-white rounded-xl shadow-md w-44 overflow-hidden border border-gray-100"
-      style={{ borderTopColor: '#3B82F6', borderTopWidth: 3 }}
+      style={{ borderTopColor: '#3B82F6', borderTopWidth: 3, height: 98 }}
     >
-      <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
-      <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
+      <Handle type="target" position={Position.Left} style={{ opacity: 0, top: '50%' }} />
+      <Handle type="source" position={Position.Right} style={{ opacity: 0, top: '50%' }} />
 
       {/* ヘッダー */}
       <div className="px-3 pt-3 pb-2 flex items-center gap-2">

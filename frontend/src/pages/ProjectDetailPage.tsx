@@ -11,7 +11,7 @@ import {
   type Edge,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Plus, Trash2, X, Globe, Copy, Check, ExternalLink, Play, HardDrive, KeyRound } from 'lucide-react'
+import { Plus, Trash2, X, Globe, Copy, Check, ExternalLink, Play, HardDrive, KeyRound, Layers, ChevronRight } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DeploymentNode } from '@/components/flow/DeploymentNode'
@@ -72,6 +72,8 @@ export function ProjectDetailPage() {
   const [volumeList, setVolumeList] = useState<Volume[]>([]) // プロジェクトのボリューム一覧を管理する
   const [deletingVolumeId, setDeletingVolumeId] = useState<string | null>(null) // 削除中のボリュームID
   const [showEnvVarSidebar, setShowEnvVarSidebar] = useState(false) // 環境変数サイドバーの表示フラグ
+  const [showDeploymentListSidebar, setShowDeploymentListSidebar] = useState(false) // デプロイメント一覧サイドバーの表示フラグ
+  const [showIngressListSidebar, setShowIngressListSidebar] = useState(false) // IngressRoute一覧サイドバーの表示フラグ
   const [envVarList, setEnvVarList] = useState<EnvVar[]>([]) // プロジェクトの環境変数一覧を管理する
   const [deletingEnvVarId, setDeletingEnvVarId] = useState<string | null>(null) // 削除中の環境変数ID
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_INITIAL_WIDTH) // サイドバー幅（px）
@@ -105,21 +107,22 @@ export function ProjectDetailPage() {
     const DEPLOY_COL = COL_WIDTH * 3 // Deployment ノードのX座標
     const VOLUME_COL = COL_WIDTH * 4 // Volume ノードのX座標
 
-    // ノード高さ定数（ハンドルはノード縦中央に出るため、中央Y = y + height/2 が一致するよう offsetY を計算する）
-    const DEP_H = 160   // Deployment ノードの概算高さ
-    const SVC_H = 110   // Service ノードの概算高さ
-    const ING_H = 115   // IngressRoute ノードの概算高さ
-    const NET_H = 80    // Internet ノード（円）の概算高さ
+    // 各ノードの固定高さ（ノードコンポーネントの style.height と必ず一致させること）
+    const SVC_H = 98   // Service ノード高さ
+    const ING_H = 104  // IngressRoute ノード高さ
+    const NET_H = 80   // Internet ノード高さ（h-20 固定）
 
     relations.forEach((relation, relationIndex) => {
-      const rowBaseY = relationIndex * ROW_HEIGHT // 行のベースY座標
-      const depY = rowBaseY // Deployment を基準（y=rowBaseY）にする
+      const rowCenterY = relationIndex * ROW_HEIGHT + ROW_HEIGHT / 2 // 行の縦中央Y座標
 
-      // デプロイメントノードを右端に追加する
+      // Deployment の高さは k8s_status の有無で変わる（ノードコンポーネントと同じ条件分岐）
+      const depH = relation.deployment.k8s_status ? 148 : 132
+
+      // デプロイメントノード: 縦中央を rowCenterY に合わせる
       newNodes.push({
         id: `dep-${relation.deployment.id}`,
         type: 'deployment',
-        position: { x: DEPLOY_COL, y: depY },
+        position: { x: DEPLOY_COL, y: rowCenterY - depH / 2 },
         data: {
           deployment: relation.deployment,
           projectId: pid,
@@ -135,12 +138,11 @@ export function ProjectDetailPage() {
       const serviceConfigured = relation.service && (relation.service.port !== 0 || relation.service.pending_port !== 0)
 
       if (serviceConfigured && relation.service) {
-        // サービスノードのY: Deployment の縦中央に Service の縦中央を合わせる
-        const svcY = depY + (DEP_H - SVC_H) / 2
+        // サービスノード: 縦中央を rowCenterY に合わせる
         newNodes.push({
           id: `svc-${relation.service.id}`,
           type: 'service',
-          position: { x: SERVICE_COL, y: svcY },
+          position: { x: SERVICE_COL, y: rowCenterY - SVC_H / 2 },
           data: { service: relation.service },
         })
 
@@ -168,18 +170,18 @@ export function ProjectDetailPage() {
     })
 
     // ボリュームをグラフに追加する（マウント有無に関わらず全件表示する）
-    const VOL_H = 120 // Volume ノードの概算高さ
-    const VOL_ROW_HEIGHT = 140 // Volume ノード間の縦間隔
+    const VOL_H = 100  // Volume ノード高さ
     currentVolumeList.forEach((volume, volumeIndex) => {
       // このボリュームをマウントしている Deployment のインデックスを収集する
       const mountedRelationIndices = relations
         .map((relation, relationIndex) => ({ relation, relationIndex }))
         .filter(({ relation }) => relation.volumeMounts.some(vm => vm.volume_id === volume.id && vm.status !== 'deleting')) // deleting 状態は接続しない
 
-      // Volume ノードのY座標: マウント先がある場合はその縦中央平均、ない場合は縦に並べる
-      const volY = mountedRelationIndices.length > 0
-        ? mountedRelationIndices.reduce((sum, { relationIndex }) => sum + relationIndex * ROW_HEIGHT, 0) / mountedRelationIndices.length + (DEP_H - VOL_H) / 2
-        : volumeIndex * VOL_ROW_HEIGHT // マウントなしは縦に並べる
+      // Volume ノードのY座標: マウント先がある場合はその縦中央平均に合わせる、ない場合は ROW_HEIGHT 間隔で縦に並べる
+      const volCenterY = mountedRelationIndices.length > 0
+        ? mountedRelationIndices.reduce((sum, { relationIndex }) => sum + relationIndex * ROW_HEIGHT + ROW_HEIGHT / 2, 0) / mountedRelationIndices.length
+        : volumeIndex * ROW_HEIGHT + ROW_HEIGHT / 2 // マウントなしは縦に並べる
+      const volY = volCenterY - VOL_H / 2
 
       newNodes.push({
         id: `vol-${volume.id}`,
@@ -205,23 +207,21 @@ export function ProjectDetailPage() {
       })
     })
 
-    // IngressRoute を縦に並べて配置する
-    const ING_ROW_HEIGHT = 140 // IngressRoute ノード間の縦間隔
-    const totalDepSpan = relations.length * ROW_HEIGHT // 全Deploymentが占める縦幅
-    const depMidY = (totalDepSpan - ROW_HEIGHT) / 2 // 縦中央行の Deployment Y座標
-
+    // IngressRoute を ROW_HEIGHT 間隔で縦に並べて配置する
     if (currentIngressRouteList.length > 0) {
-      const totalIngHeight = currentIngressRouteList.length * ING_ROW_HEIGHT // 全IngressRouteが占める縦幅
-      const ingStartY = depMidY + (DEP_H - totalIngHeight) / 2 // IngressRoute 群の開始Y座標（Deploymentの縦中央に合わせる）
-      const netY = depMidY + (DEP_H - NET_H) / 2 // Internet の縦中央を Deployment に合わせる
+      const totalIngSpan = currentIngressRouteList.length * ROW_HEIGHT // 全IngressRouteが占める縦幅
+      const totalDepSpan = relations.length * ROW_HEIGHT // 全Deploymentが占める縦幅
+      // IngressRoute 群の縦中央を Deployment 群の縦中央に揃える
+      const ingGroupCenterY = totalDepSpan / 2 // Deployment群の縦中央
+      const ingStartCenterY = ingGroupCenterY - totalIngSpan / 2 + ROW_HEIGHT / 2 // 最初のIngressRouteの縦中央Y
 
       currentIngressRouteList.forEach((ingressRoute, ingressIndex) => {
-        const ingY = ingStartY + ingressIndex * ING_ROW_HEIGHT // 各 IngressRoute のY座標
+        const ingCenterY = ingStartCenterY + ingressIndex * ROW_HEIGHT // 各IngressRouteの縦中央Y
         const currentPathRules = currentPathRulesByIngressRouteId[ingressRoute.id] ?? [] // この IngressRoute のパスルールを取得する
         newNodes.push({
           id: `ingress-node-${ingressRoute.id}`,
           type: 'ingress',
-          position: { x: INGRESS_COL, y: ingY },
+          position: { x: INGRESS_COL, y: ingCenterY - ING_H / 2 }, // 縦中央を基準にY座標を決める
           data: {
             ingress: ingressRoute,
             pathRules: currentPathRules,
@@ -238,11 +238,11 @@ export function ProjectDetailPage() {
         })
       })
 
-      // Internet ノードを配置する（IngressRoute が1つ以上ある場合のみ表示する）
+      // Internet ノードを IngressRoute 群の縦中央に配置する
       newNodes.push({
         id: 'internet-node',
         type: 'internet',
-        position: { x: INTERNET_COL, y: netY },
+        position: { x: INTERNET_COL, y: ingGroupCenterY - NET_H / 2 }, // Deployment群縦中央に Internet を置く
         data: {},
       })
     }
@@ -516,7 +516,29 @@ export function ProjectDetailPage() {
             {/* 左アイコンレール */}
             <div className="w-14 shrink-0 flex flex-col items-center pt-3 gap-2 border-r border-gray-100 bg-gray-50 z-10">
               <button
-                onClick={() => { setShowVolumeSidebar(prev => !prev); setShowEnvVarSidebar(false) }}
+                onClick={() => { setShowDeploymentListSidebar(prev => !prev); setShowIngressListSidebar(false); setShowVolumeSidebar(false); setShowEnvVarSidebar(false) }}
+                title="デプロイメント"
+                className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
+                  showDeploymentListSidebar
+                    ? 'bg-[#00C2D1] text-white shadow-md'
+                    : 'bg-cyan-50 text-[#00C2D1] hover:bg-cyan-100'
+                }`}
+              >
+                <Layers className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => { setShowIngressListSidebar(prev => !prev); setShowDeploymentListSidebar(false); setShowVolumeSidebar(false); setShowEnvVarSidebar(false) }}
+                title="IngressRoute"
+                className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
+                  showIngressListSidebar
+                    ? 'bg-indigo-500 text-white shadow-md'
+                    : 'bg-indigo-50 text-indigo-500 hover:bg-indigo-100'
+                }`}
+              >
+                <Globe className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => { setShowVolumeSidebar(prev => !prev); setShowEnvVarSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false) }}
                 title="ボリューム"
                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                   showVolumeSidebar
@@ -527,7 +549,7 @@ export function ProjectDetailPage() {
                 <HardDrive className="w-5 h-5" />
               </button>
               <button
-                onClick={() => { setShowEnvVarSidebar(prev => !prev); setShowVolumeSidebar(false) }}
+                onClick={() => { setShowEnvVarSidebar(prev => !prev); setShowVolumeSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false) }}
                 title="環境変数"
                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                   showEnvVarSidebar
@@ -538,6 +560,38 @@ export function ProjectDetailPage() {
                 <KeyRound className="w-5 h-5" />
               </button>
             </div>
+
+            {/* デプロイメント一覧サイドバー（左から開く） */}
+            {showDeploymentListSidebar && (
+              <div className="w-72 shrink-0 flex flex-col border-r border-gray-200 bg-white z-10">
+                <DeploymentListSidebar
+                  deploymentRelations={deploymentRelations}
+                  onSelect={(deploymentId: string) => {
+                    setSelectedDeploymentId(deploymentId) // 選択したデプロイメントIDを設定する
+                    setSidebarMode('deployment') // デプロイメントサイドバーを開く
+                    setIframeLoaded(false) // iframe読み込みフラグをリセットする
+                  }}
+                  selectedDeploymentId={selectedDeploymentId}
+                  onClose={() => setShowDeploymentListSidebar(false)}
+                  projectId={projectId!}
+                />
+              </div>
+            )}
+
+            {/* IngressRoute一覧サイドバー（左から開く） */}
+            {showIngressListSidebar && (
+              <div className="w-72 shrink-0 flex flex-col border-r border-gray-200 bg-white z-10">
+                <IngressListSidebar
+                  ingressRouteList={ingressRouteList}
+                  pathRulesByIngressRouteId={pathRulesByIngressRouteId}
+                  selectedIngressRouteId={selectedIngressRouteId}
+                  onSelect={openIngressSidebar}
+                  onCreateIngress={handleCreateIngressRoute}
+                  creatingIngress={creatingIngress}
+                  onClose={() => setShowIngressListSidebar(false)}
+                />
+              </div>
+            )}
 
             {/* ボリュームサイドバー（左から開く） */}
             {showVolumeSidebar && (
@@ -1347,6 +1401,163 @@ function VolumeSidebar({
             {adding ? '作成中...' : '作成'}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ── DeploymentListSidebar ─────────────────────────────────────
+
+function DeploymentListSidebar({
+  deploymentRelations,
+  onSelect,
+  selectedDeploymentId,
+  onClose,
+  projectId,
+}: {
+  deploymentRelations: DeploymentWithRelations[]
+  onSelect: (deploymentId: string) => void
+  selectedDeploymentId: string | null
+  onClose: () => void
+  projectId: string
+}) {
+  const navigate = useNavigate() // ページ遷移用フック
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* ヘッダー */}
+      <div className="h-10 flex items-center justify-between px-3 border-b border-gray-100 bg-gray-50 shrink-0">
+        <div className="flex items-center gap-2">
+          <Layers className="w-3.5 h-3.5 text-[#00C2D1] shrink-0" />
+          <span className="text-xs font-medium text-[#111827]">デプロイメント</span>
+          <span className="text-xs text-gray-400">{deploymentRelations.length}</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* 一覧 */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+        {deploymentRelations.length === 0 ? (
+          <p className="text-xs text-gray-400 py-2">デプロイメントがありません</p>
+        ) : (
+          deploymentRelations.map(({ deployment }) => (
+            <button
+              key={deployment.id}
+              onClick={() => onSelect(deployment.id)} // クリックで右サイドバーに詳細を表示する
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md border text-left transition-all ${
+                selectedDeploymentId === deployment.id
+                  ? 'border-[#00C2D1] bg-cyan-50'
+                  : 'border-gray-100 bg-gray-50 hover:border-gray-200 hover:bg-gray-100'
+              }`}
+            >
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <p className="text-sm font-medium text-[#111827] truncate">{deployment.name}</p>
+                <StatusBadge status={deployment.status} />
+              </div>
+              <ChevronRight className="w-3.5 h-3.5 text-gray-300 shrink-0 ml-2" />
+            </button>
+          ))
+        )}
+      </div>
+
+      {/* フッター：新規作成ボタン */}
+      <div className="shrink-0 border-t border-gray-100 p-3">
+        <button
+          onClick={() => navigate(`/projects/${projectId}/deployments/new`)} // 新規デプロイメント作成ページへ遷移する
+          className="w-full flex items-center justify-center gap-1.5 bg-[#111827] text-white text-sm py-2 rounded-md hover:bg-gray-800 transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          新規デプロイメント
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ── IngressListSidebar ────────────────────────────────────────
+
+function IngressListSidebar({
+  ingressRouteList,
+  pathRulesByIngressRouteId,
+  selectedIngressRouteId,
+  onSelect,
+  onCreateIngress,
+  creatingIngress,
+  onClose,
+}: {
+  ingressRouteList: IngressRoute[]
+  pathRulesByIngressRouteId: Record<string, PathRule[]>
+  selectedIngressRouteId: string | null
+  onSelect: (ingressRouteId: string) => void
+  onCreateIngress: () => Promise<void>
+  creatingIngress: boolean
+  onClose: () => void
+}) {
+  return (
+    <div className="flex flex-col h-full">
+      {/* ヘッダー */}
+      <div className="h-10 flex items-center justify-between px-3 border-b border-gray-100 bg-gray-50 shrink-0">
+        <div className="flex items-center gap-2">
+          <Globe className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+          <span className="text-xs font-medium text-[#111827]">IngressRoute</span>
+          <span className="text-xs text-gray-400">{ingressRouteList.length}</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* 一覧 */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+        {ingressRouteList.length === 0 ? (
+          <p className="text-xs text-gray-400 py-2">IngressRouteがありません</p>
+        ) : (
+          ingressRouteList.map(ingressRoute => {
+            const ruleCount = (pathRulesByIngressRouteId[ingressRoute.id] ?? []).length // このIngressRouteのパスルール数を取得する
+            return (
+              <button
+                key={ingressRoute.id}
+                onClick={() => onSelect(ingressRoute.id)} // クリックで右サイドバーに詳細を表示する
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-md border text-left transition-all ${
+                  selectedIngressRouteId === ingressRoute.id
+                    ? 'border-indigo-400 bg-indigo-50'
+                    : 'border-gray-100 bg-gray-50 hover:border-gray-200 hover:bg-gray-100'
+                }`}
+              >
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <p className="text-sm font-mono font-medium text-[#111827] truncate">{ingressRoute.host || '(ホスト未設定)'}</p>
+                  <div className="flex items-center gap-2">
+                    <StatusBadge status={ingressRoute.status} />
+                    {ruleCount > 0 && (
+                      <span className="text-[10px] text-gray-400">{ruleCount}ルール</span>
+                    )}
+                  </div>
+                </div>
+                <ChevronRight className="w-3.5 h-3.5 text-gray-300 shrink-0 ml-2" />
+              </button>
+            )
+          })
+        )}
+      </div>
+
+      {/* フッター：新規作成ボタン */}
+      <div className="shrink-0 border-t border-gray-100 p-3">
+        <button
+          onClick={() => void onCreateIngress()} // 新規IngressRouteを作成する
+          disabled={creatingIngress}
+          className="w-full flex items-center justify-center gap-1.5 bg-[#111827] text-white text-sm py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          {creatingIngress ? '作成中...' : '新規IngressRoute'}
+        </button>
       </div>
     </div>
   )
