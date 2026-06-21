@@ -23,6 +23,18 @@ var traefikIngressRouteGVR = schema.GroupVersionResource{
 	Resource: "ingressroutes",
 }
 
+// traefikMiddlewareGVR は Traefik Middleware CRD の GroupVersionResource を定義する
+var traefikMiddlewareGVR = schema.GroupVersionResource{
+	Group:    "traefik.io",
+	Version:  "v1alpha1",
+	Resource: "middlewares",
+}
+
+// middlewareName は IngressRoute ID から StripPrefix Middleware の名前を生成する
+func middlewareName(ingressRouteID string) string {
+	return fmt.Sprintf("strip-%s", ingressRouteID) // strip-{ingressRouteID} 形式で名前を生成する
+}
+
 // buildRouterRule は IngressRoute のルールマッチ文字列を生成する
 func buildRouterRule(host, pathPrefix string) string {
 	return fmt.Sprintf("Host(`%s`) && PathPrefix(`%s`)", host, pathPrefix) // ホストとパスプレフィックスのルールを生成する
@@ -33,23 +45,33 @@ type PathRuleSpec struct {
 	PathPrefix  string // ルーティング対象パスプレフィックス
 	ServiceName string // 転送先 Kubernetes Service 名
 	ServicePort int    // 転送先 Service ポート番号
+	StripPrefix bool   // パスプレフィックスを strip するか
 }
 
 // buildIngressRouteManifest は Traefik IngressRoute の unstructured マニフェストを生成する
 func buildIngressRouteManifest(ingressRouteData models.IngressRoute, namespace string, pathRuleSpecList []PathRuleSpec) *unstructured.Unstructured {
-	routeList := make([]interface{}, 0, len(pathRuleSpecList)) // ルート一覧を初期化する
-	for _, pathRuleSpec := range pathRuleSpecList {            // PathRuleSpec ごとに Traefik ルートを生成する
+	middlewareRef := fmt.Sprintf("%s@kubernetescrd", middlewareName(ingressRouteData.ID)) // Middleware 参照文字列を生成する
+	routeList := make([]interface{}, 0, len(pathRuleSpecList))                            // ルート一覧を初期化する
+	for _, pathRuleSpec := range pathRuleSpecList {                                       // PathRuleSpec ごとに Traefik ルートを生成する
 		routeRule := buildRouterRule(ingressRouteData.Host, pathRuleSpec.PathPrefix) // ルールを生成する
-		routeList = append(routeList, map[string]interface{}{
+		routeEntry := map[string]interface{}{
 			"kind":  "Rule",
 			"match": routeRule, // ルール文字列を設定する
 			"services": []interface{}{
 				map[string]interface{}{
-					"name": pathRuleSpec.ServiceName,         // サービス名を設定する
-					"port": int64(pathRuleSpec.ServicePort),  // ポートを設定する
+					"name": pathRuleSpec.ServiceName,        // サービス名を設定する
+					"port": int64(pathRuleSpec.ServicePort), // ポートを設定する
 				},
 			},
-		})
+		}
+		if pathRuleSpec.StripPrefix { // strip_prefix が有効な場合は Middleware 参照を追加する
+			routeEntry["middlewares"] = []interface{}{
+				map[string]interface{}{
+					"name": middlewareRef, // Middleware 名を設定する
+				},
+			}
+		}
+		routeList = append(routeList, routeEntry) // ルートを追加する
 	}
 
 	spec := map[string]interface{}{
@@ -72,6 +94,56 @@ func buildIngressRouteManifest(ingressRouteData models.IngressRoute, namespace s
 			"spec": spec,
 		},
 	}
+}
+
+// buildMiddlewareManifest は Traefik StripPrefix Middleware の unstructured マニフェストを生成する
+func buildMiddlewareManifest(ingressRouteID string, namespace string, prefixList []string) *unstructured.Unstructured {
+	prefixInterface := make([]interface{}, 0, len(prefixList)) // interface スライスに変換する
+	for _, prefix := range prefixList {
+		prefixInterface = append(prefixInterface, prefix) // 各プレフィックスを追加する
+	}
+	name := middlewareName(ingressRouteID) // Middleware 名を生成する
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "traefik.io/v1alpha1",
+			"kind":       "Middleware",
+			"metadata": map[string]interface{}{
+				"name":      name,      // Middleware 名を設定する
+				"namespace": namespace, // namespace を設定する
+				"labels": map[string]interface{}{
+					"launchs-managed": "true", // launchs が管理するリソースであることを示すラベル
+				},
+			},
+			"spec": map[string]interface{}{
+				"stripPrefix": map[string]interface{}{
+					"prefixes": prefixInterface, // strip 対象プレフィックス一覧を設定する
+				},
+			},
+		},
+	}
+}
+
+// ApplyMiddleware は Traefik StripPrefix Middleware を作成または更新する
+func ApplyMiddleware(ctx context.Context, client dynamic.Interface, ingressRouteID string, namespace string, prefixList []string) error {
+	manifest := buildMiddlewareManifest(ingressRouteID, namespace, prefixList) // マニフェストを生成する
+
+	existing, err := client.Resource(traefikMiddlewareGVR).Namespace(namespace).Get(ctx, manifest.GetName(), metav1.GetOptions{}) // 既存の Middleware を取得する
+	if err != nil {
+		// 存在しない場合は新規作成する
+		_, err = client.Resource(traefikMiddlewareGVR).Namespace(namespace).Create(ctx, manifest, metav1.CreateOptions{})
+		return err
+	}
+
+	// 既存の Middleware を更新する
+	manifest.SetResourceVersion(existing.GetResourceVersion()) // 楽観的並行性制御のため ResourceVersion を引き継ぐ
+	_, err = client.Resource(traefikMiddlewareGVR).Namespace(namespace).Update(ctx, manifest, metav1.UpdateOptions{})
+	return err
+}
+
+// DeleteMiddleware は Traefik StripPrefix Middleware を削除する
+func DeleteMiddleware(ctx context.Context, client dynamic.Interface, namespace string, ingressRouteID string) error {
+	name := middlewareName(ingressRouteID)                                                                    // Middleware 名を生成する
+	return client.Resource(traefikMiddlewareGVR).Namespace(namespace).Delete(ctx, name, metav1.DeleteOptions{}) // Middleware を削除する
 }
 
 // ApplyIngressRoute は Traefik IngressRoute を作成または更新する

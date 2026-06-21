@@ -470,6 +470,11 @@ func (applyService *ApplyService) applySingleIngressRoute(ctx context.Context, n
 				return fmt.Errorf("k8s ingress_route delete: %w", delErr) // 削除エラーを返す
 			}
 		}
+		if delErr := k8s.DeleteMiddleware(ctx, applyService.DynamicClient, namespace, ingressRouteData.ID); delErr != nil { // k8s Middleware を削除する
+			if !k8serrors.IsNotFound(delErr) { // k8s に存在しない場合は無視して続行する
+				return fmt.Errorf("k8s middleware delete: %w", delErr) // 削除エラーを返す
+			}
+		}
 		allPathRuleList, allErr := applyService.PathRuleRepo.FindByIngressRouteID(ctx, ingressRouteData.ID) // 全 PathRule を取得する
 		if allErr != nil {
 			return fmt.Errorf("path_rule 一覧取得に失敗しました: %w", allErr) // 取得エラーを返す
@@ -500,6 +505,7 @@ func (applyService *ApplyService) applySingleIngressRoute(ctx context.Context, n
 	} else {
 		// PathRule を集約して Service 情報を解決し k8s に apply する
 		pathRuleSpecList := make([]k8s.PathRuleSpec, 0, len(pathRuleList)) // PathRuleSpec 一覧を初期化する
+		stripPrefixList := make([]string, 0)                               // strip 対象プレフィックス一覧を初期化する
 		for _, pathRuleItem := range pathRuleList {
 			pathRuleService, serviceErr := applyService.ServiceRepo.FindByServiceID(ctx, pathRuleItem.ServiceID) // PathRule が指す Service を取得する
 			if serviceErr != nil {
@@ -513,7 +519,14 @@ func (applyService *ApplyService) applySingleIngressRoute(ctx context.Context, n
 				PathPrefix:  pathRuleItem.PathPrefix,
 				ServiceName: pathRuleService.ID + "-svc", // k8s Service 名は Service UUID ベース（Deployment 名変更の影響を受けない）
 				ServicePort: pathRuleServicePort,
+				StripPrefix: pathRuleItem.StripPrefix, // strip_prefix フラグを設定する
 			})
+			if pathRuleItem.StripPrefix { // strip_prefix が有効な場合はプレフィックスを収集する
+				stripPrefixList = append(stripPrefixList, pathRuleItem.PathPrefix)
+			}
+		}
+		if applyErr := k8s.ApplyMiddleware(ctx, applyService.DynamicClient, ingressRouteData.ID, namespace, stripPrefixList); applyErr != nil { // Middleware を apply する（strip 0 件でも空 prefixes で作成する）
+			return fmt.Errorf("k8s middleware apply: %w", applyErr) // apply エラーを返す
 		}
 		if applyErr := k8s.ApplyIngressRoute(ctx, applyService.DynamicClient, *ingressRouteData, namespace, pathRuleSpecList); applyErr != nil { // k8s に IngressRoute を apply する
 			return fmt.Errorf("k8s ingress_route apply: %w", applyErr) // apply エラーを返す
