@@ -18,6 +18,7 @@ type DeploymentService interface {
 	GetDeployment(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)                                          // deployment を取得する
 	UpdateDeployment(ctx context.Context, userID string, deploymentID string, req UpdateDeploymentRequest) (*models.Deployment, error)          // deployment を更新する
 	DeleteDeployment(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)                                       // deployment を削除（deleting 状態に変更）する
+	DiscardPending(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)                                         // deployment の pending フィールドを全クリアする
 	GetService(ctx context.Context, userID string, deploymentID string) (*models.Service, error)                                                // service 設定を取得する
 	CreateService(ctx context.Context, userID string, deploymentID string, req CreateServiceRequest) (*models.Service, error)                   // service を作成する
 	UpdateService(ctx context.Context, userID string, deploymentID string, req UpdateServiceRequest) (*models.Service, error)                   // service の pending フィールドを更新する
@@ -217,6 +218,34 @@ func (svc *deploymentServiceImpl) UpdateDeployment(ctx context.Context, userID s
 	return deploymentData, nil // 更新後の deployment を返す
 }
 
+// DiscardPending は deployment の pending_* フィールドを現在の適用済み値に戻してクリアする
+func (svc *deploymentServiceImpl) DiscardPending(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error) {
+	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // リポジトリ経由で取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	if err := svc.checkOwnership(ctx, userID, deploymentData.ProjectID); err != nil { // 所有権を確認する
+		return nil, err
+	}
+
+	// pending フィールドを現在の適用済み値で上書きしてクリアする
+	deploymentData.PendingImageURL            = deploymentData.ImageURL            // pending_image_url を現在値に戻す
+	deploymentData.PendingGithubRepoURL       = deploymentData.GithubRepoURL       // pending_github_repo_url を現在値に戻す
+	deploymentData.PendingGithubBranch        = deploymentData.GithubBranch        // pending_github_branch を現在値に戻す
+	deploymentData.PendingGithubCommitSHA     = deploymentData.GithubCommitSHA     // pending_github_commit_sha を現在値に戻す
+	deploymentData.PendingGithubRepoDirectory = deploymentData.GithubRepoDirectory // pending_github_repo_directory を現在値に戻す
+	deploymentData.PendingDockerfilePath      = deploymentData.DockerfilePath      // pending_dockerfile_path を現在値に戻す
+	deploymentData.PendingInstanceSize        = deploymentData.InstanceSize        // pending_instance_size を現在値に戻す
+	deploymentData.PendingReplicas            = deploymentData.Replicas            // pending_replicas を現在値に戻す
+	deploymentData.PendingCommand             = deploymentData.Command             // pending_command を現在値に戻す
+	deploymentData.PendingArgs                = deploymentData.Args                // pending_args を現在値に戻す
+
+	if err := svc.deploymentRepo.Save(ctx, deploymentData); err != nil { // リポジトリ経由で保存する
+		return nil, err // 保存エラーを返す
+	}
+	return deploymentData, nil // 更新後の deployment を返す
+}
+
 // DeleteDeployment は deployment のステータスを deleting に変更し、k8s リソースを削除する
 func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error) {
 	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // リポジトリ経由で取得する
@@ -233,24 +262,30 @@ func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID s
 	}
 	namespace := projectData.Namespace // namespace を取得する
 
-	deploymentData.Status = models.DeploymentStatusDeleting                    // ステータスを deleting に変更する
-	if err := svc.deploymentRepo.Save(ctx, deploymentData); err != nil {       // リポジトリ経由で保存する
+	deploymentData.Status         = models.DeploymentStatusDeleting // ステータスを deleting に変更する
+	deploymentData.DeleteProgress = "k8s リソースを削除中"            // 初期進捗を設定する
+	if err := svc.deploymentRepo.Save(ctx, deploymentData); err != nil { // リポジトリ経由で保存する
 		return nil, err // 保存エラーを返す
 	}
 
 	// k8s リソースを順に削除する（エラーは警告ログとして記録し処理を継続する）
+	_ = svc.deploymentRepo.UpdateDeleteProgress(ctx, deploymentData.ID, "k8s Deployment を削除中") // 進捗を記録する
 	if k8sErr := k8s.DeleteDeployment(ctx, svc.k8sClient, namespace, deploymentData.Name); k8sErr != nil { // k8s Deployment を削除する
 		_ = k8sErr // k8s 上に存在しない場合もあるため無視して継続する
 	}
+	_ = svc.deploymentRepo.UpdateDeleteProgress(ctx, deploymentData.ID, "k8s Service を削除中") // 進捗を記録する
 	if k8sErr := k8s.DeleteService(ctx, svc.k8sClient, namespace, deploymentData.Name); k8sErr != nil { // k8s Service を削除する
 		_ = k8sErr // k8s 上に存在しない場合もあるため無視して継続する
 	}
+	_ = svc.deploymentRepo.UpdateDeleteProgress(ctx, deploymentData.ID, "k8s ConfigMap を削除中") // 進捗を記録する
 	if k8sErr := k8s.DeleteConfigMap(ctx, svc.k8sClient, namespace, deploymentData.Name); k8sErr != nil { // k8s ConfigMap を削除する
 		_ = k8sErr // k8s 上に存在しない場合もあるため無視して継続する
 	}
+	_ = svc.deploymentRepo.UpdateDeleteProgress(ctx, deploymentData.ID, "k8s Secret を削除中") // 進捗を記録する
 	if k8sErr := k8s.DeleteSecret(ctx, svc.k8sClient, namespace, deploymentData.Name); k8sErr != nil { // k8s Secret を削除する
 		_ = k8sErr // k8s 上に存在しない場合もあるため無視して継続する
 	}
+	_ = svc.deploymentRepo.UpdateDeleteProgress(ctx, deploymentData.ID, "k8s リソース削除完了 / DB クリーンアップ待ち") // 進捗を記録する
 
 	return deploymentData, nil // 更新後の deployment を返す
 }

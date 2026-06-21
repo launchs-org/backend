@@ -1,12 +1,14 @@
 package service
 
 import (
+	"app/k8s"
 	"app/models"
 	"app/repository"
 	"context"
 	"errors"
 
 	"gorm.io/gorm"
+	k8sclient "k8s.io/client-go/kubernetes"
 )
 
 // ErrDuplicateVolumeMount は同一DeploymentID・同一MountPathのマウントが既に存在する場合のエラー
@@ -42,6 +44,8 @@ type volumeServiceImpl struct {
 	deploymentRepo   repository.DeploymentRepository     // deployment リポジトリ（認可チェックに使用する）
 	projectRepo      repository.ProjectRepository        // project リポジトリ（認可チェックに使用する）
 	userQuotaRepo    repository.UserQuotaRepository      // user_quota リポジトリ（Quotaチェック用）
+	k8sClient        k8sclient.Interface                 // k8s クライアント（PVC 作成に使用する）
+	storageClassName string                              // PVC に使用する StorageClass 名
 }
 
 // NewVolumeService は VolumeService の実装を返す
@@ -52,14 +56,18 @@ func NewVolumeService(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	userQuotaRepo repository.UserQuotaRepository,
+	k8sClient k8sclient.Interface,
+	storageClassName string,
 ) VolumeService {
 	return &volumeServiceImpl{
-		db:              db,              // DB 接続を注入する
-		volumeRepo:      volumeRepo,      // volume リポジトリを注入する
-		volumeMountRepo: volumeMountRepo, // volume_mount リポジトリを注入する
-		deploymentRepo:  deploymentRepo,  // deployment リポジトリを注入する
-		projectRepo:     projectRepo,     // project リポジトリを注入する
-		userQuotaRepo:   userQuotaRepo,   // user_quota リポジトリを注入する
+		db:               db,               // DB 接続を注入する
+		volumeRepo:       volumeRepo,       // volume リポジトリを注入する
+		volumeMountRepo:  volumeMountRepo,  // volume_mount リポジトリを注入する
+		deploymentRepo:   deploymentRepo,   // deployment リポジトリを注入する
+		projectRepo:      projectRepo,      // project リポジトリを注入する
+		userQuotaRepo:    userQuotaRepo,    // user_quota リポジトリを注入する
+		k8sClient:        k8sClient,        // k8s クライアントを注入する
+		storageClassName: storageClassName, // StorageClass 名を注入する
 	}
 }
 
@@ -83,28 +91,40 @@ func (svc *volumeServiceImpl) ListVolumes(ctx context.Context, userID string, pr
 	return svc.volumeRepo.FindAllByProjectID(ctx, projectID) // リポジトリ経由で一覧を取得する
 }
 
-// CreateVolume は volume を作成する
+// CreateVolume は volume を作成し、k8s に PVC を作成する
 func (svc *volumeServiceImpl) CreateVolume(ctx context.Context, userID string, projectID string, req CreateVolumeRequest) (*models.Volume, error) {
-	if err := svc.checkProjectOwner(ctx, userID, projectID); err != nil { // 認可チェックを行う
-		return nil, err // エラーを返す
+	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, projectID) // namespace 解決のために project を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	if projectData.UserID != userID { // 所有者チェックを行う
+		return nil, ErrForbidden
 	}
 	if err := CheckVolumeQuota(ctx, svc.userQuotaRepo, userID, req.SizeMB); err != nil { // ボリューム容量のQuotaチェックを行う
 		return nil, err // Quota超過エラーを返す
 	}
 
 	var createdVolume *models.Volume                                             // 結果格納用変数を宣言する
-	err := svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {        // トランザクションを開始する
+	err = svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {         // トランザクションを開始する
 		volumeData := &models.Volume{
-			ProjectID: projectID, // プロジェクト ID を設定する
-			Name:      req.Name,  // ボリューム名を設定する
-			SizeMB:    req.SizeMB, // サイズを設定する
+			ProjectID: projectID,              // プロジェクト ID を設定する
+			Name:      req.Name,               // ボリューム名を設定する
+			SizeMB:    req.SizeMB,             // サイズを設定する
 			Status:    models.VolumeStatusPending, // ステータスを pending に設定する
 		}
 		if err := svc.volumeRepo.Create(ctx, tx, volumeData); err != nil { // tx を渡してリポジトリに委譲する
 			return err // エラーでロールバックする
 		}
 		createdVolume = volumeData // 作成した volume を格納する
-		return nil                 // コミットする
+
+		// k8s に PVC を作成する（Volume 作成時に即時作成する）
+		pvcName := volumeData.ID + "-pvc"                                                                      // PVC 名を VolumeID から生成する
+		pvcManifest := k8s.BuildPVCManifest(projectData.Namespace, pvcName, req.SizeMB, svc.storageClassName) // PVC マニフェストを生成する
+		if pvcErr := k8s.ApplyPVC(ctx, svc.k8sClient, pvcManifest); pvcErr != nil {                           // k8s に PVC を作成する
+			return pvcErr // PVC 作成エラーでロールバックする
+		}
+
+		return nil // コミットする
 	})
 	return createdVolume, err // 結果を返す
 }
@@ -182,6 +202,7 @@ func (svc *volumeServiceImpl) CreateVolumeMount(ctx context.Context, userID stri
 }
 
 // DeleteVolumeMount はボリュームマウント設定を削除する
+// pending 状態（未 apply）の場合は即削除、mounted 状態の場合は deleting に変更して apply 待ちにする
 func (svc *volumeServiceImpl) DeleteVolumeMount(ctx context.Context, userID string, mountID string) error {
 	mountData, err := svc.volumeMountRepo.FindByID(ctx, mountID) // マウント設定を取得する
 	if err != nil {
@@ -193,6 +214,9 @@ func (svc *volumeServiceImpl) DeleteVolumeMount(ctx context.Context, userID stri
 	}
 
 	return svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { // トランザクションを開始する
-		return svc.volumeMountRepo.Delete(ctx, tx, mountData) // tx を渡してリポジトリに委譲する
+		if mountData.Status == models.VolumeMountStatusPending { // pending 状態は k8s に未反映のため即削除する
+			return svc.volumeMountRepo.Delete(ctx, tx, mountData) // tx を渡してリポジトリに委譲する
+		}
+		return svc.volumeMountRepo.UpdateStatus(ctx, tx, mountData, models.VolumeMountStatusDeleting) // deleting に変更して apply 待ちにする
 	})
 }

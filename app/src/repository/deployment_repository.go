@@ -19,6 +19,7 @@ type DeploymentRepository interface {
 	Updates(ctx context.Context, tx *gorm.DB, deployment *models.Deployment, values map[string]interface{}) error // deployment を map で部分更新する
 	UpdateAppStatus(ctx context.Context, deploymentID string, appStatus models.AppStatus) error                   // app_status を更新する
 	UpdateK8sStatus(ctx context.Context, deploymentID string, k8sStatus datatypes.JSON) error                     // k8s_status を更新する
+	UpdateDeleteProgress(ctx context.Context, deploymentID string, progress string) error                         // delete_progress を更新する（削除中のステップ名を保持する）
 	UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error                        // ビルド成功時に pending_image_url を更新する
 	UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error               // GitHub push 時に pending_github_commit_sha を更新する
 	Delete(ctx context.Context, deploymentID string) error                                                        // deployment を削除する
@@ -107,6 +108,15 @@ func (repo *deploymentRepositoryImpl) UpdateK8sStatus(ctx context.Context, deplo
 		return gorm.ErrRecordNotFound // レコードなしエラーを返す
 	}
 	return nil // 正常終了
+}
+
+// UpdateDeleteProgress は deploymentID に対応する deployment の delete_progress を更新する
+func (repo *deploymentRepositoryImpl) UpdateDeleteProgress(ctx context.Context, deploymentID string, progress string) error {
+	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Update("delete_progress", progress) // delete_progress を更新する
+	if result.Error != nil {                                                                                                           // エラーが発生した場合
+		return result.Error // エラーを返す
+	}
+	return nil // 正常終了（RowsAffected=0 は物理削除済みの場合があるため無視する）
 }
 
 // UpdatePendingImageURL は deploymentID に対応する deployment の pending_image_url を更新する
