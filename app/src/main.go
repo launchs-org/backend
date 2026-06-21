@@ -108,7 +108,7 @@ func main() {
 	envVarHandler := handler.NewEnvVarHandler(envVarServiceImpl, envVarMountServiceImpl)                                                       // env_var ハンドラーを生成する
 
 	// volume ハンドラーを DI 組み立てする
-	volumeServiceImpl := service.NewVolumeService(repository.Database, volumeRepo, volumeMountRepo, deploymentRepo, projectRepo, userQuotaRepo)  // volume サービスを生成する
+	volumeServiceImpl := service.NewVolumeService(repository.Database, volumeRepo, volumeMountRepo, deploymentRepo, projectRepo, userQuotaRepo, k8sClient, cfg.GetStorageClassName())  // volume サービスを生成する
 	volumeHandler := handler.NewVolumeHandler(volumeServiceImpl)                                                                  // volume ハンドラーを生成する
 
 	// webhook ハンドラーを DI 組み立てする

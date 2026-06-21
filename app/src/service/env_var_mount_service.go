@@ -105,6 +105,7 @@ func (svc *envVarMountServiceImpl) CreateEnvVarMount(ctx context.Context, userID
 }
 
 // DeleteEnvVarMount はマウント設定を削除する
+// pending 状態（未 apply）の場合は即削除、applied 状態の場合は deleting に変更して apply 待ちにする
 func (svc *envVarMountServiceImpl) DeleteEnvVarMount(ctx context.Context, userID string, mountID string) error {
 	mountData, err := svc.mountRepo.FindByID(ctx, mountID) // マウント設定を取得する
 	if err != nil {
@@ -116,6 +117,9 @@ func (svc *envVarMountServiceImpl) DeleteEnvVarMount(ctx context.Context, userID
 	}
 
 	return svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { // トランザクションを開始する
-		return svc.mountRepo.Delete(ctx, tx, mountData) // tx を渡してリポジトリに委譲する
+		if mountData.Status == models.EnvVarMountStatusPending { // pending 状態は k8s に未反映のため即削除する
+			return svc.mountRepo.Delete(ctx, tx, mountData) // tx を渡してリポジトリに委譲する
+		}
+		return svc.mountRepo.UpdateStatus(ctx, tx, mountData, models.EnvVarMountStatusDeleting) // deleting に変更して apply 待ちにする
 	})
 }

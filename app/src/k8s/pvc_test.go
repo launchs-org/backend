@@ -81,12 +81,14 @@ func TestApplyPVC_StorageClassNameが設定される(t *testing.T) {
 	}
 }
 
-// TestApplyPVC_同名PVCを再applyすると更新される は同名の PVC を再度 apply すると更新されることを確認する
-func TestApplyPVC_同名PVCを再applyすると更新される(t *testing.T) {
+// TestApplyPVC_同名PVCを再applyするとスキップされる は同名の PVC を再度 apply してもエラーにならずスキップされることを確認する
+// PVC の spec は Bound 後 immutable なため、既存 PVC が存在する場合は更新せずそのまま返す設計
+func TestApplyPVC_同名PVCを再applyするとスキップされる(t *testing.T) {
 	fakeClient := fake.NewSimpleClientset() // fake k8s クライアントを生成する
 	ctx := context.Background()            // テスト用コンテキストを生成する
 
 	pvcManifest := BuildPVCManifest("test-namespace", "update-pvc", 1024, "") // テスト用 PVC manifest を生成する
+	pvcManifest.Labels = map[string]string{"original": "true"}                // 元のラベルを設定する
 
 	err := ApplyPVC(ctx, fakeClient, pvcManifest) // 1回目の apply（作成）
 	if err != nil {
@@ -94,19 +96,22 @@ func TestApplyPVC_同名PVCを再applyすると更新される(t *testing.T) {
 	}
 
 	updatedManifest := BuildPVCManifest("test-namespace", "update-pvc", 1024, "") // 更新用 manifest を生成する
-	updatedManifest.Labels = map[string]string{"updated": "true"}                 // ラベルを追加して更新内容を確認できるようにする
+	updatedManifest.Labels = map[string]string{"updated": "true"}                 // 別のラベルを設定する
 
-	err = ApplyPVC(ctx, fakeClient, updatedManifest) // 2回目の apply（更新）
+	err = ApplyPVC(ctx, fakeClient, updatedManifest) // 2回目の apply（既存あり → スキップ）
 	if err != nil {
-		t.Fatalf("2回目の ApplyPVC() がエラーを返しました: %v", err) // エラーが返った場合はテスト失敗とする
+		t.Fatalf("2回目の ApplyPVC() がエラーを返しました: %v", err) // スキップ時にエラーが返ってはいけない
 	}
 
-	updatedPVC, err := fakeClient.CoreV1().PersistentVolumeClaims("test-namespace").Get(ctx, "update-pvc", metav1.GetOptions{}) // 更新後の PVC を取得する
+	existingPVC, err := fakeClient.CoreV1().PersistentVolumeClaims("test-namespace").Get(ctx, "update-pvc", metav1.GetOptions{}) // 取得して内容を確認する
 	if err != nil {
-		t.Fatalf("更新後の PVC 取得に失敗しました: %v", err) // 取得失敗時はテスト失敗とする
+		t.Fatalf("PVC の取得に失敗しました: %v", err) // 取得失敗時はテスト失敗とする
 	}
-	if updatedPVC.Labels["updated"] != "true" { // 更新が反映されていることを確認する
-		t.Errorf("PVC の更新が反映されていません。Labels: %v", updatedPVC.Labels)
+	if existingPVC.Labels["updated"] == "true" { // ラベルが更新されていないことを確認する（spec immutable のためスキップされる）
+		t.Errorf("既存 PVC が上書きされています。スキップされるべきです")
+	}
+	if existingPVC.Labels["original"] != "true" { // 元のラベルが保持されていることを確認する
+		t.Errorf("元のラベルが失われています。Labels: %v", existingPVC.Labels)
 	}
 }
 

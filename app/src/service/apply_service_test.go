@@ -381,6 +381,10 @@ func (mock *applyHistoryMockDeploymentRepository) UpdatePendingGithubCommitSHA(c
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *applyHistoryMockDeploymentRepository) UpdateDeleteProgress(ctx context.Context, deploymentID string, progress string) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 func (mock *applyHistoryMockDeploymentRepository) Delete(ctx context.Context, deploymentID string) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
@@ -978,6 +982,10 @@ func (mock *duplicateKeyMockEnvVarMountRepository) FindByDeploymentIDAndEnvVarID
 }
 
 func (mock *duplicateKeyMockEnvVarMountRepository) Delete(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error {
+	return nil // 使用しない
+}
+
+func (mock *duplicateKeyMockEnvVarMountRepository) UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount, status models.EnvVarMountStatus) error {
 	return nil // 使用しない
 }
 

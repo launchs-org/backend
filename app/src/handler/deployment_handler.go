@@ -95,6 +95,31 @@ func (deploymentHandler *DeploymentHandler) GetDeployment(echoCtx echo.Context) 
 	return echoCtx.JSON(http.StatusOK, deploymentData) // deployment を返す
 }
 
+// DiscardPending は POST /deployments/:id/discard-pending のハンドラー
+func (deploymentHandler *DeploymentHandler) DiscardPending(echoCtx echo.Context) error {
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
+	deploymentID := echoCtx.Param("id")      // パスパラメータから deployment ID を取得する
+
+	deploymentData, err := deploymentHandler.deploymentService.DiscardPending(echoCtx.Request().Context(), userID, deploymentID) // サービスを呼び出して pending をクリアする
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) { // deployment が見つからない場合
+			return echoCtx.JSON(http.StatusNotFound, map[string]string{
+				"error": "デプロイメントが見つかりません",
+			})
+		}
+		if errors.Is(err, service.ErrForbidden) { // 所有権がない場合
+			return echoCtx.JSON(http.StatusForbidden, map[string]string{
+				"error": "権限がありません",
+			})
+		}
+		logger.PrintHandlerError("DeploymentHandler", "DiscardPending", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "内部サーバーエラー",
+		})
+	}
+	return echoCtx.JSON(http.StatusOK, deploymentData) // 更新後の deployment を返す
+}
+
 // UpdateDeployment は PUT /deployments/:id のハンドラー
 func (deploymentHandler *DeploymentHandler) UpdateDeployment(echoCtx echo.Context) error {
 	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する

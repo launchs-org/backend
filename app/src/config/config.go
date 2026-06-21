@@ -12,7 +12,8 @@ type Config interface {
 	GetServerPort() string       // サーバーのリッスンポートを返す
 	GetHarborEndpoint() string   // Harbor エンドポイントを返す
 	GetHarborRobotName() string  // Harbor 管理用 robot アカウント名を返す
-	GetHarborRobotSecret() string // Harbor 管理用 robot アカウントのシークレットを返す
+	GetHarborRobotSecret() string  // Harbor 管理用 robot アカウントのシークレットを返す
+	GetStorageClassName() string   // PVC に使用する StorageClass 名を返す
 }
 
 // EnvConfig は環境変数から設定を読み込む Config の実装
@@ -57,6 +58,10 @@ func (envConfig *EnvConfig) GetHarborRobotName() string {
 
 func (envConfig *EnvConfig) GetHarborRobotSecret() string {
 	return getEnv("HARBOR_ROBOT_SECRET", "") // Harbor 管理用 robot アカウントのシークレットを環境変数から取得する
+}
+
+func (envConfig *EnvConfig) GetStorageClassName() string {
+	return getEnv("STORAGE_CLASS_NAME", "longhorn") // PVC に使用する StorageClass 名を環境変数から取得する
 }
 
 // getEnv は環境変数を取得し、未設定の場合はデフォルト値を返す

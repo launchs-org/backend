@@ -13,7 +13,8 @@ type EnvVarMountRepository interface {
 	FindByID(ctx context.Context, mountID string) (*models.EnvVarMount, error)                           // ID でマウント設定を取得する
 	FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error)       // deploymentID に紐づくマウント設定一覧を取得する
 	FindByDeploymentIDAndEnvVarID(ctx context.Context, deploymentID string, envVarID string) (*models.EnvVarMount, error) // deploymentID と envVarID でマウント設定を取得する
-	Delete(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error                            // マウント設定を削除する
+	UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount, status models.EnvVarMountStatus) error // ステータスを更新する
+	Delete(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error                                        // マウント設定を削除する
 }
 
 // envVarMountRepositoryImpl は EnvVarMountRepository の GORM 実装
@@ -58,7 +59,21 @@ func (repo *envVarMountRepositoryImpl) FindByDeploymentIDAndEnvVarID(ctx context
 	return &mountData, nil // マウント設定を返す
 }
 
+// UpdateStatus はマウント設定のステータスを更新する
+func (repo *envVarMountRepositoryImpl) UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount, status models.EnvVarMountStatus) error {
+	db := repo.db // tx が nil の場合は repo.db を使う
+	if tx != nil {
+		db = tx
+	}
+	mount.Status = status                        // ステータスを更新する
+	return db.WithContext(ctx).Save(mount).Error // db を使って保存する
+}
+
 // Delete はマウント設定レコードを削除する
 func (repo *envVarMountRepositoryImpl) Delete(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error {
-	return tx.WithContext(ctx).Delete(mount).Error // tx を使って削除する
+	db := repo.db // tx が nil の場合は repo.db を使う
+	if tx != nil {
+		db = tx
+	}
+	return db.WithContext(ctx).Delete(mount).Error // db を使って削除する
 }

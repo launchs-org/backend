@@ -148,6 +148,9 @@ func (mock *mockDeploymentRepo) UpdatePendingImageURL(ctx context.Context, deplo
 func (mock *mockDeploymentRepo) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error {
 	return nil // 使用しない
 }
+func (mock *mockDeploymentRepo) UpdateDeleteProgress(ctx context.Context, deploymentID string, progress string) error {
+	return nil // 使用しない
+}
 func (mock *mockDeploymentRepo) Delete(ctx context.Context, deploymentID string) error {
 	mock.deletedIDs = append(mock.deletedIDs, deploymentID) // 削除 ID を記録する
 	return nil
@@ -173,6 +176,9 @@ func (mock *mockEnvVarMountRepoForDeployment) FindAllByDeploymentID(ctx context.
 }
 func (mock *mockEnvVarMountRepoForDeployment) FindByDeploymentIDAndEnvVarID(ctx context.Context, deploymentID string, envVarID string) (*models.EnvVarMount, error) {
 	return nil, nil // 使用しない
+}
+func (mock *mockEnvVarMountRepoForDeployment) UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount, status models.EnvVarMountStatus) error {
+	return nil // 使用しない
 }
 func (mock *mockEnvVarMountRepoForDeployment) Delete(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error {
 	mock.deletedIDs = append(mock.deletedIDs, mount.ID) // 削除 ID を記録する

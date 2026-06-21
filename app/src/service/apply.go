@@ -217,6 +217,29 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 			volumeMountValues[mountIndex] = *mountPtr
 		}
 
+		// 5-2-2. VolumeMount に紐づく Volume の PVC を k8s に apply する（未作成の場合のみ作成する）
+		for _, volumeMountItem := range volumeMountList {
+			if volumeMountItem.Status == models.VolumeMountStatusDeleting { // deleting は apply 不要なのでスキップする
+				continue
+			}
+			volumeData, volumeErr := applyService.VolumeRepo.FindByID(ctx, volumeMountItem.VolumeID) // Volume を取得する
+			if volumeErr != nil {
+				return fmt.Errorf("volume find: %w", volumeErr) // 取得エラーを返す
+			}
+			pvcName := volumeData.ID + "-pvc"                                                                                // PVC 名を生成する
+			pvcManifest := k8s.BuildPVCManifest(projectData.Namespace, pvcName, volumeData.SizeMB, "")                      // PVC マニフェストを生成する（storageClass は apply 時は空）
+			if pvcErr := k8s.ApplyPVC(ctx, applyService.K8s, pvcManifest); pvcErr != nil {                                  // k8s に PVC を apply する（既存の場合はスキップ）
+				applyHistoryRecord := &models.ApplyHistory{DeploymentID: deploymentID, Status: models.ApplyStatusFailed, ErrorMessage: pvcErr.Error(), AppliedAt: time.Now()} // apply_history を生成する
+				if err := applyService.ApplyHistoryRepo.Create(ctx, tx, applyHistoryRecord); err != nil {                   // apply_history を作成する
+					return fmt.Errorf("apply_history create: %w", err)
+				}
+				if err := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); err != nil { // ステータスを failed に更新する
+					return fmt.Errorf("apply_history update: %w", err)
+				}
+				return fmt.Errorf("k8s pvc apply: %w", pvcErr) // PVC apply エラーを返す
+			}
+		}
+
 		// 5-3. k8s Deployment マニフェストを生成する
 		envVarMountValues := make([]models.EnvVarMount, len(envVarMountList)) // ポインタスライスを値スライスに変換する
 		for mountIndex, mountPtr := range envVarMountList {                   // マウント設定を値スライスに変換する
@@ -249,28 +272,6 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 			return duplicateKeyErr // 重複キーエラーを返す
 		}
 
-		// 6-3. k8s に PVC を apply する（VolumeMount が存在する場合のみ）
-		for _, volumeMountItem := range volumeMountList { // VolumeMount ごとに PVC を apply する
-			volumeData, volumeErr := applyService.VolumeRepo.FindByID(ctx, volumeMountItem.VolumeID) // Volume を取得する
-			if volumeErr != nil {
-				applyHistoryRecord.Status = models.ApplyStatusFailed                                                                                  // Volume 取得失敗時はステータスを failed に変更する
-				applyHistoryRecord.ErrorMessage = volumeErr.Error()                                                                                   // エラーメッセージを記録する
-				if updateErr := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); updateErr != nil { // ステータスを更新する
-					return fmt.Errorf("apply_history update: %w", updateErr) // 更新エラーを返す
-				}
-				return fmt.Errorf("volume not found (id=%s): %w", volumeMountItem.VolumeID, volumeErr) // Volume 取得エラーを返す
-			}
-			pvcName := volumeData.ID + "-pvc"                                                                                              // PVC 名を VolumeID から生成する（generator.go の命名規則と一致させる）
-			pvcManifest := k8s.BuildPVCManifest(projectData.Namespace, pvcName, volumeData.SizeMB, "")                                    // PVC マニフェストを生成する
-			if pvcErr := k8s.ApplyPVC(ctx, applyService.K8s, pvcManifest); pvcErr != nil {                                                // k8s に PVC を apply する
-				applyHistoryRecord.Status = models.ApplyStatusFailed                                                                                  // PVC apply 失敗時はステータスを failed に変更する
-				applyHistoryRecord.ErrorMessage = pvcErr.Error()                                                                                      // エラーメッセージを記録する
-				if updateErr := applyService.ApplyHistoryRepo.UpdateStatus(ctx, tx, applyHistoryRecord, models.ApplyStatusFailed); updateErr != nil { // ステータスを更新する
-					return fmt.Errorf("apply_history update: %w", updateErr) // 更新エラーを返す
-				}
-				return fmt.Errorf("k8s pvc apply (volume_id=%s): %w", volumeData.ID, pvcErr) // k8s PVC apply エラーを返す
-			}
-		}
 
 		// 7-0. k8s に ConfigMap を apply する（非シークレット環境変数が存在する場合のみ）
 		if len(configMapData) > 0 { // ConfigMap データが存在する場合のみ apply する
@@ -392,10 +393,29 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 
 		// 10. PathRule は ApplyProject で管理するため Deployment Apply では触らない
 
-		// 11. VolumeMount の status を mounted に更新する
-		for _, volumeMountItem := range volumeMountList { // VolumeMount ごとに status を更新する
-			if updateErr := applyService.VolumeMountRepo.UpdateStatus(ctx, tx, volumeMountItem, models.VolumeMountStatusMounted); updateErr != nil { // status を mounted に変更する
-				return fmt.Errorf("volume_mount update status: %w", updateErr) // 更新エラーを返す
+		// 11. EnvVarMount の status を昇格させる（pending → applied、deleting → 物理削除）
+		for _, mountItem := range envVarMountList {
+			if mountItem.Status == models.EnvVarMountStatusDeleting { // deleting は k8s から削除済みなので物理削除する
+				if deleteErr := applyService.EnvVarMountRepo.Delete(ctx, tx, mountItem); deleteErr != nil {
+					return fmt.Errorf("env_var_mount delete: %w", deleteErr) // 削除エラーを返す
+				}
+			} else if mountItem.Status == models.EnvVarMountStatusPending { // pending は applied に昇格する
+				if updateErr := applyService.EnvVarMountRepo.UpdateStatus(ctx, tx, mountItem, models.EnvVarMountStatusApplied); updateErr != nil {
+					return fmt.Errorf("env_var_mount update status: %w", updateErr) // 更新エラーを返す
+				}
+			}
+		}
+
+		// 12. VolumeMount の status を昇格させる（pending → mounted、deleting → 物理削除）
+		for _, volumeMountItem := range volumeMountList {
+			if volumeMountItem.Status == models.VolumeMountStatusDeleting { // deleting は k8s から削除済みなので物理削除する
+				if deleteErr := applyService.VolumeMountRepo.Delete(ctx, tx, volumeMountItem); deleteErr != nil {
+					return fmt.Errorf("volume_mount delete: %w", deleteErr) // 削除エラーを返す
+				}
+			} else { // pending/mounted は mounted に昇格する
+				if updateErr := applyService.VolumeMountRepo.UpdateStatus(ctx, tx, volumeMountItem, models.VolumeMountStatusMounted); updateErr != nil { // status を mounted に変更する
+					return fmt.Errorf("volume_mount update status: %w", updateErr) // 更新エラーを返す
+				}
 			}
 		}
 

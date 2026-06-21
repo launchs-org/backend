@@ -226,6 +226,7 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kub
 
 		if deploymentData.Status == models.DeploymentStatusDeleting { // status が deleting の場合のみ連鎖削除する
 			// EnvVarMount を全件削除する
+			_ = deploymentRepo.UpdateDeleteProgress(ctx, deploymentID, "環境変数マウントを削除中")         // 進捗を記録する
 			envVarMountList, envVarMountErr := envVarMountRepo.FindAllByDeploymentID(ctx, deploymentID) // EnvVarMount 一覧を取得する
 			if envVarMountErr == nil {
 				for _, mountData := range envVarMountList { // 各マウント設定を削除する
@@ -236,6 +237,7 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kub
 			}
 
 			// VolumeMount を全件削除する
+			_ = deploymentRepo.UpdateDeleteProgress(ctx, deploymentID, "ボリュームマウントを削除中")          // 進捗を記録する
 			volumeMountList, volumeMountErr := volumeMountRepo.FindAllByDeploymentID(ctx, deploymentID) // VolumeMount 一覧を取得する
 			if volumeMountErr == nil {
 				for _, mountData := range volumeMountList { // 各マウント設定を削除する
@@ -246,17 +248,20 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kub
 			}
 
 			// ApplyHistory を全件削除する
+			_ = deploymentRepo.UpdateDeleteProgress(ctx, deploymentID, "Apply履歴を削除中") // 進捗を記録する
 			if err := applyHistoryRepo.DeleteAllByDeploymentID(ctx, deploymentID); err != nil { // ApplyHistory を削除する
 				logger.PrintErr("WatchDeployments: ApplyHistory 削除に失敗しました: " + err.Error()) // エラーをログ出力する
 			}
 
 			// DeploymentBuild を全件削除する
+			_ = deploymentRepo.UpdateDeleteProgress(ctx, deploymentID, "ビルド履歴を削除中") // 進捗を記録する
 			if err := buildRepo.DeleteAllByDeploymentID(ctx, deploymentID); err != nil { // DeploymentBuild を削除する
 				logger.PrintErr("WatchDeployments: DeploymentBuild 削除に失敗しました: " + err.Error()) // エラーをログ出力する
 			}
 
 			// Deployment レコード本体を削除する
-			if err := deploymentRepo.Delete(ctx, deploymentID); err != nil { // deployment を削除する
+			_ = deploymentRepo.UpdateDeleteProgress(ctx, deploymentID, "レコードを削除中") // 進捗を記録する
+			if err := deploymentRepo.Delete(ctx, deploymentID); err != nil {            // deployment を削除する
 				logger.PrintErr("WatchDeployments: Deployment 削除に失敗しました: " + err.Error()) // エラーをログ出力する
 			}
 			logger.Println("WatchDeployments: Deployment を削除しました: " + deploymentID) // 削除ログを出力する

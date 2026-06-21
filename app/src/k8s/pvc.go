@@ -18,16 +18,14 @@ import (
 )
 
 // ApplyPVC は k8s に PersistentVolumeClaim を作成または更新する
+// PVC の spec は bound 後に immutable なため、既存 PVC が存在する場合は作成をスキップする
 func ApplyPVC(ctx context.Context, client kubernetes.Interface, pvcManifest *corev1.PersistentVolumeClaim) error {
-	existing, err := client.CoreV1().PersistentVolumeClaims(pvcManifest.Namespace).Get(ctx, pvcManifest.Name, metav1.GetOptions{}) // 既存の PVC を取得する
-	if err != nil {
-		// 存在しない場合は新規作成する
-		_, err = client.CoreV1().PersistentVolumeClaims(pvcManifest.Namespace).Create(ctx, pvcManifest, metav1.CreateOptions{})
-		return err
+	_, err := client.CoreV1().PersistentVolumeClaims(pvcManifest.Namespace).Get(ctx, pvcManifest.Name, metav1.GetOptions{}) // 既存の PVC を取得する
+	if err == nil {
+		return nil // 既存 PVC があれば何もしない（spec は immutable なため更新不可）
 	}
-	// 既存の ResourceVersion を設定して更新する（k8s の楽観的並行性制御のため）
-	pvcManifest.ResourceVersion = existing.ResourceVersion
-	_, err = client.CoreV1().PersistentVolumeClaims(pvcManifest.Namespace).Update(ctx, pvcManifest, metav1.UpdateOptions{})
+	// 存在しない場合は新規作成する
+	_, err = client.CoreV1().PersistentVolumeClaims(pvcManifest.Namespace).Create(ctx, pvcManifest, metav1.CreateOptions{})
 	return err
 }
 

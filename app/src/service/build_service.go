@@ -24,9 +24,10 @@ var ErrBuildNotCancellable = errors.New("build is not cancellable")
 
 // BuildService はビルドトリガーのビジネスロジックを定義するインターフェース
 type BuildService interface {
-	TriggerBuild(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error) // ビルドをトリガーする
-	CancelBuild(ctx context.Context, userID string, buildID string) error                                  // ビルドをキャンセルする
-	GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, error)     // ビルドログを取得する
+	TriggerBuild(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error)         // ビルドをトリガーする
+	CancelBuild(ctx context.Context, userID string, buildID string) error                                          // ビルドをキャンセルする
+	GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error) // ビルドログを取得する（ログ文字列・最終チャンク時刻・エラー）
+	ListBuilds(ctx context.Context, userID string, deploymentID string) ([]models.DeploymentBuild, error)          // ビルド一覧を取得する
 }
 
 // TriggerBuildRequest は TriggerBuild のリクエスト構造体（現時点では deploymentID のみ）
@@ -204,25 +205,25 @@ func (svc *buildServiceImpl) CancelBuild(ctx context.Context, userID string, bui
 	return nil // キャンセル成功
 }
 
-// GetBuildLogs はビルドIDに紐づくログを取得して結合した文字列を返す
-func (svc *buildServiceImpl) GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, error) {
+// GetBuildLogs はビルドIDに紐づくログを取得して結合した文字列と最終チャンク時刻を返す
+func (svc *buildServiceImpl) GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error) {
 	// 1. ビルドレコードを取得する
 	buildData, err := svc.buildRepo.FindByID(ctx, buildID) // ビルドレコードを取得する
 	if err != nil {
-		return "", err // 取得エラーを返す
+		return "", nil, err // 取得エラーを返す
 	}
 
 	// 2. 所有権チェック（Build → Deployment → Project → UserID を辿る）
 	deploymentData, err := svc.deploymentRepo.FindByID(ctx, buildData.DeploymentID) // deployment を取得する
 	if err != nil {
-		return "", err // 取得エラーを返す
+		return "", nil, err // 取得エラーを返す
 	}
 	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // project を取得する
 	if err != nil {
-		return "", err // 取得エラーを返す
+		return "", nil, err // 取得エラーを返す
 	}
 	if projectData.UserID != userID { // UserID が一致しない場合は禁止エラーを返す
-		return "", ErrForbidden
+		return "", nil, ErrForbidden
 	}
 
 	// 3. ログチャンクを取得する（since 指定あり／なしで分岐する）
@@ -233,15 +234,18 @@ func (svc *buildServiceImpl) GetBuildLogs(ctx context.Context, userID string, bu
 		chunkList, err = svc.logChunkRepo.FindByBuildID(ctx, buildID) // 全チャンクを取得する
 	}
 	if err != nil {
-		return "", err // 取得エラーを返す
+		return "", nil, err // 取得エラーを返す
 	}
 
-	// 4. チャンクを結合して返す
-	var logBuilder strings.Builder                      // ログ文字列ビルダーを生成する
-	for _, chunk := range chunkList {                   // 各チャンクを結合する
-		logBuilder.WriteString(chunk.Content)           // チャンクの内容を追記する
+	// 4. チャンクを結合して最終チャンクの時刻を返す
+	var logBuilder strings.Builder               // ログ文字列ビルダーを生成する
+	var lastChunkTime *time.Time                 // 最終チャンクの時刻を保持する
+	for _, chunk := range chunkList {            // 各チャンクを結合する
+		logBuilder.WriteString(chunk.Content)    // チャンクの内容を追記する
+		chunkTime := chunk.CreatedAt             // ループ変数のアドレスをコピーする
+		lastChunkTime = &chunkTime               // 最終チャンクの時刻を更新する
 	}
-	return logBuilder.String(), nil // 結合したログ文字列を返す
+	return logBuilder.String(), lastChunkTime, nil // 結合したログ文字列と最終時刻を返す
 }
 
 // ListBuilds は deploymentID に紐づくビルド一覧を返す

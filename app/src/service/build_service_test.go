@@ -477,8 +477,8 @@ func TestGetBuildLogs_正常系(t *testing.T) {
 
 	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, "") // サービスを生成する
 
-	logs, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", nil) // ログを取得する
-	if err != nil {                                                     // エラーが返った場合はテスト失敗
+	logs, _, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", nil) // ログを取得する
+	if err != nil {                                                        // エラーが返った場合はテスト失敗
 		t.Fatalf("GetBuildLogs() が予期しないエラーを返しました: %v", err)
 	}
 	expectedLogs := "line1\nline2\n" // 期待するログ文字列を設定する
@@ -530,8 +530,8 @@ func TestGetBuildLogs_since指定(t *testing.T) {
 
 	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, "") // サービスを生成する
 
-	logs, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", &sinceTime) // since を指定してログを取得する
-	if err != nil {                                                            // エラーが返った場合はテスト失敗
+	logs, _, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", &sinceTime) // since を指定してログを取得する
+	if err != nil {                                                              // エラーが返った場合はテスト失敗
 		t.Fatalf("GetBuildLogs() が予期しないエラーを返しました: %v", err)
 	}
 	if logs != "line3\n" { // since 以降のログのみ返ることを確認する
@@ -579,8 +579,8 @@ func TestGetBuildLogs_チャンクなし(t *testing.T) {
 
 	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, "") // サービスを生成する
 
-	logs, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", nil) // ログを取得する
-	if err != nil {                                                     // エラーが返った場合はテスト失敗
+	logs, _, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", nil) // ログを取得する
+	if err != nil {                                                       // エラーが返った場合はテスト失敗
 		t.Fatalf("GetBuildLogs() が予期しないエラーを返しました: %v", err)
 	}
 	if logs != "" { // 空文字列が返ることを確認する
@@ -619,8 +619,8 @@ func TestGetBuildLogs_403_他ユーザー(t *testing.T) {
 
 	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, &mockBuildLogChunkRepository{}, k8sClient, "") // サービスを生成する
 
-	_, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", nil) // 他ユーザーのログを取得しようとする
-	if err != ErrForbidden {                                        // ErrForbidden が返ることを確認する
+	_, _, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", nil) // 他ユーザーのログを取得しようとする
+	if err != ErrForbidden {                                          // ErrForbidden が返ることを確認する
 		t.Errorf("期待するエラー %v、実際のエラー %v", ErrForbidden, err)
 	}
 }

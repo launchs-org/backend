@@ -48,7 +48,8 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.GET("/deployments/:id", opts.DeploymentHandler.GetDeployment)               // deployment 詳細取得エンドポイント
 	apiGroup.PUT("/deployments/:id", opts.DeploymentHandler.UpdateDeployment)            // deployment 更新エンドポイント
 	apiGroup.DELETE("/deployments/:id", opts.DeploymentHandler.DeleteDeployment)         // deployment 削除エンドポイント
-	apiGroup.POST("/deployments/:id/apply", opts.DeploymentHandler.ApplyDeployment)               // deployment apply エンドポイント
+	apiGroup.POST("/deployments/:id/apply", opts.DeploymentHandler.ApplyDeployment)                       // deployment apply エンドポイント
+	apiGroup.POST("/deployments/:id/discard-pending", opts.DeploymentHandler.DiscardPending)              // deployment pending クリアエンドポイント
 	apiGroup.GET("/deployments/:id/apply-histories", opts.DeploymentHandler.ListApplyHistories)   // apply 履歴一覧取得エンドポイント
 	apiGroup.GET("/deployments/:id/service", opts.DeploymentHandler.GetService)                   // service 設定取得エンドポイント
 	apiGroup.POST("/deployments/:id/service", opts.DeploymentHandler.CreateService)               // service 作成エンドポイント
@@ -56,6 +57,7 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.DELETE("/deployments/:id/service", opts.DeploymentHandler.DeleteService)             // service 削除エンドポイント
 
 	// build エンドポイントを登録する
+	apiGroup.GET("/deployments/:id/builds", opts.BuildHandler.ListBuilds)   // ビルド一覧取得エンドポイント
 	apiGroup.POST("/deployments/:id/build", opts.BuildHandler.TriggerBuild) // ビルドトリガーエンドポイント
 	apiGroup.DELETE("/builds/:id", opts.BuildHandler.CancelBuild)           // ビルドキャンセルエンドポイント
 	apiGroup.GET("/builds/:id/logs", opts.BuildHandler.GetBuildLogs)        // ビルドログ取得エンドポイント

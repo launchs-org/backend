@@ -17,7 +17,7 @@ import (
 type mockBuildService struct {
 	triggerBuildFunc func(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error)
 	cancelBuildFunc  func(ctx context.Context, userID string, buildID string) error
-	getBuildLogsFunc func(ctx context.Context, userID string, buildID string, since *time.Time) (string, error)
+	getBuildLogsFunc func(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error)
 	listBuildsFunc   func(ctx context.Context, userID string, deploymentID string) ([]models.DeploymentBuild, error)
 }
 
@@ -29,7 +29,7 @@ func (mock *mockBuildService) CancelBuild(ctx context.Context, userID string, bu
 	return mock.cancelBuildFunc(ctx, userID, buildID) // モック関数を呼び出す
 }
 
-func (mock *mockBuildService) GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, error) {
+func (mock *mockBuildService) GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error) {
 	return mock.getBuildLogsFunc(ctx, userID, buildID, since) // モック関数を呼び出す
 }
 
@@ -217,8 +217,8 @@ func newGetBuildLogsHandlerTestContext(buildID string, since string) (echo.Conte
 // TestGetBuildLogs_正常系 はビルドログが正常に取得できることを確認する
 func TestGetBuildLogs_正常系(t *testing.T) {
 	mockSvc := &mockBuildService{
-		getBuildLogsFunc: func(ctx context.Context, userID string, buildID string, since *time.Time) (string, error) {
-			return "line1\nline2\n", nil // テスト用ログを返す
+		getBuildLogsFunc: func(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error) {
+			return "line1\nline2\n", nil, nil // テスト用ログを返す
 		},
 	}
 
@@ -247,9 +247,9 @@ func TestGetBuildLogs_since指定(t *testing.T) {
 	capturedSince := (*time.Time)(nil) // GetBuildLogs に渡された since を記録する
 
 	mockSvc := &mockBuildService{
-		getBuildLogsFunc: func(ctx context.Context, userID string, buildID string, since *time.Time) (string, error) {
-			capturedSince = since   // since を記録する
-			return "line3\n", nil   // テスト用ログを返す
+		getBuildLogsFunc: func(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error) {
+			capturedSince = since      // since を記録する
+			return "line3\n", nil, nil // テスト用ログを返す
 		},
 	}
 
@@ -272,8 +272,8 @@ func TestGetBuildLogs_since指定(t *testing.T) {
 // TestGetBuildLogs_403_他ユーザー は他ユーザーのビルドログ取得で 403 が返ることを確認する
 func TestGetBuildLogs_403_他ユーザー(t *testing.T) {
 	mockSvc := &mockBuildService{
-		getBuildLogsFunc: func(ctx context.Context, userID string, buildID string, since *time.Time) (string, error) {
-			return "", service.ErrForbidden // 所有権エラーを返す
+		getBuildLogsFunc: func(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error) {
+			return "", nil, service.ErrForbidden // 所有権エラーを返す
 		},
 	}
 
@@ -292,8 +292,8 @@ func TestGetBuildLogs_403_他ユーザー(t *testing.T) {
 // TestGetBuildLogs_sinceパラメータ不正 は不正な since パラメータで 400 が返ることを確認する
 func TestGetBuildLogs_sinceパラメータ不正(t *testing.T) {
 	mockSvc := &mockBuildService{
-		getBuildLogsFunc: func(ctx context.Context, userID string, buildID string, since *time.Time) (string, error) {
-			return "", nil // 呼ばれないはずなのでデフォルトを返す
+		getBuildLogsFunc: func(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error) {
+			return "", nil, nil // 呼ばれないはずなのでデフォルトを返す
 		},
 	}
 

@@ -83,10 +83,11 @@ type Deployment struct {
 	PendingArgs pq.StringArray `gorm:"type:text[]" json:"pending_args"`
 
 	// --- ステータス ---
-	Status    DeploymentStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
-	AppStatus AppStatus        `gorm:"type:varchar(32);not null;default:'pending'" json:"app_status"`
-	K8sStatus datatypes.JSON   `gorm:"type:jsonb"                                  json:"k8s_status"` // null = 未同期
-	AppliedAt *time.Time       `json:"applied_at"`
+	Status         DeploymentStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
+	AppStatus      AppStatus        `gorm:"type:varchar(32);not null;default:'pending'" json:"app_status"`
+	K8sStatus      datatypes.JSON   `gorm:"type:jsonb"                                  json:"k8s_status"` // null = 未同期
+	DeleteProgress string           `gorm:"type:varchar(128)"                           json:"delete_progress"` // 削除中のステップ名（deleting 時のみ使用）
+	AppliedAt      *time.Time       `json:"applied_at"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

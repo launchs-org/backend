@@ -2,7 +2,6 @@ package handler
 
 import (
 	"app/logger"
-	"app/middlewares"
 	"app/service"
 	"errors"
 	"fmt"
@@ -31,10 +30,10 @@ const maskedValue = "***"
 
 // ListEnvVars は GET /api/v1/projects/:id/env-vars のハンドラー
 func (envVarHandler *EnvVarHandler) ListEnvVars(echoCtx echo.Context) error {
-	userClaim := echoCtx.Get("claim").(*middlewares.AccessTokenClaim) // JWT クレームを取得する
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
 	projectID := echoCtx.Param("id")                                  // パスパラメータから project ID を取得する
 
-	envVarList, err := envVarHandler.envVarService.ListEnvVars(echoCtx.Request().Context(), userClaim.UserID, projectID) // サービスを呼び出して一覧を取得する
+	envVarList, err := envVarHandler.envVarService.ListEnvVars(echoCtx.Request().Context(), userID, projectID) // サービスを呼び出して一覧を取得する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
 			logger.PrintHandlerError("EnvVarHandler", "ListEnvVars", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
@@ -73,7 +72,7 @@ func (envVarHandler *EnvVarHandler) ListEnvVars(echoCtx echo.Context) error {
 
 // CreateEnvVar は POST /api/v1/projects/:id/env-vars のハンドラー
 func (envVarHandler *EnvVarHandler) CreateEnvVar(echoCtx echo.Context) error {
-	userClaim := echoCtx.Get("claim").(*middlewares.AccessTokenClaim) // JWT クレームを取得する
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
 	projectID := echoCtx.Param("id")                                  // パスパラメータから project ID を取得する
 
 	var requestBody service.CreateEnvVarRequest               // リクエストボディの構造体を定義する
@@ -90,7 +89,7 @@ func (envVarHandler *EnvVarHandler) CreateEnvVar(echoCtx echo.Context) error {
 		})
 	}
 
-	envVarData, err := envVarHandler.envVarService.CreateEnvVar(echoCtx.Request().Context(), userClaim.UserID, projectID, requestBody) // サービスを呼び出して env_var を作成する
+	envVarData, err := envVarHandler.envVarService.CreateEnvVar(echoCtx.Request().Context(), userID, projectID, requestBody) // サービスを呼び出して env_var を作成する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
 			logger.PrintHandlerError("EnvVarHandler", "CreateEnvVar", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
@@ -125,7 +124,7 @@ func (envVarHandler *EnvVarHandler) CreateEnvVar(echoCtx echo.Context) error {
 
 // UpdateEnvVar は PUT /api/v1/env-vars/:id のハンドラー
 func (envVarHandler *EnvVarHandler) UpdateEnvVar(echoCtx echo.Context) error {
-	userClaim := echoCtx.Get("claim").(*middlewares.AccessTokenClaim) // JWT クレームを取得する
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
 	envVarID := echoCtx.Param("id")                                   // パスパラメータから env_var ID を取得する
 
 	var requestBody service.UpdateEnvVarRequest               // リクエストボディの構造体を定義する
@@ -136,7 +135,7 @@ func (envVarHandler *EnvVarHandler) UpdateEnvVar(echoCtx echo.Context) error {
 		})
 	}
 
-	envVarData, err := envVarHandler.envVarService.UpdateEnvVar(echoCtx.Request().Context(), userClaim.UserID, envVarID, requestBody) // サービスを呼び出して env_var を更新する
+	envVarData, err := envVarHandler.envVarService.UpdateEnvVar(echoCtx.Request().Context(), userID, envVarID, requestBody) // サービスを呼び出して env_var を更新する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
 			logger.PrintHandlerError("EnvVarHandler", "UpdateEnvVar", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
@@ -171,10 +170,10 @@ func (envVarHandler *EnvVarHandler) UpdateEnvVar(echoCtx echo.Context) error {
 
 // DeleteEnvVar は DELETE /api/v1/env-vars/:id のハンドラー
 func (envVarHandler *EnvVarHandler) DeleteEnvVar(echoCtx echo.Context) error {
-	userClaim := echoCtx.Get("claim").(*middlewares.AccessTokenClaim) // JWT クレームを取得する
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
 	envVarID := echoCtx.Param("id")                                   // パスパラメータから env_var ID を取得する
 
-	err := envVarHandler.envVarService.DeleteEnvVar(echoCtx.Request().Context(), userClaim.UserID, envVarID) // サービスを呼び出して env_var を削除する
+	err := envVarHandler.envVarService.DeleteEnvVar(echoCtx.Request().Context(), userID, envVarID) // サービスを呼び出して env_var を削除する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
 			logger.PrintHandlerError("EnvVarHandler", "DeleteEnvVar", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
@@ -198,10 +197,10 @@ func (envVarHandler *EnvVarHandler) DeleteEnvVar(echoCtx echo.Context) error {
 
 // ListEnvVarMounts は GET /api/v1/deployments/:id/env-var-mounts のハンドラー
 func (envVarHandler *EnvVarHandler) ListEnvVarMounts(echoCtx echo.Context) error {
-	userClaim := echoCtx.Get("claim").(*middlewares.AccessTokenClaim) // JWT クレームを取得する
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
 	deploymentID := echoCtx.Param("id")                               // パスパラメータから deployment ID を取得する
 
-	mountList, err := envVarHandler.envVarMountService.ListEnvVarMounts(echoCtx.Request().Context(), userClaim.UserID, deploymentID) // サービスを呼び出して一覧を取得する
+	mountList, err := envVarHandler.envVarMountService.ListEnvVarMounts(echoCtx.Request().Context(), userID, deploymentID) // サービスを呼び出して一覧を取得する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
 			logger.PrintHandlerError("EnvVarHandler", "ListEnvVarMounts", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
@@ -225,7 +224,7 @@ func (envVarHandler *EnvVarHandler) ListEnvVarMounts(echoCtx echo.Context) error
 
 // CreateEnvVarMount は POST /api/v1/deployments/:id/env-var-mounts のハンドラー
 func (envVarHandler *EnvVarHandler) CreateEnvVarMount(echoCtx echo.Context) error {
-	userClaim := echoCtx.Get("claim").(*middlewares.AccessTokenClaim) // JWT クレームを取得する
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
 	deploymentID := echoCtx.Param("id")                               // パスパラメータから deployment ID を取得する
 
 	var requestBody service.CreateEnvVarMountRequest          // リクエストボディの構造体を定義する
@@ -242,7 +241,7 @@ func (envVarHandler *EnvVarHandler) CreateEnvVarMount(echoCtx echo.Context) erro
 		})
 	}
 
-	mountData, err := envVarHandler.envVarMountService.CreateEnvVarMount(echoCtx.Request().Context(), userClaim.UserID, deploymentID, requestBody) // サービスを呼び出してマウント設定を作成する
+	mountData, err := envVarHandler.envVarMountService.CreateEnvVarMount(echoCtx.Request().Context(), userID, deploymentID, requestBody) // サービスを呼び出してマウント設定を作成する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
 			logger.PrintHandlerError("EnvVarHandler", "CreateEnvVarMount", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
@@ -272,10 +271,10 @@ func (envVarHandler *EnvVarHandler) CreateEnvVarMount(echoCtx echo.Context) erro
 
 // DeleteEnvVarMount は DELETE /api/v1/env-var-mounts/:id のハンドラー
 func (envVarHandler *EnvVarHandler) DeleteEnvVarMount(echoCtx echo.Context) error {
-	userClaim := echoCtx.Get("claim").(*middlewares.AccessTokenClaim) // JWT クレームを取得する
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
 	mountID := echoCtx.Param("id")                                    // パスパラメータからマウント ID を取得する
 
-	err := envVarHandler.envVarMountService.DeleteEnvVarMount(echoCtx.Request().Context(), userClaim.UserID, mountID) // サービスを呼び出してマウント設定を削除する
+	err := envVarHandler.envVarMountService.DeleteEnvVarMount(echoCtx.Request().Context(), userID, mountID) // サービスを呼び出してマウント設定を削除する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
 			logger.PrintHandlerError("EnvVarHandler", "DeleteEnvVarMount", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
