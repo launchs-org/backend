@@ -60,9 +60,10 @@ export function ProjectDetailPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]) // ReactFlowのノードを管理する
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]) // ReactFlowのエッジを管理する
   const [deletingProject, setDeletingProject] = useState(false) // プロジェクト削除中フラグ
-  const [ingressRoute, setIngressRoute] = useState<IngressRoute | null>(null) // プロジェクト単位のIngressRouteを管理する
-  const [pathRules, setPathRules] = useState<PathRule[]>([]) // IngressRouteのパスルール一覧を管理する
+  const [ingressRouteList, setIngressRouteList] = useState<IngressRoute[]>([]) // プロジェクトのIngressRoute一覧を管理する
+  const [pathRulesByIngressRouteId, setPathRulesByIngressRouteId] = useState<Record<string, PathRule[]>>({}) // IngressRoute IDをキーにしたパスルールマップを管理する
   const [creatingIngress, setCreatingIngress] = useState(false) // IngressRoute作成中フラグ
+  const [selectedIngressRouteId, setSelectedIngressRouteId] = useState<string | null>(null) // 選択中のIngressRoute IDを管理する
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(null) // サイドバーの表示モードを管理する
   const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null) // 選択中のデプロイメントIDを管理する
   const [iframeLoaded, setIframeLoaded] = useState(false) // iframe読み込み完了フラグ
@@ -78,7 +79,8 @@ export function ProjectDetailPage() {
   const dragStartX = useRef(0) // ドラッグ開始X座標
   const dragStartWidth = useRef(SIDEBAR_INITIAL_WIDTH) // ドラッグ開始時の幅
 
-  const openIngressSidebar = useCallback(() => {
+  const openIngressSidebar = useCallback((ingressRouteId: string) => {
+    setSelectedIngressRouteId(ingressRouteId) // 選択した IngressRoute ID を設定する
     setSidebarMode('ingress') // IngressRoute サイドバーを開く
     setSelectedDeploymentId(null) // デプロイメント選択をリセットする
   }, [])
@@ -86,8 +88,8 @@ export function ProjectDetailPage() {
   const buildGraph = useCallback((
     relations: DeploymentWithRelations[],
     pid: string,
-    currentIngressRoute: IngressRoute | null,
-    currentPathRules: PathRule[],
+    currentIngressRouteList: IngressRoute[],
+    currentPathRulesByIngressRouteId: Record<string, PathRule[]>,
     currentVolumeList: Volume[],
   ) => {
     const newNodes: Node[] = []
@@ -151,15 +153,17 @@ export function ProjectDetailPage() {
         })
 
         // pathRules でこの Service が IngressRoute に登録済みの場合のみ Ingress → Service のエッジを追加する
-        const isLinkedToIngress = currentIngressRoute && currentPathRules.some(pr => pr.service_id === relation.service!.id)
-        if (isLinkedToIngress) {
+        const linkedIngressRouteList = currentIngressRouteList.filter(ing =>
+          (currentPathRulesByIngressRouteId[ing.id] ?? []).some(pr => pr.service_id === relation.service!.id)
+        ) // この Service を参照している IngressRoute を収集する
+        linkedIngressRouteList.forEach(linkedIngressRoute => {
           newEdges.push({
-            id: `edge-ing-svc-${relation.service.id}`,
-            source: 'ingress-node',
-            target: `svc-${relation.service.id}`,
+            id: `edge-ing-svc-${linkedIngressRoute.id}-${relation.service!.id}`,
+            source: `ingress-node-${linkedIngressRoute.id}`,
+            target: `svc-${relation.service!.id}`,
             ...EDGE_DEFAULTS,
           })
-        }
+        })
       }
     })
 
@@ -201,34 +205,40 @@ export function ProjectDetailPage() {
       })
     })
 
-    // Ingress / Internet は全行の縦中央に1つ配置する
-    // 全行の縦中央Y = 全行の高さ/2 - DEP_H/2（Deployment 基準）
+    // IngressRoute を縦に並べて配置する
+    const ING_ROW_HEIGHT = 140 // IngressRoute ノード間の縦間隔
     const totalDepSpan = relations.length * ROW_HEIGHT // 全Deploymentが占める縦幅
     const depMidY = (totalDepSpan - ROW_HEIGHT) / 2 // 縦中央行の Deployment Y座標
-    const ingY = depMidY + (DEP_H - ING_H) / 2   // IngressRoute の縦中央を Deployment に合わせる
-    const netY = depMidY + (DEP_H - NET_H) / 2   // Internet の縦中央を Deployment に合わせる
 
-    if (currentIngressRoute) {
-      newNodes.push({
-        id: 'ingress-node',
-        type: 'ingress',
-        position: { x: INGRESS_COL, y: ingY },
-        data: {
-          ingress: currentIngressRoute,
-          pathRules: currentPathRules,
-          onSelect: openIngressSidebar, // ノードクリック時にIngressサイドバーを開く
-        },
+    if (currentIngressRouteList.length > 0) {
+      const totalIngHeight = currentIngressRouteList.length * ING_ROW_HEIGHT // 全IngressRouteが占める縦幅
+      const ingStartY = depMidY + (DEP_H - totalIngHeight) / 2 // IngressRoute 群の開始Y座標（Deploymentの縦中央に合わせる）
+      const netY = depMidY + (DEP_H - NET_H) / 2 // Internet の縦中央を Deployment に合わせる
+
+      currentIngressRouteList.forEach((ingressRoute, ingressIndex) => {
+        const ingY = ingStartY + ingressIndex * ING_ROW_HEIGHT // 各 IngressRoute のY座標
+        const currentPathRules = currentPathRulesByIngressRouteId[ingressRoute.id] ?? [] // この IngressRoute のパスルールを取得する
+        newNodes.push({
+          id: `ingress-node-${ingressRoute.id}`,
+          type: 'ingress',
+          position: { x: INGRESS_COL, y: ingY },
+          data: {
+            ingress: ingressRoute,
+            pathRules: currentPathRules,
+            onSelect: () => openIngressSidebar(ingressRoute.id), // ノードクリック時にIngressサイドバーを開く
+          },
+        })
+
+        // Internet → IngressRoute のエッジを追加する
+        newEdges.push({
+          id: `edge-internet-ingress-${ingressRoute.id}`,
+          source: 'internet-node',
+          target: `ingress-node-${ingressRoute.id}`,
+          ...EDGE_DEFAULTS,
+        })
       })
 
-      // Internet → IngressRoute のエッジを追加する
-      newEdges.push({
-        id: 'edge-internet-ingress',
-        source: 'internet-node',
-        target: 'ingress-node',
-        ...EDGE_DEFAULTS,
-      })
-
-      // Internet ノードの縦中央を Deployment に合わせる
+      // Internet ノードを配置する（IngressRoute が1つ以上ある場合のみ表示する）
       newNodes.push({
         id: 'internet-node',
         type: 'internet',
@@ -268,26 +278,28 @@ export function ProjectDetailPage() {
 
       setDeploymentRelations(relations) // デプロイメント関連リソースを更新する
 
-      // プロジェクト単位のIngressRouteを取得する
-      const ingressResult = await get<IngressRoute>(`/projects/${projectId}/ingress-route`).catch(() => null) // IngressRouteを取得する
-      setIngressRoute(ingressResult) // IngressRoute情報を設定する
+      // プロジェクトの IngressRoute 一覧を取得する
+      const ingressList = await get<IngressRoute[]>(`/projects/${projectId}/ingress-routes`).catch(() => []) ?? [] // IngressRoute 一覧を取得する
+      setIngressRouteList(ingressList) // IngressRoute 一覧を設定する
 
-      let currentPathRules: PathRule[] = []
-      if (ingressResult) {
-        currentPathRules = await get<PathRule[]>(`/ingress-routes/${ingressResult.id}/path-rules`).catch(() => []) ?? [] // パスルール一覧を取得する
-        setPathRules(currentPathRules) // パスルールを設定する
-      } else {
-        setPathRules([]) // パスルールを空にする
-      }
+      // 各 IngressRoute のパスルールを並行取得する
+      const pathRulesEntries = await Promise.all(
+        ingressList.map(async (ingressRoute) => {
+          const rules = await get<PathRule[]>(`/ingress-routes/${ingressRoute.id}/path-rules`).catch(() => []) ?? [] // パスルール一覧を取得する
+          return [ingressRoute.id, rules] as [string, PathRule[]]
+        })
+      )
+      const currentPathRulesByIngressRouteId = Object.fromEntries(pathRulesEntries) // IngressRoute IDをキーにしたパスルールマップを生成する
+      setPathRulesByIngressRouteId(currentPathRulesByIngressRouteId) // パスルールマップを設定する
 
       const volumes = await get<Volume[]>(`/projects/${projectId}/volumes`).catch(() => []) // ボリューム一覧を取得する
       setVolumeList(volumes ?? []) // ボリューム一覧を設定する
 
       // グラフに関わるデータのハッシュキーを生成し、前回から変化があった場合のみ再描画する
-      const nextGraphKey = JSON.stringify({ relations, ingressResult, currentPathRules, volumes })
+      const nextGraphKey = JSON.stringify({ relations, ingressList, currentPathRulesByIngressRouteId, volumes })
       if (nextGraphKey !== prevGraphKey.current) {
         prevGraphKey.current = nextGraphKey // キーを更新する
-        buildGraph(relations, projectId, ingressResult, currentPathRules, volumes ?? []) // グラフを再描画する
+        buildGraph(relations, projectId, ingressList, currentPathRulesByIngressRouteId, volumes ?? []) // グラフを再描画する
       }
 
       const envVars = await get<EnvVar[]>(`/projects/${projectId}/env-vars`).catch(() => []) // 環境変数一覧を取得する
@@ -342,9 +354,11 @@ export function ProjectDetailPage() {
     if (!projectId) return
     setCreatingIngress(true) // 作成中フラグを立てる
     try {
-      await post(`/projects/${projectId}/ingress-route`) // IngressRouteを作成する
+      const created = await post<IngressRoute>(`/projects/${projectId}/ingress-routes`) // IngressRouteを作成する
       await fetchData() // データを再取得する
-      setSidebarMode('ingress') // 作成後にIngressサイドバーを開く
+      if (created) {
+        openIngressSidebar(created.id) // 作成した IngressRoute のサイドバーを開く
+      }
     } catch (createError) {
       console.error(createError)
       alert('IngressRouteの作成に失敗しました')
@@ -451,11 +465,7 @@ export function ProjectDetailPage() {
                   <button
                     onClick={() => {
                       setShowAddMenu(false)
-                      if (ingressRoute) {
-                        setSidebarMode('ingress') // 既存の IngressRoute がある場合はサイドバーを開く
-                      } else {
-                        void handleCreateIngressRoute() // 未作成の場合は作成する
-                      }
+                      void handleCreateIngressRoute() // 常に新規作成する（複数作成可能）
                     }}
                     disabled={creatingIngress}
                     className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-[#111827] hover:bg-gray-50 transition-colors disabled:opacity-50"
@@ -632,16 +642,20 @@ export function ProjectDetailPage() {
                   )}
 
                   {/* IngressRoute サイドバー */}
-                  {sidebarMode === 'ingress' && ingressRoute && (
-                    <IngressRouteSidebar
-                      projectId={projectId!}
-                      ingressRoute={ingressRoute}
-                      pathRules={pathRules}
-                      deploymentRelations={deploymentRelations}
-                      onRefresh={fetchData}
-                      onClose={handleCloseSidebar}
-                    />
-                  )}
+                  {sidebarMode === 'ingress' && selectedIngressRouteId && (() => {
+                    const selectedIngressRoute = ingressRouteList.find(ir => ir.id === selectedIngressRouteId) // 選択中の IngressRoute を取得する
+                    if (!selectedIngressRoute) return null
+                    return (
+                      <IngressRouteSidebar
+                        projectId={projectId!}
+                        ingressRoute={selectedIngressRoute}
+                        pathRules={pathRulesByIngressRouteId[selectedIngressRouteId] ?? []}
+                        deploymentRelations={deploymentRelations}
+                        onRefresh={fetchData}
+                        onClose={handleCloseSidebar}
+                      />
+                    )
+                  })()}
                 </div>
               </>
             )}
@@ -695,7 +709,7 @@ function IngressRouteSidebar({
     if (!confirm('IngressRoute を削除しますか？k8s からも即時削除されます。')) return
     setDeleting(true) // 削除中フラグを立てる
     try {
-      await del(`/projects/${projectId}/ingress-route`) // IngressRoute を deleting 状態にする
+      await del(`/ingress-routes/${ingressRoute.id}`) // IngressRoute を deleting 状態にする
       await post(`/projects/${projectId}/apply`) // Apply して k8s から削除・DB レコードも物理削除する
       await onRefresh() // データを再取得する
       onClose() // サイドバーを閉じる
