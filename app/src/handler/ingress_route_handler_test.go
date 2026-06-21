@@ -17,24 +17,24 @@ import (
 
 // mockIngressRouteService は IngressRouteService のテスト用モック実装
 type mockIngressRouteService struct {
-	getIngressRouteFunc    func(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error)
+	listIngressRoutesFunc  func(ctx context.Context, userID string, projectID string) ([]*models.IngressRoute, error)
 	createIngressRouteFunc func(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error)
-	deleteIngressRouteFunc func(ctx context.Context, userID string, projectID string) error
+	deleteIngressRouteFunc func(ctx context.Context, userID string, ingressRouteID string) error
 	listPathRulesFunc      func(ctx context.Context, userID string, ingressRouteID string) ([]*models.PathRule, error)
 	createPathRuleFunc     func(ctx context.Context, userID string, ingressRouteID string, req service.CreatePathRuleRequest) (*models.PathRule, error)
 	deletePathRuleFunc     func(ctx context.Context, userID string, pathRuleID string) error
 }
 
-func (mock *mockIngressRouteService) GetIngressRoute(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error) {
-	return mock.getIngressRouteFunc(ctx, userID, projectID) // モック関数を呼び出す
+func (mock *mockIngressRouteService) ListIngressRoutes(ctx context.Context, userID string, projectID string) ([]*models.IngressRoute, error) {
+	return mock.listIngressRoutesFunc(ctx, userID, projectID) // モック関数を呼び出す
 }
 
 func (mock *mockIngressRouteService) CreateIngressRoute(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error) {
 	return mock.createIngressRouteFunc(ctx, userID, projectID) // モック関数を呼び出す
 }
 
-func (mock *mockIngressRouteService) DeleteIngressRoute(ctx context.Context, userID string, projectID string) error {
-	return mock.deleteIngressRouteFunc(ctx, userID, projectID) // モック関数を呼び出す
+func (mock *mockIngressRouteService) DeleteIngressRoute(ctx context.Context, userID string, ingressRouteID string) error {
+	return mock.deleteIngressRouteFunc(ctx, userID, ingressRouteID) // モック関数を呼び出す
 }
 
 func (mock *mockIngressRouteService) ListPathRules(ctx context.Context, userID string, ingressRouteID string) ([]*models.PathRule, error) {
@@ -88,77 +88,54 @@ func setupIngressRouteEchoContext(method, path, body string, params map[string]s
 	return echoCtx, responseRecorder
 }
 
-// TestIngressRouteHandler_GetIngressRoute_正常に取得される は GET で 200 と ingress_route が返ることを確認する
-func TestIngressRouteHandler_GetIngressRoute_正常に取得される(t *testing.T) {
-	expectedIngressRoute := &models.IngressRoute{
-		ID:        "ingress-route-id-1",         // IngressRoute ID を設定する
-		ProjectID: "project-id-1",               // project_id を設定する
-		Host:      "abc.launchs.org",            // ホスト名を設定する
-		Status:    models.IngressRouteStatusActive, // ステータスを設定する
+// TestIngressRouteHandler_ListIngressRoutes_正常に一覧が返る は GET で 200 と ingress_route 一覧が返ることを確認する
+func TestIngressRouteHandler_ListIngressRoutes_正常に一覧が返る(t *testing.T) {
+	expectedIngressRouteList := []*models.IngressRoute{
+		{ID: "ingress-route-id-1", ProjectID: "project-id-1", Host: "abc.launchs.org", Status: models.IngressRouteStatusActive},
+		{ID: "ingress-route-id-2", ProjectID: "project-id-1", Host: "def.launchs.org", Status: models.IngressRouteStatusPending},
 	}
 
 	mockSvc := &mockIngressRouteService{
-		getIngressRouteFunc: func(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error) {
-			return expectedIngressRoute, nil // 正常に返す
+		listIngressRoutesFunc: func(ctx context.Context, userID string, projectID string) ([]*models.IngressRoute, error) {
+			return expectedIngressRouteList, nil // 一覧を返す
 		},
 	}
 
 	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
 	echoCtx, responseRecorder := setupIngressRouteEchoContext(
-		http.MethodGet, "/api/v1/projects/project-id-1/ingress-route", "", map[string]string{"id": "project-id-1"},
+		http.MethodGet, "/api/v1/projects/project-id-1/ingress-routes", "", map[string]string{"id": "project-id-1"},
 	) // テスト用コンテキストを生成する
 
-	if err := ingressRouteHandler.GetIngressRoute(echoCtx); err != nil { // ハンドラーを実行する
+	if err := ingressRouteHandler.ListIngressRoutes(echoCtx); err != nil { // ハンドラーを実行する
 		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
 	}
 	if responseRecorder.Code != http.StatusOK { // 200 が返ることを確認する
 		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusOK, responseRecorder.Code)
 	}
 
-	var actualIngressRoute models.IngressRoute
-	if err := json.NewDecoder(responseRecorder.Body).Decode(&actualIngressRoute); err != nil { // レスポンスをデコードする
+	var actualList []*models.IngressRoute
+	if err := json.NewDecoder(responseRecorder.Body).Decode(&actualList); err != nil { // レスポンスをデコードする
 		t.Fatalf("レスポンスのデコードに失敗しました: %v", err)
 	}
-	if actualIngressRoute.Host != "abc.launchs.org" { // host が一致することを確認する
-		t.Errorf("期待する host: abc.launchs.org, 実際の host: %s", actualIngressRoute.Host)
+	if len(actualList) != 2 { // 2件返ることを確認する
+		t.Errorf("期待する件数: 2, 実際の件数: %d", len(actualList))
 	}
 }
 
-// TestIngressRouteHandler_GetIngressRoute_存在しない場合は404になる は 404 が返ることを確認する
-func TestIngressRouteHandler_GetIngressRoute_存在しない場合は404になる(t *testing.T) {
+// TestIngressRouteHandler_ListIngressRoutes_権限がない場合は403になる は 403 が返ることを確認する
+func TestIngressRouteHandler_ListIngressRoutes_権限がない場合は403になる(t *testing.T) {
 	mockSvc := &mockIngressRouteService{
-		getIngressRouteFunc: func(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error) {
-			return nil, gorm.ErrRecordNotFound // 存在しない場合は NotFound を返す
-		},
-	}
-
-	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
-	echoCtx, responseRecorder := setupIngressRouteEchoContext(
-		http.MethodGet, "/api/v1/projects/project-id-1/ingress-route", "", map[string]string{"id": "project-id-1"},
-	) // テスト用コンテキストを生成する
-
-	if err := ingressRouteHandler.GetIngressRoute(echoCtx); err != nil { // ハンドラーを実行する
-		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
-	}
-	if responseRecorder.Code != http.StatusNotFound { // 404 が返ることを確認する
-		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusNotFound, responseRecorder.Code)
-	}
-}
-
-// TestIngressRouteHandler_GetIngressRoute_権限がない場合は403になる は 403 が返ることを確認する
-func TestIngressRouteHandler_GetIngressRoute_権限がない場合は403になる(t *testing.T) {
-	mockSvc := &mockIngressRouteService{
-		getIngressRouteFunc: func(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error) {
+		listIngressRoutesFunc: func(ctx context.Context, userID string, projectID string) ([]*models.IngressRoute, error) {
 			return nil, service.ErrForbidden // 権限なしエラーを返す
 		},
 	}
 
 	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
 	echoCtx, responseRecorder := setupIngressRouteEchoContext(
-		http.MethodGet, "/api/v1/projects/project-id-1/ingress-route", "", map[string]string{"id": "project-id-1"},
+		http.MethodGet, "/api/v1/projects/project-id-1/ingress-routes", "", map[string]string{"id": "project-id-1"},
 	) // テスト用コンテキストを生成する
 
-	if err := ingressRouteHandler.GetIngressRoute(echoCtx); err != nil { // ハンドラーを実行する
+	if err := ingressRouteHandler.ListIngressRoutes(echoCtx); err != nil { // ハンドラーを実行する
 		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
 	}
 	if responseRecorder.Code != http.StatusForbidden { // 403 が返ることを確認する
@@ -183,7 +160,7 @@ func TestIngressRouteHandler_CreateIngressRoute_正常に作成される(t *test
 
 	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
 	echoCtx, responseRecorder := setupIngressRouteEchoContext(
-		http.MethodPost, "/api/v1/projects/project-id-1/ingress-route", "", map[string]string{"id": "project-id-1"},
+		http.MethodPost, "/api/v1/projects/project-id-1/ingress-routes", "", map[string]string{"id": "project-id-1"},
 	) // テスト用コンテキストを生成する
 
 	if err := ingressRouteHandler.CreateIngressRoute(echoCtx); err != nil { // ハンドラーを実行する
@@ -199,6 +176,69 @@ func TestIngressRouteHandler_CreateIngressRoute_正常に作成される(t *test
 	}
 	if actualIngressRoute.Status != models.IngressRouteStatusPending { // status が pending であることを確認する
 		t.Errorf("期待する status: pending, 実際の status: %s", actualIngressRoute.Status)
+	}
+}
+
+// TestIngressRouteHandler_DeleteIngressRoute_正常に204が返る は DELETE で 204 が返ることを確認する
+func TestIngressRouteHandler_DeleteIngressRoute_正常に204が返る(t *testing.T) {
+	mockSvc := &mockIngressRouteService{
+		deleteIngressRouteFunc: func(ctx context.Context, userID string, ingressRouteID string) error {
+			return nil // 正常に返す
+		},
+	}
+
+	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
+	echoCtx, responseRecorder := setupIngressRouteEchoContext(
+		http.MethodDelete, "/api/v1/ingress-routes/ingress-route-id-1", "", map[string]string{"id": "ingress-route-id-1"},
+	) // テスト用コンテキストを生成する
+
+	if err := ingressRouteHandler.DeleteIngressRoute(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
+	}
+	if responseRecorder.Code != http.StatusNoContent { // 204 が返ることを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusNoContent, responseRecorder.Code)
+	}
+}
+
+// TestIngressRouteHandler_DeleteIngressRoute_存在しない場合は404になる は 404 が返ることを確認する
+func TestIngressRouteHandler_DeleteIngressRoute_存在しない場合は404になる(t *testing.T) {
+	mockSvc := &mockIngressRouteService{
+		deleteIngressRouteFunc: func(ctx context.Context, userID string, ingressRouteID string) error {
+			return gorm.ErrRecordNotFound // 存在しない場合は NotFound を返す
+		},
+	}
+
+	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
+	echoCtx, responseRecorder := setupIngressRouteEchoContext(
+		http.MethodDelete, "/api/v1/ingress-routes/ingress-route-id-1", "", map[string]string{"id": "ingress-route-id-1"},
+	) // テスト用コンテキストを生成する
+
+	if err := ingressRouteHandler.DeleteIngressRoute(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
+	}
+	if responseRecorder.Code != http.StatusNotFound { // 404 が返ることを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusNotFound, responseRecorder.Code)
+	}
+}
+
+// TestIngressRouteHandler_DeleteIngressRoute_権限がない場合は403になる は 403 が返ることを確認する
+func TestIngressRouteHandler_DeleteIngressRoute_権限がない場合は403になる(t *testing.T) {
+	mockSvc := &mockIngressRouteService{
+		deleteIngressRouteFunc: func(ctx context.Context, userID string, ingressRouteID string) error {
+			return service.ErrForbidden // 権限なしエラーを返す
+		},
+	}
+
+	ingressRouteHandler := NewIngressRouteHandler(mockSvc, &mockApplyServiceForIngress{}) // ハンドラーを生成する
+	echoCtx, responseRecorder := setupIngressRouteEchoContext(
+		http.MethodDelete, "/api/v1/ingress-routes/ingress-route-id-1", "", map[string]string{"id": "ingress-route-id-1"},
+	) // テスト用コンテキストを生成する
+
+	if err := ingressRouteHandler.DeleteIngressRoute(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
+	}
+	if responseRecorder.Code != http.StatusForbidden { // 403 が返ることを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusForbidden, responseRecorder.Code)
 	}
 }
 

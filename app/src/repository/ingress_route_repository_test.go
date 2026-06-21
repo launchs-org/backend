@@ -71,8 +71,8 @@ func TestIngressRouteRepository_FindByProjectID_正常に取得される(t *test
 	}
 }
 
-// TestIngressRouteRepository_UniqueIndex_同一プロジェクトに2つ作成するとエラーになる は uniqueIndex が機能することを確認する
-func TestIngressRouteRepository_UniqueIndex_同一プロジェクトに2つ作成するとエラーになる(t *testing.T) {
+// TestIngressRouteRepository_FindAllByProjectID_複数件取得される は FindAllByProjectID で複数の ingress_route が取得されることを確認する
+func TestIngressRouteRepository_FindAllByProjectID_複数件取得される(t *testing.T) {
 	db := setupTestDB(t)                     // テスト用 DB を準備する
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
@@ -89,13 +89,20 @@ func TestIngressRouteRepository_UniqueIndex_同一プロジェクトに2つ作�
 	t.Cleanup(func() { db.Unscoped().Delete(firstIngressRoute) }) // テスト終了後にレコードを削除する
 
 	secondIngressRoute := &models.IngressRoute{
-		ProjectID: projectData.ID,                   // 同じ project_id を設定する（uniqueIndex 違反）
+		ProjectID: projectData.ID,                   // 同じ project_id に2つ目を作成する
 		Host:      "second.launchs.org",             // 別のホスト名を設定する
 		Status:    models.IngressRouteStatusPending, // ステータスを設定する
 	}
-	err := repo.Create(context.Background(), nil, secondIngressRoute) // 2つ目を作成する（エラーになるはず）
-	if err == nil {                                                    // エラーが返らない場合はテスト失敗とする
-		t.Error("同一プロジェクトに2つ目の IngressRoute を作成できてしまいました")
-		db.Unscoped().Delete(secondIngressRoute) // クリーンアップする
+	if err := repo.Create(context.Background(), nil, secondIngressRoute); err != nil { // 2つ目を作成する（エラーにならないはず）
+		t.Fatalf("2つ目の Create がエラーを返しました: %v", err)
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(secondIngressRoute) }) // テスト終了後にレコードを削除する
+
+	ingressRouteList, err := repo.FindAllByProjectID(context.Background(), projectData.ID) // 全件取得する
+	if err != nil {
+		t.Fatalf("FindAllByProjectID がエラーを返しました: %v", err)
+	}
+	if len(ingressRouteList) != 2 { // 2件取得されることを確認する
+		t.Errorf("期待する件数: 2, 実際の件数: %d", len(ingressRouteList))
 	}
 }

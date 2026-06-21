@@ -12,7 +12,8 @@ import (
 type IngressRouteRepository interface {
 	Create(ctx context.Context, tx *gorm.DB, ingressRoute *models.IngressRoute) error                                                       // ingress_route を作成する
 	FindByID(ctx context.Context, ingressRouteID string) (*models.IngressRoute, error)                                                      // ID に紐づく ingress_route を取得する
-	FindByProjectID(ctx context.Context, projectID string) (*models.IngressRoute, error)                                                    // projectID に紐づく ingress_route を取得する
+	FindByProjectID(ctx context.Context, projectID string) (*models.IngressRoute, error)                                                    // projectID に紐づく ingress_route を1件取得する
+	FindAllByProjectID(ctx context.Context, projectID string) ([]*models.IngressRoute, error)                                               // projectID に紐づく ingress_route を全件取得する
 	Update(ctx context.Context, tx *gorm.DB, ingressRoute *models.IngressRoute) error                                                       // ingress_route を更新する
 	UpdateStatus(ctx context.Context, ingressRouteID string, status models.IngressRouteStatus, k8sStatus datatypes.JSON) error              // ingress_route の status と k8s_status を更新する
 	Delete(ctx context.Context, tx *gorm.DB, ingressRouteID string) error                                                                   // ingress_route を削除する
@@ -53,6 +54,15 @@ func (repo *ingressRouteRepositoryImpl) FindByProjectID(ctx context.Context, pro
 		return nil, err // 取得エラーを返す
 	}
 	return &ingressRouteData, nil // ingress_route を返す
+}
+
+// FindAllByProjectID は projectID に対応する全 ingress_route を返す
+func (repo *ingressRouteRepositoryImpl) FindAllByProjectID(ctx context.Context, projectID string) ([]*models.IngressRoute, error) {
+	var ingressRouteList []*models.IngressRoute                                                                                // ingress_route 一覧を格納する変数を定義する
+	if err := repo.db.WithContext(ctx).Where("project_id = ?", projectID).Find(&ingressRouteList).Error; err != nil {         // db から ingress_route 一覧を取得する
+		return nil, err // 取得エラーを返す
+	}
+	return ingressRouteList, nil // ingress_route 一覧を返す
 }
 
 // Update は ingress_route レコードを保存する

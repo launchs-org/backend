@@ -437,7 +437,7 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 	return applyResult, err // 結果とエラーを返す
 }
 
-// ApplyProject は projectID に紐づく IngressRoute・PathRule を k8s に apply する
+// ApplyProject は projectID に紐づく全 IngressRoute・PathRule を k8s に apply する
 func (applyService *ApplyService) ApplyProject(ctx context.Context, userID string, projectID string) error {
 	projectData, err := applyService.ProjectRepository.FindByIDNoTx(ctx, projectID) // project を取得する
 	if err != nil {
@@ -447,14 +447,25 @@ func (applyService *ApplyService) ApplyProject(ctx context.Context, userID strin
 		return ErrForbidden // 所有者でない場合は禁止エラーを返す
 	}
 
-	ingressRouteData, err := applyService.IngressRouteRepo.FindByProjectID(ctx, projectID) // IngressRoute を取得する
+	ingressRouteList, err := applyService.IngressRouteRepo.FindAllByProjectID(ctx, projectID) // 全 IngressRoute を取得する
 	if err != nil {
-		return fmt.Errorf("ingress_route not found: %w", err) // 取得エラーを返す
+		return fmt.Errorf("ingress_route 一覧取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
+	for _, ingressRouteData := range ingressRouteList { // 各 IngressRoute に対して apply 処理を行う
+		if applyErr := applyService.applySingleIngressRoute(ctx, projectData.Namespace, ingressRouteData); applyErr != nil { // 個別 IngressRoute を apply する
+			return applyErr // エラーをそのまま返す
+		}
+	}
+
+	return nil // 正常終了
+}
+
+// applySingleIngressRoute は1件の IngressRoute を k8s に apply する
+func (applyService *ApplyService) applySingleIngressRoute(ctx context.Context, namespace string, ingressRouteData *models.IngressRoute) error {
 	// status=deleting の場合は k8s から削除して DB レコードも物理削除する
 	if ingressRouteData.Status == models.IngressRouteStatusDeleting {
-		if delErr := k8s.DeleteIngressRoute(ctx, applyService.DynamicClient, projectData.Namespace, ingressRouteData.ID); delErr != nil { // k8s IngressRoute を削除する
+		if delErr := k8s.DeleteIngressRoute(ctx, applyService.DynamicClient, namespace, ingressRouteData.ID); delErr != nil { // k8s IngressRoute を削除する
 			if !k8serrors.IsNotFound(delErr) { // k8s に存在しない場合は無視して続行する（未 apply のまま削除する場合）
 				return fmt.Errorf("k8s ingress_route delete: %w", delErr) // 削除エラーを返す
 			}
@@ -481,8 +492,10 @@ func (applyService *ApplyService) ApplyProject(ctx context.Context, userID strin
 
 	if len(pathRuleList) == 0 {
 		// PathRule が 0 件の場合は k8s から IngressRoute を削除する
-		if delErr := k8s.DeleteIngressRoute(ctx, applyService.DynamicClient, projectData.Namespace, ingressRouteData.ID); delErr != nil { // k8s IngressRoute を削除する
-			return fmt.Errorf("k8s ingress_route delete: %w", delErr) // 削除エラーを返す
+		if delErr := k8s.DeleteIngressRoute(ctx, applyService.DynamicClient, namespace, ingressRouteData.ID); delErr != nil { // k8s IngressRoute を削除する
+			if !k8serrors.IsNotFound(delErr) { // k8s に存在しない場合は無視して続行する
+				return fmt.Errorf("k8s ingress_route delete: %w", delErr) // 削除エラーを返す
+			}
 		}
 	} else {
 		// PathRule を集約して Service 情報を解決し k8s に apply する
@@ -502,14 +515,14 @@ func (applyService *ApplyService) ApplyProject(ctx context.Context, userID strin
 				ServicePort: pathRuleServicePort,
 			})
 		}
-		if err := k8s.ApplyIngressRoute(ctx, applyService.DynamicClient, *ingressRouteData, projectData.Namespace, pathRuleSpecList); err != nil { // k8s に IngressRoute を apply する
-			return fmt.Errorf("k8s ingress_route apply: %w", err) // apply エラーを返す
+		if applyErr := k8s.ApplyIngressRoute(ctx, applyService.DynamicClient, *ingressRouteData, namespace, pathRuleSpecList); applyErr != nil { // k8s に IngressRoute を apply する
+			return fmt.Errorf("k8s ingress_route apply: %w", applyErr) // apply エラーを返す
 		}
 	}
 
 	// IngressRoute の status を active に更新する
-	if err := applyService.IngressRouteRepo.UpdateStatus(ctx, ingressRouteData.ID, models.IngressRouteStatusActive, ingressRouteData.K8sStatus); err != nil { // status を active に更新する
-		return fmt.Errorf("ingress_route status 更新に失敗しました: %w", err) // 更新エラーを返す
+	if updateErr := applyService.IngressRouteRepo.UpdateStatus(ctx, ingressRouteData.ID, models.IngressRouteStatusActive, ingressRouteData.K8sStatus); updateErr != nil { // status を active に更新する
+		return fmt.Errorf("ingress_route status 更新に失敗しました: %w", updateErr) // 更新エラーを返す
 	}
 
 	// PathRule の pending→active 昇格・deleting→物理削除を行う

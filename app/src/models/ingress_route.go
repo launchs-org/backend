@@ -16,7 +16,7 @@ const (
 
 type IngressRoute struct {
 	ID        string             `gorm:"primaryKey;type:uuid;default:gen_random_uuid()" json:"id"`         // UUID 主キー
-	ProjectID string             `gorm:"type:uuid;not null;uniqueIndex"                 json:"project_id"` // プロジェクトに 1 つ
+	ProjectID string             `gorm:"type:uuid;not null;index"                       json:"project_id"` // プロジェクト ID
 	Host      string             `gorm:"type:varchar(253);not null"                     json:"host"`       // 払い出し済みドメイン（{uuid}.{BASE_DOMAIN}）
 	Status    IngressRouteStatus `gorm:"type:varchar(32);not null;default:'pending'"    json:"status"`     // ステータス
 	K8sStatus datatypes.JSON     `gorm:"type:jsonb"                                     json:"k8s_status"` // null = 未同期
