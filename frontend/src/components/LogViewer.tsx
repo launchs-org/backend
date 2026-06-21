@@ -1,10 +1,21 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Search, X, Copy, Check, ChevronUp, ChevronDown, RefreshCw, Pause } from 'lucide-react'
 import AnsiToHtml from 'ansi-to-html'
+import {
+  LOG_VIEWER_BG,
+  LOG_VIEWER_FG,
+  LOG_VIEWER_TOOLBAR_BG,
+  LOG_VIEWER_BORDER,
+  LOG_VIEWER_MUTED,
+  LOG_VIEWER_HOVER,
+  LOG_VIEWER_HIGHLIGHT_BG,
+  LOG_VIEWER_SCROLL_THRESHOLD,
+  LOG_VIEWER_COPY_RESET_DELAY,
+} from '@/lib/config'
 
 const ansiConverter = new AnsiToHtml({
-  fg: '#E6EDF3',
-  bg: '#0D1117',
+  fg: LOG_VIEWER_FG,
+  bg: LOG_VIEWER_BG,
   newline: true,
   escapeXML: true,
 }) // ANSIエスケープコードをHTMLに変換するコンバーターを初期化する
@@ -15,6 +26,8 @@ type LogViewerProps = {
   title?: string
   initialLive?: boolean
   autoStopLive?: boolean // trueの場合、ログ取得が空になったら自動でLive OFFにする
+  externalLive?: boolean // 外部からLive状態を制御する（falseになったらLive OFFにする）
+  onLiveChange?: (live: boolean) => void // Live状態が変化したときのコールバック
 }
 
 type LogLine = {
@@ -42,6 +55,8 @@ export function LogViewer({
   title,
   initialLive = true,
   autoStopLive = false,
+  externalLive,
+  onLiveChange,
 }: LogViewerProps) {
   const [logLines, setLogLines] = useState<LogLine[]>([]) // ログ行を管理する
   const [isLive, setIsLive] = useState(initialLive) // リアルタイム更新状態を管理する
@@ -58,7 +73,15 @@ export function LogViewer({
 
   useEffect(() => {
     isLiveRef.current = isLive // Live状態のrefを更新する
-  }, [isLive])
+    onLiveChange?.(isLive) // 外部コールバックへ通知する
+  }, [isLive, onLiveChange])
+
+  // 外部から Live OFF を要求されたら停止する
+  useEffect(() => {
+    if (externalLive === false) {
+      setIsLive(false) // 外部指示でLive OFFにする
+    }
+  }, [externalLive])
 
   // 初回ログ取得
   useEffect(() => {
@@ -114,7 +137,7 @@ export function LogViewer({
     if (isLiveRef.current) return // Live 中は手動スクロールで autoScroll を変えない
     const container = containerRef.current
     if (!container) return
-    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 50
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < LOG_VIEWER_SCROLL_THRESHOLD
     setAutoScroll(isAtBottom) // 最下部付近の場合のみ自動スクロールを有効にする
   }, [])
 
@@ -153,7 +176,7 @@ export function LogViewer({
     const text = logLines.map((line) => line.raw).join('\n') // 全ログをコピーする
     await navigator.clipboard.writeText(text)
     setCopied(true)
-    setTimeout(() => setCopied(false), 2000) // 2秒後にコピー状態をリセットする
+    setTimeout(() => setCopied(false), LOG_VIEWER_COPY_RESET_DELAY) // 一定時間後にコピー状態をリセットする
   }
 
   const highlightLine = (rawText: string): string => {
@@ -166,15 +189,15 @@ export function LogViewer({
     const after = rawText.slice(idx + searchQuery.length)
     return (
       ansiConverter.toHtml(before) +
-      `<mark style="background:#F59E0B;color:#111827;border-radius:2px">${match}</mark>` +
+      `<mark style="background:${LOG_VIEWER_HIGHLIGHT_BG};color:#111827;border-radius:2px">${match}</mark>` +
       ansiConverter.toHtml(after)
     ) // 検索マッチ箇所をハイライトする
   }
 
   return (
-    <div className="flex flex-col overflow-hidden border border-[#30363D]" style={{ background: '#0D1117', height: '100%' }}>
+    <div className="flex flex-col overflow-hidden" style={{ background: LOG_VIEWER_BG, height: '100%', border: `1px solid ${LOG_VIEWER_BORDER}` }}>
       {/* ツールバー */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-[#30363D] shrink-0" style={{ background: '#161B22' }}>
+      <div className="flex items-center gap-2 px-3 py-2 shrink-0" style={{ background: LOG_VIEWER_TOOLBAR_BG, borderBottom: `1px solid ${LOG_VIEWER_BORDER}` }}>
         {title && (
           <span className="text-xs text-[#8B949E] font-mono flex-1">{title}</span>
         )}
@@ -186,8 +209,9 @@ export function LogViewer({
             className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md transition-colors font-medium ${
               isLive
                 ? 'bg-[#00C2D1]/20 text-[#00C2D1] border border-[#00C2D1]/40'
-                : 'bg-[#21262D] text-[#8B949E] border border-[#30363D] hover:text-[#E6EDF3]'
+                : `border hover:text-[${LOG_VIEWER_FG}]`
             }`}
+            style={!isLive ? { background: LOG_VIEWER_HOVER, color: LOG_VIEWER_MUTED, borderColor: LOG_VIEWER_BORDER } : undefined}
             title={isLive ? 'リアルタイム更新中（クリックで停止）' : 'リアルタイム更新停止中（クリックで開始）'}
           >
             {isLive ? (
@@ -206,11 +230,8 @@ export function LogViewer({
           {/* 検索トグル */}
           <button
             onClick={() => setShowSearch((prev) => !prev)}
-            className={`p-1.5 rounded-md transition-colors ${
-              showSearch
-                ? 'bg-[#21262D] text-[#E6EDF3]'
-                : 'text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D]'
-            }`}
+            className="p-1.5 rounded-md transition-colors"
+            style={showSearch ? { background: LOG_VIEWER_HOVER, color: LOG_VIEWER_FG } : { color: LOG_VIEWER_MUTED }}
             title="検索（Ctrl+F）"
           >
             <Search className="w-3.5 h-3.5" />
@@ -219,7 +240,8 @@ export function LogViewer({
           {/* コピー */}
           <button
             onClick={() => void handleCopy()}
-            className="p-1.5 rounded-md text-[#8B949E] hover:text-[#E6EDF3] hover:bg-[#21262D] transition-colors"
+            className="p-1.5 rounded-md transition-colors"
+            style={{ color: LOG_VIEWER_MUTED }}
             title="全ログをコピー"
           >
             {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
@@ -229,14 +251,15 @@ export function LogViewer({
 
       {/* 検索バー */}
       {showSearch && (
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[#30363D]" style={{ background: '#161B22' }}>
-          <Search className="w-3.5 h-3.5 text-[#8B949E] shrink-0" />
+        <div className="flex items-center gap-2 px-3 py-1.5" style={{ background: LOG_VIEWER_TOOLBAR_BG, borderBottom: `1px solid ${LOG_VIEWER_BORDER}` }}>
+          <Search className="w-3.5 h-3.5 shrink-0" style={{ color: LOG_VIEWER_MUTED }} />
           <input
             type="text"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
             placeholder="検索..."
-            className="flex-1 bg-transparent text-xs text-[#E6EDF3] placeholder-[#8B949E] outline-none font-mono"
+            className="flex-1 bg-transparent text-xs outline-none font-mono"
+            style={{ color: LOG_VIEWER_FG }}
             autoFocus
             onKeyDown={(event) => {
               if (event.key === 'Enter') navigateMatch(event.shiftKey ? 'prev' : 'next') // Enterキーで次のマッチへ移動する
@@ -244,7 +267,7 @@ export function LogViewer({
             }}
           />
           {matchIndices.length > 0 && (
-            <span className="text-xs text-[#8B949E] shrink-0">
+            <span className="text-xs shrink-0" style={{ color: LOG_VIEWER_MUTED }}>
               {currentMatchIndex + 1}/{matchIndices.length}
             </span>
           )}
@@ -254,20 +277,23 @@ export function LogViewer({
           <button
             onClick={() => navigateMatch('prev')}
             disabled={matchIndices.length === 0}
-            className="p-0.5 text-[#8B949E] hover:text-[#E6EDF3] disabled:opacity-30"
+            className="p-0.5 disabled:opacity-30"
+            style={{ color: LOG_VIEWER_MUTED }}
           >
             <ChevronUp className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => navigateMatch('next')}
             disabled={matchIndices.length === 0}
-            className="p-0.5 text-[#8B949E] hover:text-[#E6EDF3] disabled:opacity-30"
+            className="p-0.5 disabled:opacity-30"
+            style={{ color: LOG_VIEWER_MUTED }}
           >
             <ChevronDown className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={() => { setShowSearch(false); setSearchQuery('') }}
-            className="p-0.5 text-[#8B949E] hover:text-[#E6EDF3]"
+            className="p-0.5"
+            style={{ color: LOG_VIEWER_MUTED }}
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -280,12 +306,12 @@ export function LogViewer({
         onScroll={handleScroll}
         className="overflow-auto font-mono text-xs leading-5 select-text flex-1"
         style={{
-          background: '#0D1117',
-          color: '#E6EDF3',
+          background: LOG_VIEWER_BG,
+          color: LOG_VIEWER_FG,
         }}
       >
         {logLines.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-[#8B949E] text-xs">
+          <div className="flex items-center justify-center h-32 text-xs" style={{ color: LOG_VIEWER_MUTED }}>
             {isLive ? 'ログ待機中...' : 'ログがありません'}
           </div>
         ) : (
@@ -303,8 +329,8 @@ export function LogViewer({
                   >
                     {/* 行番号 */}
                     <td
-                      className="select-none text-right pr-4 pl-3 text-[#8B949E] w-12 align-top"
-                      style={{ userSelect: 'none' }}
+                      className="select-none text-right pr-4 pl-3 w-12 align-top"
+                      style={{ userSelect: 'none', color: LOG_VIEWER_MUTED }}
                     >
                       {lineIndex + 1}
                     </td>

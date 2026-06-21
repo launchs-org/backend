@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Play, Trash2, GitBranch, Container, Package, ExternalLink } from 'lucide-react'
+import { Play, Trash2, GitBranch, Container, Package, ExternalLink, Clock, CheckCircle2, XCircle, AlertCircle, Ban, GitCommit, X } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { StatusBadge } from '@/components/StatusBadge'
 import { LogViewer } from '@/components/LogViewer'
@@ -16,6 +16,18 @@ import type {
   EnvVar,
   EnvVarMount,
 } from '@/lib/types'
+import {
+  POLL_INTERVAL_NORMAL,
+  POLL_INTERVAL_FAST,
+  POLL_INTERVAL_BUILDS,
+  FAST_POLL_DURATION,
+  REPLICAS_MIN,
+  REPLICAS_MAX,
+  INSTANCE_SIZES,
+  GITHUB_BRANCHES_PER_PAGE,
+  GITHUB_COMMITS_PER_PAGE,
+  GITHUB_COMMIT_MESSAGE_MAX_LENGTH,
+} from '@/lib/config'
 
 type Tab = 'overview' | 'logs' | 'builds' | 'settings' | 'networking' | 'env-vars' | 'volumes' | 'history'
 
@@ -63,7 +75,7 @@ export function DeploymentDetailPage() {
 
   useEffect(() => {
     void fetchDeployment() // 初回データ取得
-    const pollInterval = fastPolling ? 3_000 : 5_000 // 操作後は3秒、通常は5秒ポーリングする
+    const pollInterval = fastPolling ? POLL_INTERVAL_FAST : POLL_INTERVAL_NORMAL // 操作後は高速、通常は通常間隔でポーリングする
     const intervalId = setInterval(() => { void fetchDeployment() }, pollInterval)
     return () => clearInterval(intervalId) // クリーンアップ
   }, [fetchDeployment, fastPolling])
@@ -134,7 +146,7 @@ export function DeploymentDetailPage() {
 
   useEffect(() => {
     void fetchAllPending() // 初回 pending 一括取得
-    const pollInterval = fastPolling ? 3_000 : 5_000 // 操作後は3秒、通常は5秒ポーリングする
+    const pollInterval = fastPolling ? POLL_INTERVAL_FAST : POLL_INTERVAL_NORMAL // 操作後は高速、通常は通常間隔でポーリングする
     const intervalId = setInterval(() => { void fetchAllPending() }, pollInterval)
     return () => clearInterval(intervalId) // クリーンアップ
   }, [fetchAllPending, fastPolling])
@@ -166,7 +178,7 @@ export function DeploymentDetailPage() {
       alert('Apply に失敗しました')
     } finally {
       setApplying(false)
-      setTimeout(() => setFastPolling(false), 30_000) // 30秒後に通常ポーリングへ戻す
+      setTimeout(() => setFastPolling(false), FAST_POLL_DURATION) // 一定時間後に通常ポーリングへ戻す
     }
   }
 
@@ -453,7 +465,7 @@ function LogsTab({ deploymentId }: { deploymentId: string }) {
       <LogViewer
         fetchLogs={fetchPodLogs}
         title={`Pod Logs — ${deploymentId}`}
-        pollInterval={5_000}
+        pollInterval={POLL_INTERVAL_NORMAL}
         initialLive={true}
       />
     </div>
@@ -462,20 +474,12 @@ function LogsTab({ deploymentId }: { deploymentId: string }) {
 
 // ── Builds タブ ───────────────────────────────────────────────
 
-const BUILD_STATUS_LABEL: Record<string, string> = {
-  pending: '待機中',
-  building: 'ビルド中',
-  succeeded: '成功',
-  failed: '失敗',
-  cancelled: 'キャンセル',
-}
-
-const BUILD_STATUS_COLOR: Record<string, string> = {
-  pending: 'text-yellow-500',
-  building: 'text-blue-500',
-  succeeded: 'text-green-600',
-  failed: 'text-red-500',
-  cancelled: 'text-gray-400',
+const BUILD_STATUS_META: Record<string, { label: string; icon: React.ReactNode; badge: string }> = {
+  pending:   { label: '待機中',     icon: <Clock         className="w-3.5 h-3.5" />, badge: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
+  building:  { label: 'ビルド中',   icon: <AlertCircle   className="w-3.5 h-3.5 animate-pulse" />, badge: 'bg-blue-100 text-blue-700 border-blue-200' },
+  succeeded: { label: '成功',       icon: <CheckCircle2  className="w-3.5 h-3.5" />, badge: 'bg-green-100 text-green-700 border-green-200' },
+  failed:    { label: '失敗',       icon: <XCircle       className="w-3.5 h-3.5" />, badge: 'bg-red-100 text-red-700 border-red-200' },
+  cancelled: { label: 'キャンセル', icon: <Ban           className="w-3.5 h-3.5" />, badge: 'bg-gray-100 text-gray-500 border-gray-200' },
 }
 
 function BuildsTab({
@@ -488,6 +492,7 @@ function BuildsTab({
   const navigate = useNavigate()
   const [building, setBuilding] = useState(false) // ビルド中フラグ
   const [buildList, setBuildList] = useState<Build[]>([]) // ビルド一覧を管理する
+  const [cancellingId, setCancellingId] = useState<string | null>(null) // キャンセル中のビルドIDを管理する
 
   const fetchBuilds = useCallback(async () => {
     try {
@@ -500,7 +505,7 @@ function BuildsTab({
 
   useEffect(() => {
     void fetchBuilds() // 初回取得
-    const intervalId = setInterval(() => void fetchBuilds(), 10_000) // 10秒ごとにポーリングする
+    const intervalId = setInterval(() => void fetchBuilds(), POLL_INTERVAL_BUILDS) // 定期的にポーリングする
     return () => clearInterval(intervalId)
   }, [fetchBuilds])
 
@@ -518,13 +523,33 @@ function BuildsTab({
     }
   }
 
+  const handleCancel = async (buildId: string, event: React.MouseEvent) => {
+    event.preventDefault() // Link のナビゲーションを阻止する
+    event.stopPropagation()
+    setCancellingId(buildId)
+    try {
+      await del(`/builds/${buildId}`) // ビルドをキャンセルする
+      await fetchBuilds() // 一覧を即座に更新する
+    } catch (cancelError) {
+      console.error(cancelError)
+      alert('キャンセルに失敗しました')
+    } finally {
+      setCancellingId(null)
+    }
+  }
+
+  const hasPendingOrBuilding = buildList.some(
+    buildItem => buildItem.status === 'pending' || buildItem.status === 'building'
+  ) // 進行中のビルドが存在するか確認する
+
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
         <button
           onClick={() => void handleBuild()}
-          disabled={building}
-          className="flex items-center gap-1.5 bg-[#111827] text-white text-sm px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
+          disabled={building || hasPendingOrBuilding}
+          title={hasPendingOrBuilding ? 'ビルドが進行中です。完了またはキャンセル後に再試行してください' : undefined}
+          className="flex items-center gap-1.5 bg-[#111827] text-white text-sm px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {building ? 'ビルド開始中...' : 'ビルド'}
         </button>
@@ -540,31 +565,66 @@ function BuildsTab({
             ビルド履歴
           </div>
           <div className="divide-y divide-gray-100">
-            {buildList.map(buildItem => (
-              <Link
-                key={buildItem.id}
-                to={`/builds/${buildItem.id}/logs`}
-                className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="font-mono text-sm text-[#111827]">#{buildItem.id.slice(0, 8)}</span>
-                  <span className={`text-xs font-medium ${BUILD_STATUS_COLOR[buildItem.status] ?? 'text-gray-400'}`}>
-                    {BUILD_STATUS_LABEL[buildItem.status] ?? buildItem.status}
-                  </span>
-                  {buildItem.branch && (
-                    <span className="text-xs text-gray-400 truncate">{buildItem.branch}</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {buildItem.created_at && (
-                    <span className="text-xs text-gray-400">
-                      {new Date(buildItem.created_at).toLocaleString('ja-JP')}
+            {buildList.map(buildItem => {
+              const statusMeta = BUILD_STATUS_META[buildItem.status] // ステータスメタデータを取得する
+              const isCancellable = buildItem.status === 'pending' || buildItem.status === 'building' // キャンセル可能か判定する
+              return (
+                <div key={buildItem.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
+                  {/* クリック可能なリンク部分 */}
+                  <Link
+                    to={`/builds/${buildItem.id}/logs`}
+                    className="flex items-center gap-3 min-w-0 flex-1"
+                  >
+                    {/* ステータスバッジ */}
+                    <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border ${statusMeta?.badge ?? 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+                      {statusMeta?.icon}
+                      {statusMeta?.label ?? buildItem.status}
                     </span>
-                  )}
-                  <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                    {/* ビルドID */}
+                    <span className="font-mono text-xs text-[#111827] shrink-0">#{buildItem.id.slice(0, 8)}</span>
+                    {/* ブランチ */}
+                    {buildItem.branch && (
+                      <span className="flex items-center gap-1 text-xs text-gray-500 shrink-0">
+                        <GitBranch className="w-3 h-3" />
+                        {buildItem.branch}
+                      </span>
+                    )}
+                    {/* コミットSHA + メッセージ */}
+                    {buildItem.commit_sha && (
+                      <span className="flex items-center gap-1 text-xs text-gray-400 truncate min-w-0">
+                        <GitCommit className="w-3 h-3 shrink-0" />
+                        <span className="font-mono shrink-0">{buildItem.commit_sha.slice(0, 7)}</span>
+                        {buildItem.commit_message && (
+                          <span className="truncate text-gray-500">{buildItem.commit_message}</span>
+                        )}
+                      </span>
+                    )}
+                  </Link>
+                  {/* 右側: 日時・キャンセルボタン・ログリンク */}
+                  <div className="flex items-center gap-2 shrink-0 ml-3">
+                    {buildItem.created_at && (
+                      <span className="text-xs text-gray-400">
+                        {new Date(buildItem.created_at).toLocaleString('ja-JP')}
+                      </span>
+                    )}
+                    {/* キャンセルボタン（pending/building のみ表示）*/}
+                    {isCancellable && (
+                      <button
+                        onClick={(event) => void handleCancel(buildItem.id, event)}
+                        disabled={cancellingId === buildItem.id}
+                        className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-red-200 text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
+                      >
+                        <X className="w-3 h-3" />
+                        {cancellingId === buildItem.id ? 'キャンセル中...' : 'キャンセル'}
+                      </button>
+                    )}
+                    <Link to={`/builds/${buildItem.id}/logs`} onClick={(event) => event.stopPropagation()}>
+                      <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                    </Link>
+                  </div>
                 </div>
-              </Link>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
@@ -593,14 +653,14 @@ type GitHubTree  = { path: string; type: string }
 
 // GitHub API からブランチ一覧を取得する
 async function fetchGitHubBranches(repo: string): Promise<GitHubBranch[]> {
-  const res = await fetch(`https://api.github.com/repos/${repo}/branches?per_page=100`) // GitHub API を呼ぶ
+  const res = await fetch(`https://api.github.com/repos/${repo}/branches?per_page=${GITHUB_BRANCHES_PER_PAGE}`) // GitHub API を呼ぶ
   if (!res.ok) throw new Error(`branches fetch failed: ${res.status}`)
   return res.json() as Promise<GitHubBranch[]>
 }
 
 // GitHub API からブランチの最新コミット一覧を取得する
 async function fetchGitHubCommits(repo: string, branch: string): Promise<GitHubCommit[]> {
-  const res = await fetch(`https://api.github.com/repos/${repo}/commits?sha=${branch}&per_page=30`) // GitHub API を呼ぶ
+  const res = await fetch(`https://api.github.com/repos/${repo}/commits?sha=${branch}&per_page=${GITHUB_COMMITS_PER_PAGE}`) // GitHub API を呼ぶ
   if (!res.ok) throw new Error(`commits fetch failed: ${res.status}`)
   return res.json() as Promise<GitHubCommit[]>
 }
@@ -797,7 +857,7 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
                   <option value="">最新のコミット（HEAD）</option>
                   {ghCommits.map(commitItem => (
                     <option key={commitItem.sha} value={commitItem.sha}>
-                      {commitItem.sha.slice(0, 7)} — {commitItem.commit.message.split('\n')[0].slice(0, 60)}
+                      {commitItem.sha.slice(0, 7)} — {commitItem.commit.message.split('\n')[0].slice(0, GITHUB_COMMIT_MESSAGE_MAX_LENGTH)}
                     </option>
                   ))}
                 </select>
@@ -850,8 +910,8 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
             <label className={labelClass}>レプリカ数</label>
             <input
               type="number"
-              min={0}
-              max={10}
+              min={REPLICAS_MIN}
+              max={REPLICAS_MAX}
               value={formData.replicas}
               onChange={(event) => setFormData((prev) => ({ ...prev, replicas: event.target.value }))}
               className={inputClass}
@@ -864,9 +924,9 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
               onChange={(event) => setFormData((prev) => ({ ...prev, instance_size: event.target.value }))}
               className={inputClass}
             >
-              <option value="small">small</option>
-              <option value="medium">medium</option>
-              <option value="large">large</option>
+              {INSTANCE_SIZES.map(size => (
+                <option key={size} value={size}>{size}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -898,7 +958,7 @@ function NetworkingTab({ deploymentId, onUpdated }: { deploymentId: string; onUp
 
   useEffect(() => {
     void fetchNetworking()
-    const intervalId = setInterval(() => { void fetchNetworking() }, 10_000)
+    const intervalId = setInterval(() => { void fetchNetworking() }, POLL_INTERVAL_BUILDS)
     return () => clearInterval(intervalId) // クリーンアップ
   }, [deploymentId])
 

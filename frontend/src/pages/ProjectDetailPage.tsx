@@ -21,6 +21,7 @@ import { IngressNode } from '@/components/flow/IngressNode'
 import { get, post, del } from '@/lib/api'
 import { put } from '@/lib/api'
 import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar } from '@/lib/types'
+import { SIDEBAR_INITIAL_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, FLOW_ROW_HEIGHT } from '@/lib/config'
 
 const NODE_TYPES = {
   deployment: DeploymentNode,
@@ -67,10 +68,10 @@ export function ProjectDetailPage() {
   const [showEnvVarSidebar, setShowEnvVarSidebar] = useState(false) // 環境変数サイドバーの表示フラグ
   const [envVarList, setEnvVarList] = useState<EnvVar[]>([]) // プロジェクトの環境変数一覧を管理する
   const [deletingEnvVarId, setDeletingEnvVarId] = useState<string | null>(null) // 削除中の環境変数ID
-  const [sidebarWidth, setSidebarWidth] = useState(420) // サイドバー幅（px）
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_INITIAL_WIDTH) // サイドバー幅（px）
   const isDragging = useRef(false) // ドラッグ中フラグ
   const dragStartX = useRef(0) // ドラッグ開始X座標
-  const dragStartWidth = useRef(420) // ドラッグ開始時の幅
+  const dragStartWidth = useRef(SIDEBAR_INITIAL_WIDTH) // ドラッグ開始時の幅
 
   const openIngressSidebar = useCallback(() => {
     setSidebarMode('ingress') // IngressRoute サイドバーを開く
@@ -86,7 +87,7 @@ export function ProjectDetailPage() {
     const newNodes: Node[] = []
     const newEdges: Edge[] = []
 
-    const ROW_HEIGHT = 200 // 行の高さを定義する
+    const ROW_HEIGHT = FLOW_ROW_HEIGHT // 行の高さを定義する
     const COL_WIDTH = 300 // 列の幅を定義する
     const INGRESS_COL = COL_WIDTH * 2 // IngressRoute ノードのX座標
 
@@ -223,7 +224,7 @@ export function ProjectDetailPage() {
     const onMouseMove = (ev: MouseEvent) => {
       if (!isDragging.current) return
       const delta = dragStartX.current - ev.clientX // 左へドラッグすると幅が増える
-      const next = Math.min(800, Math.max(280, dragStartWidth.current + delta))
+      const next = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, dragStartWidth.current + delta))
       setSidebarWidth(next)
     }
     const onMouseUp = () => {
