@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
@@ -177,10 +178,54 @@ func (mock *mockProjectRepository) DeleteNoTx(ctx context.Context, project *mode
 }
 
 
+// mockApplyHistoryRepository は ApplyHistoryRepository のテスト用モック
+type mockApplyHistoryRepository struct{}
+
+func (mock *mockApplyHistoryRepository) Create(ctx context.Context, tx *gorm.DB, history *models.ApplyHistory) error {
+	return nil
+}
+func (mock *mockApplyHistoryRepository) UpdateStatus(ctx context.Context, tx *gorm.DB, history *models.ApplyHistory, status models.ApplyStatus) error {
+	return nil
+}
+func (mock *mockApplyHistoryRepository) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.ApplyHistory, error) {
+	return nil, nil
+}
+func (mock *mockApplyHistoryRepository) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error {
+	return nil
+}
+
+// mockBuildRepository は DeploymentBuildRepository のテスト用モック
+type mockBuildRepository struct{}
+
+func (mock *mockBuildRepository) Create(ctx context.Context, build *models.DeploymentBuild) error {
+	return nil
+}
+func (mock *mockBuildRepository) FindByID(ctx context.Context, buildID string) (*models.DeploymentBuild, error) {
+	return nil, nil
+}
+func (mock *mockBuildRepository) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]models.DeploymentBuild, error) {
+	return nil, nil
+}
+func (mock *mockBuildRepository) FindAllBuilding(ctx context.Context) ([]models.DeploymentBuild, error) {
+	return nil, nil
+}
+func (mock *mockBuildRepository) UpdateStatus(ctx context.Context, buildID string, status models.BuildStatus) error {
+	return nil
+}
+func (mock *mockBuildRepository) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, finishedAt time.Time) error {
+	return nil
+}
+func (mock *mockBuildRepository) UpdateK8sJobName(ctx context.Context, buildID string, jobName string) error {
+	return nil
+}
+func (mock *mockBuildRepository) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error {
+	return nil
+}
+
 // newTestDeploymentService はテスト用のデフォルト DeploymentService を生成するヘルパー関数
 func newTestDeploymentService(deploymentRepo *mockDeploymentRepository, serviceRepo *mockServiceRepository, projectRepo *mockProjectRepository) DeploymentService {
 	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
-	return NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &noopUserQuotaRepository{}, fakeK8sClient) // サービスを生成する
+	return NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &noopUserQuotaRepository{}, fakeK8sClient) // サービスを生成する
 }
 
 // TestCreateDeployment_正常に作成されpendingフィールドに値が入る は POST で全フィールドが pending_*** に入ることを確認する
@@ -428,7 +473,7 @@ func TestDeleteDeployment_k8sリソースが削除される(t *testing.T) {
 		},
 	}
 	fakeK8sClient := k8sfake.NewSimpleClientset()                             // fake k8s クライアントを生成する
-	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &noopUserQuotaRepository{}, fakeK8sClient) // サービスを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &noopUserQuotaRepository{}, fakeK8sClient) // サービスを生成する
 
 	result, err := deploymentSvc.DeleteDeployment(context.Background(), "test-user-id", "deployment-id-k8s") // サービスを実行する
 	if err != nil {
