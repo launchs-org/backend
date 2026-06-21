@@ -83,6 +83,33 @@ func (buildHandler *BuildHandler) ListBuilds(echoCtx echo.Context) error {
 	return echoCtx.JSON(http.StatusOK, buildList) // ビルド一覧を返す
 }
 
+// GetBuild は GET /api/v1/builds/:id のハンドラー
+func (buildHandler *BuildHandler) GetBuild(echoCtx echo.Context) error {
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
+	buildID := echoCtx.Param("id")           // パスパラメータからビルド ID を取得する
+
+	buildData, err := buildHandler.buildService.GetBuild(echoCtx.Request().Context(), userID, buildID) // サービスを呼び出してビルドを取得する
+	if err != nil {
+		if errors.Is(err, service.ErrForbidden) { // 所有権エラーの場合は 403 を返す
+			logger.PrintHandlerError("BuildHandler", "GetBuild", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusForbidden, map[string]string{
+				"error": "アクセス権限がありません",
+			})
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが見つからない場合は 404 を返す
+			logger.PrintHandlerError("BuildHandler", "GetBuild", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusNotFound, map[string]string{
+				"error": "リソースが見つかりません",
+			})
+		}
+		logger.PrintHandlerError("BuildHandler", "GetBuild", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "内部サーバーエラー",
+		})
+	}
+	return echoCtx.JSON(http.StatusOK, buildData) // ビルドレコードを返す
+}
+
 // CancelBuild は DELETE /api/v1/builds/:id のハンドラー
 func (buildHandler *BuildHandler) CancelBuild(echoCtx echo.Context) error {
 	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する

@@ -59,6 +59,7 @@ func New(opts RouterOptions) *echo.Echo {
 	// build エンドポイントを登録する
 	apiGroup.GET("/deployments/:id/builds", opts.BuildHandler.ListBuilds)   // ビルド一覧取得エンドポイント
 	apiGroup.POST("/deployments/:id/build", opts.BuildHandler.TriggerBuild) // ビルドトリガーエンドポイント
+	apiGroup.GET("/builds/:id", opts.BuildHandler.GetBuild)                  // ビルド取得エンドポイント
 	apiGroup.DELETE("/builds/:id", opts.BuildHandler.CancelBuild)           // ビルドキャンセルエンドポイント
 	apiGroup.GET("/builds/:id/logs", opts.BuildHandler.GetBuildLogs)        // ビルドログ取得エンドポイント
 
