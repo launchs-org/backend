@@ -117,6 +117,7 @@ export type PathRule = {
   ingress_route_id: string
   path_prefix: string
   service_id: string
+  strip_prefix: boolean
   status: PathRuleStatus
   created_at: string
   updated_at: string

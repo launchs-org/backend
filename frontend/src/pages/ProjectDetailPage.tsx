@@ -926,6 +926,7 @@ function IngressPathsTab({
   const [deletingPathRuleId, setDeletingPathRuleId] = useState<string | null>(null) // 削除中のパスルールID
   const [pathPrefix, setPathPrefix] = useState('/') // 追加するパスプレフィックス
   const [serviceId, setServiceId] = useState('') // 追加する転送先サービスID
+  const [stripPrefix, setStripPrefix] = useState(false) // strip_prefix フラグ
   const [addingPathRule, setAddingPathRule] = useState(false) // パスルール追加中フラグ
 
   const servicesWithLabel = deploymentRelations
@@ -952,9 +953,11 @@ function IngressPathsTab({
       await post(`/ingress-routes/${ingressRoute.id}/path-rules`, {
         path_prefix: pathPrefix,
         service_id: serviceId,
+        strip_prefix: stripPrefix,
       }) // パスルールを追加する
       setPathPrefix('/') // フォームをリセットする
       setServiceId('') // 選択をリセットする
+      setStripPrefix(false) // strip_prefix フラグをリセットする
       await onRefresh() // データを再取得する
     } catch (addError) {
       console.error(addError)
@@ -982,6 +985,9 @@ function IngressPathsTab({
                   <span className="font-mono text-sm text-[#111827]">{pathRule.path_prefix}</span>
                   {targetDeployment && (
                     <span className="text-xs text-gray-400 ml-2">→ {targetDeployment.deployment.name}</span>
+                  )}
+                  {pathRule.strip_prefix && (
+                    <span className="ml-2 text-[10px] bg-[#00C2D1]/10 text-[#00C2D1] px-1.5 py-0.5 rounded font-medium">strip</span>
                   )}
                   <span className={`ml-2 text-[10px] ${pathRule.status === 'active' ? 'text-green-500' : pathRule.status === 'deleting' ? 'text-red-400' : 'text-amber-500'}`}>
                     {pathRule.status}
@@ -1029,6 +1035,18 @@ function IngressPathsTab({
                   <option key={svc.id} value={svc.id}>{svc.label}</option>
                 ))}
               </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="strip-prefix-checkbox"
+                checked={stripPrefix}
+                onChange={ev => setStripPrefix(ev.target.checked)}
+                className="w-4 h-4 rounded border-gray-300 text-[#00C2D1] focus:ring-[#00C2D1]/50 cursor-pointer"
+              />
+              <label htmlFor="strip-prefix-checkbox" className="text-sm text-gray-600 cursor-pointer select-none">
+                パスプレフィックスを strip する
+              </label>
             </div>
             <button
               onClick={() => void handleAddPathRule()}
