@@ -14,7 +14,7 @@ export type Project = {
 
 export type DeploymentType = 'image_url' | 'dockerfile' | 'railpack'
 
-export type DeploymentStatus = 'pending' | 'running' | 'failed' | 'deleting'
+export type DeploymentStatus = 'not_init' | 'pending' | 'running' | 'failed' | 'deleting'
 
 export type AppStatus = 'pending' | 'building' | 'deploying' | 'running' | 'error'
 

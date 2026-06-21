@@ -119,6 +119,10 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 		return nil, err // 作成エラーを返す
 	}
 
+	if err := svc.deploymentRepo.UpdateCurrentBuildID(ctx, deploymentID, buildData.ID); err != nil { // current_build_id を最新ビルドに更新する
+		return nil, err // 更新エラーを返す
+	}
+
 	// 7. ビルドタイプに応じた k8s Job を起動する
 	var jobName string
 	switch buildData.BuildType {

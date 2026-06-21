@@ -23,6 +23,7 @@ type DeploymentRepository interface {
 	UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error                        // ビルド成功時に pending_image_url を更新する
 	UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error               // GitHub push 時に pending_github_commit_sha を更新する
 	UpdateDeploymentStatus(ctx context.Context, deploymentID string, status models.DeploymentStatus) error       // deployment の status を更新する
+	UpdateCurrentBuildID(ctx context.Context, deploymentID string, buildID string) error                          // current_build_id を更新する
 	Delete(ctx context.Context, deploymentID string) error                                                        // deployment を削除する
 }
 
@@ -148,6 +149,18 @@ func (repo *deploymentRepositoryImpl) UpdatePendingGithubCommitSHA(ctx context.C
 func (repo *deploymentRepositoryImpl) UpdateDeploymentStatus(ctx context.Context, deploymentID string, status models.DeploymentStatus) error {
 	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Update("status", status) // status を更新する
 	if result.Error != nil {                                                                                                // エラーが発生した場合
+		return result.Error // エラーを返す
+	}
+	if result.RowsAffected == 0 { // 更新対象が存在しない場合
+		return gorm.ErrRecordNotFound // レコードなしエラーを返す
+	}
+	return nil // 正常終了
+}
+
+// UpdateCurrentBuildID は deploymentID に対応する deployment の current_build_id を更新する
+func (repo *deploymentRepositoryImpl) UpdateCurrentBuildID(ctx context.Context, deploymentID string, buildID string) error {
+	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Update("current_build_id", buildID) // current_build_id を更新する
+	if result.Error != nil {                                                                                                           // エラーが発生した場合
 		return result.Error // エラーを返す
 	}
 	if result.RowsAffected == 0 { // 更新対象が存在しない場合

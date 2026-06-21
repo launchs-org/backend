@@ -393,6 +393,10 @@ func (mock *applyHistoryMockDeploymentRepository) UpdateDeploymentStatus(ctx con
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *applyHistoryMockDeploymentRepository) UpdateCurrentBuildID(ctx context.Context, deploymentID string, buildID string) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 func (mock *applyHistoryMockDeploymentRepository) FindAllRunning(ctx context.Context) ([]models.Deployment, error) {
 	return nil, nil // テストでは使用しないためデフォルト nil を返す
 }

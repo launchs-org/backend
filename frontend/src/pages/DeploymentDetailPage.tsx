@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Play, Trash2, GitBranch, Container, Package, ExternalLink, Clock, CheckCircle2, XCircle, AlertCircle, Ban, GitCommit, X } from 'lucide-react'
+import { Play, Trash2, GitBranch, Container, Package, ExternalLink, Clock, CheckCircle2, XCircle, AlertCircle, Ban, GitCommit, X, Hammer } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { StatusBadge } from '@/components/StatusBadge'
 import { LogViewer } from '@/components/LogViewer'
@@ -241,6 +241,18 @@ export function DeploymentDetailPage() {
           </button>
         </div>
       </Layout>
+    )
+  }
+
+  if (deployment?.status === 'not_init') {
+    return (
+      <NotInitScreen
+        deployment={deployment}
+        deploymentId={deploymentId!}
+        projectId={projectId!}
+        onDelete={() => void handleDelete()}
+        deleting={deleting}
+      />
     )
   }
 
@@ -1521,3 +1533,84 @@ function HistoryTab({ deploymentId }: { deploymentId: string }) {
     </div>
   )
 }
+
+function NotInitScreen({
+  deployment,
+  deploymentId,
+  projectId,
+  onDelete,
+  deleting,
+}: {
+  deployment: Deployment
+  deploymentId: string
+  projectId: string
+  onDelete: () => void
+  deleting: boolean
+}) {
+  const navigate = useNavigate()
+  const [building, setBuilding] = useState(false)
+
+  const handleBuild = async () => {
+    setBuilding(true)
+    try {
+      const result = await post<Build>(`/deployments/${deploymentId}/build`) // ビルドを開始する
+      navigate(`/builds/${result.id}/logs`) // ビルドログページへ遷移する
+    } catch (buildError) {
+      console.error(buildError)
+      alert('ビルドの開始に失敗しました')
+    } finally {
+      setBuilding(false)
+    }
+  }
+
+  return (
+    <Layout
+      breadcrumbs={[
+        { label: 'Project', href: `/projects/${projectId}` },
+        { label: deployment.name },
+      ]}
+    >
+      <div className="h-96 flex flex-col items-center justify-center gap-6">
+        <div className="w-16 h-16 rounded-full bg-purple-50 flex items-center justify-center">
+          <Hammer className="w-8 h-8 text-purple-400" />
+        </div>
+        <div className="text-center">
+          <p className="text-lg font-semibold text-[#111827]">初回ビルドが必要です</p>
+          <p className="text-sm text-gray-400 mt-2 max-w-sm">
+            このデプロイメントはまだビルドが実行されていません。<br />
+            ビルドを実行すると、デプロイ可能な状態になります。
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {deployment.current_build_id ? (
+            <Link
+              to={`/builds/${deployment.current_build_id}/logs`}
+              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm px-4 py-2 rounded-md transition-colors"
+            >
+              <ExternalLink className="w-4 h-4" />
+              ビルドログを表示
+            </Link>
+          ) : (
+            <button
+              onClick={() => void handleBuild()}
+              disabled={building}
+              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm px-4 py-2 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Hammer className="w-4 h-4" />
+              {building ? 'ビルド開始中...' : 'ビルドを実行'}
+            </button>
+          )}
+          <button
+            onClick={onDelete}
+            disabled={deleting}
+            className="flex items-center gap-2 border border-red-200 text-red-500 hover:bg-red-50 text-sm px-4 py-2 rounded-md transition-colors disabled:opacity-50"
+          >
+            <Trash2 className="w-4 h-4" />
+            {deleting ? '削除中...' : '削除'}
+          </button>
+        </div>
+      </div>
+    </Layout>
+  )
+}
+

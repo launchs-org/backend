@@ -9,6 +9,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; dot: string 
   active: { label: 'アクティブ', color: 'bg-green-50 text-green-700 border-green-200', dot: 'bg-green-500' },
   succeeded: { label: '成功', color: 'bg-green-50 text-green-700 border-green-200', dot: 'bg-green-500' },
   bound: { label: 'バインド済み', color: 'bg-green-50 text-green-700 border-green-200', dot: 'bg-green-500' },
+  not_init: { label: '初期化待ち', color: 'bg-purple-50 text-purple-700 border-purple-200', dot: 'bg-purple-400' },
   pending: { label: '保留中', color: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500' },
   building: { label: 'ビルド中', color: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500 animate-pulse' },
   deploying: { label: 'デプロイ中', color: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500 animate-pulse' },
