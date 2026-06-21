@@ -233,12 +233,14 @@ export function DeploymentDetailPage() {
             <p className="text-lg font-semibold text-[#111827]">削除が完了しました</p>
             <p className="text-sm text-gray-400 mt-1">デプロイメントが正常に削除されました</p>
           </div>
-          <button
-            onClick={() => navigate(`/projects/${projectId}`)}
-            className="text-sm px-4 py-2 rounded-md bg-[#111827] text-white hover:bg-gray-800 transition-colors"
-          >
-            プロジェクトへ戻る
-          </button>
+          {window.self === window.top && ( // iframe 内では表示しない
+            <button
+              onClick={() => navigate(`/projects/${projectId}`)}
+              className="text-sm px-4 py-2 rounded-md bg-[#111827] text-white hover:bg-gray-800 transition-colors"
+            >
+              プロジェクトへ戻る
+            </button>
+          )}
         </div>
       </Layout>
     )

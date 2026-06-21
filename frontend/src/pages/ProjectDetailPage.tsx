@@ -7,7 +7,6 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
-  MarkerType,
   type Node,
   type Edge,
 } from '@xyflow/react'
@@ -18,30 +17,36 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { DeploymentNode } from '@/components/flow/DeploymentNode'
 import { ServiceNode } from '@/components/flow/ServiceNode'
 import { IngressNode } from '@/components/flow/IngressNode'
+import { InternetNode } from '@/components/flow/InternetNode'
+import { VolumeNode } from '@/components/flow/VolumeNode'
 import { get, post, del } from '@/lib/api'
 import { put } from '@/lib/api'
-import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar } from '@/lib/types'
+import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar, VolumeMount } from '@/lib/types'
 import { SIDEBAR_INITIAL_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, FLOW_ROW_HEIGHT } from '@/lib/config'
 
 const NODE_TYPES = {
   deployment: DeploymentNode,
   service: ServiceNode,
   ingress: IngressNode,
+  internet: InternetNode,
+  volume: VolumeNode,
 } // カスタムノードタイプを定義する
 
-const EDGE_STYLE = {
-  stroke: '#E5E7EB',
-  strokeWidth: 2,
-} // エッジのスタイルを定義する
-
-const EDGE_MARKER = {
-  type: MarkerType.ArrowClosed,
-  color: '#9CA3AF',
-} // エッジの矢印マーカーを定義する
+const EDGE_DEFAULTS = {
+  type: 'straight', // 直線エッジで矢印を水平に保つ
+  // animated は使わず CSS アニメーションで制御する（animated=true は再レンダリングのたびにリセットされてガクつく）
+  style: {
+    stroke: '#00C2D1',
+    strokeWidth: 2,
+    strokeDasharray: '6 3',
+    animation: 'dashmove 0.6s linear infinite', // CSS アニメーションで常時流れる破線を実現する
+  },
+} // エッジ共通オプション（矢印なし・破線アニメーション）
 
 type DeploymentWithRelations = {
   deployment: Deployment
   service: K8sService | null
+  volumeMounts: VolumeMount[] // このデプロイメントにマウントされているボリューム一覧
 }
 
 type SidebarMode = 'deployment' | 'ingress' | null // サイドバーの表示モードを定義する
@@ -83,22 +88,36 @@ export function ProjectDetailPage() {
     pid: string,
     currentIngressRoute: IngressRoute | null,
     currentPathRules: PathRule[],
+    currentVolumeList: Volume[],
   ) => {
     const newNodes: Node[] = []
     const newEdges: Edge[] = []
 
     const ROW_HEIGHT = FLOW_ROW_HEIGHT // 行の高さを定義する
-    const COL_WIDTH = 300 // 列の幅を定義する
-    const INGRESS_COL = COL_WIDTH * 2 // IngressRoute ノードのX座標
+    const COL_WIDTH = 360 // 列の幅を定義する
+
+    // レイアウト: Internet(x=0) → Ingress(x=COL) → Service(x=COL*2) → Deployment(x=COL*3) → Volume(x=COL*4)
+    const INTERNET_COL = 0 // Internet ノードのX座標
+    const INGRESS_COL = COL_WIDTH // IngressRoute ノードのX座標
+    const SERVICE_COL = COL_WIDTH * 2 // Service ノードのX座標
+    const DEPLOY_COL = COL_WIDTH * 3 // Deployment ノードのX座標
+    const VOLUME_COL = COL_WIDTH * 4 // Volume ノードのX座標
+
+    // ノード高さ定数（ハンドルはノード縦中央に出るため、中央Y = y + height/2 が一致するよう offsetY を計算する）
+    const DEP_H = 160   // Deployment ノードの概算高さ
+    const SVC_H = 110   // Service ノードの概算高さ
+    const ING_H = 115   // IngressRoute ノードの概算高さ
+    const NET_H = 80    // Internet ノード（円）の概算高さ
 
     relations.forEach((relation, relationIndex) => {
-      const baseY = relationIndex * ROW_HEIGHT // Y座標を計算する
+      const rowBaseY = relationIndex * ROW_HEIGHT // 行のベースY座標
+      const depY = rowBaseY // Deployment を基準（y=rowBaseY）にする
 
-      // デプロイメントノードを追加する
+      // デプロイメントノードを右端に追加する
       newNodes.push({
         id: `dep-${relation.deployment.id}`,
         type: 'deployment',
-        position: { x: 0, y: baseY },
+        position: { x: DEPLOY_COL, y: depY },
         data: {
           deployment: relation.deployment,
           projectId: pid,
@@ -114,54 +133,116 @@ export function ProjectDetailPage() {
       const serviceConfigured = relation.service && (relation.service.port !== 0 || relation.service.pending_port !== 0)
 
       if (serviceConfigured && relation.service) {
-        // サービスノードを追加する
+        // サービスノードのY: Deployment の縦中央に Service の縦中央を合わせる
+        const svcY = depY + (DEP_H - SVC_H) / 2
         newNodes.push({
           id: `svc-${relation.service.id}`,
           type: 'service',
-          position: { x: COL_WIDTH, y: baseY + 20 },
+          position: { x: SERVICE_COL, y: svcY },
           data: { service: relation.service },
         })
 
-        // デプロイメント → サービスのエッジを追加する
+        // Service → Deployment のエッジを追加する（トラフィックの流れ: ingress → svc → dep）
         newEdges.push({
-          id: `edge-dep-svc-${relation.deployment.id}`,
-          source: `dep-${relation.deployment.id}`,
-          target: `svc-${relation.service.id}`,
-          style: EDGE_STYLE,
-          markerEnd: EDGE_MARKER,
+          id: `edge-svc-dep-${relation.deployment.id}`,
+          source: `svc-${relation.service.id}`,
+          target: `dep-${relation.deployment.id}`,
+          ...EDGE_DEFAULTS,
         })
 
-        // IngressRoute が存在する場合 Service → IngressRoute のエッジを追加する
-        if (currentIngressRoute) {
+        // pathRules でこの Service が IngressRoute に登録済みの場合のみ Ingress → Service のエッジを追加する
+        const isLinkedToIngress = currentIngressRoute && currentPathRules.some(pr => pr.service_id === relation.service!.id)
+        if (isLinkedToIngress) {
           newEdges.push({
-            id: `edge-svc-ing-${relation.service.id}`,
-            source: `svc-${relation.service.id}`,
-            target: 'ingress-node',
-            style: EDGE_STYLE,
-            markerEnd: EDGE_MARKER,
+            id: `edge-ing-svc-${relation.service.id}`,
+            source: 'ingress-node',
+            target: `svc-${relation.service.id}`,
+            ...EDGE_DEFAULTS,
           })
         }
       }
     })
 
-    // IngressRoute ノードをグラフ右側中央に1つ配置する
+    // ボリュームをグラフに追加する（マウント有無に関わらず全件表示する）
+    const VOL_H = 120 // Volume ノードの概算高さ
+    const VOL_ROW_HEIGHT = 140 // Volume ノード間の縦間隔
+    currentVolumeList.forEach((volume, volumeIndex) => {
+      // このボリュームをマウントしている Deployment のインデックスを収集する
+      const mountedRelationIndices = relations
+        .map((relation, relationIndex) => ({ relation, relationIndex }))
+        .filter(({ relation }) => relation.volumeMounts.some(vm => vm.volume_id === volume.id && vm.status !== 'deleting')) // deleting 状態は接続しない
+
+      // Volume ノードのY座標: マウント先がある場合はその縦中央平均、ない場合は縦に並べる
+      const volY = mountedRelationIndices.length > 0
+        ? mountedRelationIndices.reduce((sum, { relationIndex }) => sum + relationIndex * ROW_HEIGHT, 0) / mountedRelationIndices.length + (DEP_H - VOL_H) / 2
+        : volumeIndex * VOL_ROW_HEIGHT // マウントなしは縦に並べる
+
+      newNodes.push({
+        id: `vol-${volume.id}`,
+        type: 'volume',
+        position: { x: VOLUME_COL, y: volY },
+        data: { volume },
+      })
+
+      // マウント先の各 Deployment から Volume へ破線エッジを追加する
+      mountedRelationIndices.forEach(({ relation }) => {
+        newEdges.push({
+          id: `edge-dep-vol-${relation.deployment.id}-${volume.id}`,
+          source: `dep-${relation.deployment.id}`,
+          target: `vol-${volume.id}`,
+          type: 'straight',
+          style: {
+            stroke: '#F59E0B', // アンバー色でストレージを表現する
+            strokeWidth: 1.5,
+            strokeDasharray: '4 4',
+            animation: 'dashmove 0.6s linear infinite', // CSS アニメーションで常時流れる破線を実現する
+          },
+        })
+      })
+    })
+
+    // Ingress / Internet は全行の縦中央に1つ配置する
+    // 全行の縦中央Y = 全行の高さ/2 - DEP_H/2（Deployment 基準）
+    const totalDepSpan = relations.length * ROW_HEIGHT // 全Deploymentが占める縦幅
+    const depMidY = (totalDepSpan - ROW_HEIGHT) / 2 // 縦中央行の Deployment Y座標
+    const ingY = depMidY + (DEP_H - ING_H) / 2   // IngressRoute の縦中央を Deployment に合わせる
+    const netY = depMidY + (DEP_H - NET_H) / 2   // Internet の縦中央を Deployment に合わせる
+
     if (currentIngressRoute) {
-      const ingressY = Math.max(0, ((relations.length - 1) * ROW_HEIGHT) / 2) // 縦方向中央に配置する
       newNodes.push({
         id: 'ingress-node',
         type: 'ingress',
-        position: { x: INGRESS_COL, y: ingressY },
+        position: { x: INGRESS_COL, y: ingY },
         data: {
           ingress: currentIngressRoute,
           pathRules: currentPathRules,
           onSelect: openIngressSidebar, // ノードクリック時にIngressサイドバーを開く
         },
       })
+
+      // Internet → IngressRoute のエッジを追加する
+      newEdges.push({
+        id: 'edge-internet-ingress',
+        source: 'internet-node',
+        target: 'ingress-node',
+        ...EDGE_DEFAULTS,
+      })
+
+      // Internet ノードの縦中央を Deployment に合わせる
+      newNodes.push({
+        id: 'internet-node',
+        type: 'internet',
+        position: { x: INTERNET_COL, y: netY },
+        data: {},
+      })
     }
 
     setNodes(newNodes) // ノードを更新する
     setEdges(newEdges) // エッジを更新する
   }, [setNodes, setEdges, openIngressSidebar])
+
+  // グラフ再描画の判定に使う前回データを保持する
+  const prevGraphKey = useRef<string | null>(null)
 
   const fetchData = useCallback(async () => {
     if (!projectId) return
@@ -174,11 +255,14 @@ export function ProjectDetailPage() {
 
       setProject(projectData)
 
-      // 各デプロイメントのサービスを並行取得する
+      // 各デプロイメントのサービスと VolumeMounts を並行取得する
       const relations = await Promise.all(
         (deploymentList ?? []).map(async (deployment) => {
-          const serviceResult = await get<K8sService>(`/deployments/${deployment.id}/service`).catch(() => null) // サービス情報を取得する
-          return { deployment, service: serviceResult } as DeploymentWithRelations
+          const [serviceResult, volumeMountResult] = await Promise.all([
+            get<K8sService>(`/deployments/${deployment.id}/service`).catch(() => null), // サービス情報を取得する
+            get<VolumeMount[]>(`/deployments/${deployment.id}/volume-mounts`).catch(() => [] as VolumeMount[]), // VolumeMounts を取得する
+          ])
+          return { deployment, service: serviceResult, volumeMounts: volumeMountResult ?? [] } as DeploymentWithRelations
         })
       )
 
@@ -196,10 +280,15 @@ export function ProjectDetailPage() {
         setPathRules([]) // パスルールを空にする
       }
 
-      buildGraph(relations, projectId, ingressResult, currentPathRules) // グラフを更新する
-
       const volumes = await get<Volume[]>(`/projects/${projectId}/volumes`).catch(() => []) // ボリューム一覧を取得する
       setVolumeList(volumes ?? []) // ボリューム一覧を設定する
+
+      // グラフに関わるデータのハッシュキーを生成し、前回から変化があった場合のみ再描画する
+      const nextGraphKey = JSON.stringify({ relations, ingressResult, currentPathRules, volumes })
+      if (nextGraphKey !== prevGraphKey.current) {
+        prevGraphKey.current = nextGraphKey // キーを更新する
+        buildGraph(relations, projectId, ingressResult, currentPathRules, volumes ?? []) // グラフを再描画する
+      }
 
       const envVars = await get<EnvVar[]>(`/projects/${projectId}/env-vars`).catch(() => []) // 環境変数一覧を取得する
       setEnvVarList(envVars ?? []) // 環境変数一覧を設定する
@@ -415,28 +504,28 @@ export function ProjectDetailPage() {
           /* ReactFlow グラフ + サイドバー */
           <div className="flex overflow-hidden bg-white" style={{ height: 'calc(100vh - 48px)' }}>
             {/* 左アイコンレール */}
-            <div className="w-10 shrink-0 flex flex-col items-center pt-3 gap-1 border-r border-gray-100 bg-gray-50 z-10">
+            <div className="w-14 shrink-0 flex flex-col items-center pt-3 gap-2 border-r border-gray-100 bg-gray-50 z-10">
               <button
                 onClick={() => { setShowVolumeSidebar(prev => !prev); setShowEnvVarSidebar(false) }}
                 title="ボリューム"
-                className={`w-7 h-7 flex items-center justify-center rounded-md transition-colors ${
+                className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                   showVolumeSidebar
-                    ? 'bg-[#111827] text-white'
-                    : 'text-gray-400 hover:bg-gray-200 hover:text-gray-600'
+                    ? 'bg-amber-500 text-white shadow-md'
+                    : 'bg-amber-50 text-amber-500 hover:bg-amber-100'
                 }`}
               >
-                <HardDrive className="w-3.5 h-3.5" />
+                <HardDrive className="w-5 h-5" />
               </button>
               <button
                 onClick={() => { setShowEnvVarSidebar(prev => !prev); setShowVolumeSidebar(false) }}
                 title="環境変数"
-                className={`w-7 h-7 flex items-center justify-center rounded-md transition-colors ${
+                className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                   showEnvVarSidebar
-                    ? 'bg-[#111827] text-white'
-                    : 'text-gray-400 hover:bg-gray-200 hover:text-gray-600'
+                    ? 'bg-purple-500 text-white shadow-md'
+                    : 'bg-purple-50 text-purple-500 hover:bg-purple-100'
                 }`}
               >
-                <KeyRound className="w-3.5 h-3.5" />
+                <KeyRound className="w-5 h-5" />
               </button>
             </div>
 
@@ -475,6 +564,7 @@ export function ProjectDetailPage() {
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 nodeTypes={NODE_TYPES}
+                nodesDraggable={false}
                 fitView
                 fitViewOptions={{ padding: 0.2 }}
                 proOptions={{ hideAttribution: true }}

@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Globe } from 'lucide-react'
+import { Globe, Route } from 'lucide-react'
 import { StatusBadge } from '@/components/StatusBadge'
 import type { IngressRoute, PathRule } from '@/lib/types'
 
@@ -12,41 +12,41 @@ export type IngressNodeData = {
 export function IngressNode({ data }: NodeProps) {
   const { ingress, pathRules, onSelect } = data as IngressNodeData
 
+  const activePathCount = pathRules.filter(pr => pr.status !== 'deleting').length // 有効なパスルール数を計算する
+
   return (
     <div
       onClick={onSelect} // クリックでサイドバーを開く
-      className="bg-white border border-gray-200 rounded-lg shadow-sm w-56 cursor-pointer hover:border-purple-400 hover:shadow-md transition-all"
+      className="bg-white rounded-xl shadow-md w-56 cursor-pointer hover:shadow-lg transition-all overflow-hidden border border-gray-100"
+      style={{ borderTopColor: '#7C3AED', borderTopWidth: 3 }}
     >
-      <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
+      <Handle type="target" position={Position.Left} style={{ opacity: 0 }} /> {/* Internet からの接続を受け取る */}
+      <Handle type="source" position={Position.Right} style={{ opacity: 0 }} /> {/* Service へ接続する */}
 
-      <div className="p-3">
-        {/* ヘッダー */}
-        <div className="flex items-center gap-2 mb-2">
-          <span className="p-1 rounded bg-purple-50 text-purple-500">
-            <Globe className="w-3.5 h-3.5" />
-          </span>
-          <span className="text-xs text-gray-400 font-medium">IngressRoute</span>
+      {/* カラーヘッダー */}
+      <div className="px-3 pt-3 pb-2 flex items-center gap-2">
+        <span className="p-1.5 rounded-lg bg-purple-100 text-purple-600 shrink-0">
+          <Globe className="w-3.5 h-3.5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold text-purple-500 uppercase tracking-wide leading-none mb-0.5">IngressRoute</p>
           <StatusBadge status={ingress.status} />
         </div>
+      </div>
 
-        {/* ホスト名 */}
-        <p className="text-xs font-mono text-[#111827] break-all mb-2 leading-relaxed">
+      {/* ホスト名 */}
+      <div className="px-3 pb-2">
+        <p className="text-xs font-mono font-semibold text-gray-800 truncate" title={ingress.host}>
           {ingress.host}
         </p>
+      </div>
 
-        {/* パスルール一覧 */}
-        {pathRules.length > 0 && (
-          <div className="border-t border-gray-100 pt-2 mt-1 space-y-1">
-            {pathRules.map(pathRule => (
-              <div key={pathRule.id} className="flex items-center justify-between text-xs">
-                <span className="font-mono text-gray-600">{pathRule.path_prefix}</span>
-                <span className={`text-[10px] ${pathRule.status === 'active' ? 'text-green-500' : pathRule.status === 'deleting' ? 'text-red-400' : 'text-amber-500'}`}>
-                  {pathRule.status}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+      {/* パスルール件数バッジ */}
+      <div className="px-3 pb-3">
+        <div className="flex items-center gap-1.5 text-xs text-gray-400">
+          <Route className="w-3 h-3 shrink-0" />
+          <span>{activePathCount} {activePathCount === 1 ? 'path' : 'paths'}</span>
+        </div>
       </div>
     </div>
   )

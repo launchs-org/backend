@@ -174,7 +174,7 @@ export function DeploymentNewPage() {
       }
 
       const deployment = await post<Deployment>(`/projects/${projectId}/deployments`, body) // デプロイメントを作成する
-      navigate(`/projects/${projectId}/deployments/${deployment.id}`) // 詳細ページへ遷移する
+      navigate(`/projects/${projectId}`) // プロジェクト画面へ遷移する
     } catch (createError) {
       console.error(createError)
       setError('デプロイメントの作成に失敗しました')
