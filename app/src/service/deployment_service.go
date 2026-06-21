@@ -69,13 +69,15 @@ type UpdateDeploymentRequest struct {
 
 // deploymentServiceImpl は DeploymentService の実装
 type deploymentServiceImpl struct {
-	deploymentRepo   repository.DeploymentRepository   // deployment リポジトリ
-	serviceRepo      repository.ServiceRepository      // service リポジトリ
-	projectRepo      repository.ProjectRepository      // project リポジトリ（所有権チェック用）
-	envVarMountRepo  repository.EnvVarMountRepository  // env_var_mount リポジトリ
-	volumeMountRepo  repository.VolumeMountRepository  // volume_mount リポジトリ
-	userQuotaRepo    repository.UserQuotaRepository    // user_quota リポジトリ（Quotaチェック用）
-	k8sClient        k8sclient.Interface               // k8s クライアント（リソース削除用）
+	deploymentRepo   repository.DeploymentRepository        // deployment リポジトリ
+	serviceRepo      repository.ServiceRepository           // service リポジトリ
+	projectRepo      repository.ProjectRepository           // project リポジトリ（所有権チェック用）
+	envVarMountRepo  repository.EnvVarMountRepository       // env_var_mount リポジトリ
+	volumeMountRepo  repository.VolumeMountRepository       // volume_mount リポジトリ
+	applyHistoryRepo repository.ApplyHistoryRepository      // apply_history リポジトリ（not_init 削除時の DB クリーンアップ用）
+	buildRepo        repository.DeploymentBuildRepository   // build リポジトリ（not_init 削除時の DB クリーンアップ用）
+	userQuotaRepo    repository.UserQuotaRepository         // user_quota リポジトリ（Quotaチェック用）
+	k8sClient        k8sclient.Interface                    // k8s クライアント（リソース削除用）
 }
 
 // NewDeploymentService は DeploymentService の実装を返す
@@ -85,17 +87,21 @@ func NewDeploymentService(
 	projectRepo repository.ProjectRepository,
 	envVarMountRepo repository.EnvVarMountRepository,
 	volumeMountRepo repository.VolumeMountRepository,
+	applyHistoryRepo repository.ApplyHistoryRepository,
+	buildRepo repository.DeploymentBuildRepository,
 	userQuotaRepo repository.UserQuotaRepository,
 	k8sClient k8sclient.Interface,
 ) DeploymentService {
 	return &deploymentServiceImpl{
-		deploymentRepo:  deploymentRepo,  // deployment リポジトリを注入する
-		serviceRepo:     serviceRepo,     // service リポジトリを注入する
-		projectRepo:     projectRepo,     // project リポジトリを注入する
-		envVarMountRepo: envVarMountRepo, // env_var_mount リポジトリを注入する
-		volumeMountRepo: volumeMountRepo, // volume_mount リポジトリを注入する
-		userQuotaRepo:   userQuotaRepo,   // user_quota リポジトリを注入する
-		k8sClient:       k8sClient,       // k8s クライアントを注入する
+		deploymentRepo:  deploymentRepo,   // deployment リポジトリを注入する
+		serviceRepo:     serviceRepo,      // service リポジトリを注入する
+		projectRepo:     projectRepo,      // project リポジトリを注入する
+		envVarMountRepo: envVarMountRepo,  // env_var_mount リポジトリを注入する
+		volumeMountRepo: volumeMountRepo,  // volume_mount リポジトリを注入する
+		applyHistoryRepo: applyHistoryRepo, // apply_history リポジトリを注入する
+		buildRepo:       buildRepo,        // build リポジトリを注入する
+		userQuotaRepo:   userQuotaRepo,    // user_quota リポジトリを注入する
+		k8sClient:       k8sClient,        // k8s クライアントを注入する
 	}
 }
 
@@ -268,6 +274,17 @@ func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID s
 	}
 	if err := svc.checkOwnership(ctx, userID, deploymentData.ProjectID); err != nil { // 所有権を確認する
 		return nil, err
+	}
+
+	// not_init 状態は k8s にリソースが存在しないため、直接 DB クリーンアップを実行する
+	if deploymentData.Status == models.DeploymentStatusNotInit {
+		if err := svc.buildRepo.DeleteAllByDeploymentID(ctx, deploymentData.ID); err != nil { // ビルド履歴を削除する
+			return nil, err // 削除エラーを返す
+		}
+		if err := svc.deploymentRepo.Delete(ctx, deploymentData.ID); err != nil { // deployment レコードを削除する
+			return nil, err // 削除エラーを返す
+		}
+		return deploymentData, nil // 削除完了を返す
 	}
 
 	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // namespace 解決のために project を取得する
