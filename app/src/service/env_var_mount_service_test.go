@@ -46,6 +46,10 @@ func (mock *mockEnvVarMountRepository) FindByDeploymentIDAndEnvVarID(ctx context
 	return nil, gorm.ErrRecordNotFound // デフォルトは存在しないとして返す
 }
 
+func (mock *mockEnvVarMountRepository) UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount, status models.EnvVarMountStatus) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 func (mock *mockEnvVarMountRepository) Delete(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error {
 	if mock.deleteFunc != nil { // モック関数が設定されている場合は呼び出す
 		return mock.deleteFunc(ctx, tx, mount)
@@ -98,6 +102,10 @@ func (mock *mockDeploymentRepositoryForMount) UpdatePendingImageURL(ctx context.
 }
 
 func (mock *mockDeploymentRepositoryForMount) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
+func (mock *mockDeploymentRepositoryForMount) UpdateDeleteProgress(ctx context.Context, deploymentID string, progress string) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
@@ -235,10 +243,13 @@ func TestCreateEnvVarMount_他ユーザーのDeploymentはErrForbiddenを返す(
 	}
 }
 
-// TestDeleteEnvVarMount_正常にマウント設定が削除される は DeleteEnvVarMount がマウント設定を削除することを確認する
+// TestDeleteEnvVarMount_正常にマウント設定が削除される は pending 状態のマウント設定が即削除されることを確認する
 func TestDeleteEnvVarMount_正常にマウント設定が削除される(t *testing.T) {
 	deleteCalled := false // 削除が呼ばれたことを追跡する変数
 	mountRepo := &mockEnvVarMountRepository{
+		findByIDFunc: func(ctx context.Context, mountID string) (*models.EnvVarMount, error) {
+			return &models.EnvVarMount{ID: mountID, DeploymentID: "deployment-id-1", Status: models.EnvVarMountStatusPending}, nil // pending 状態を返す（pending は即削除）
+		},
 		deleteFunc: func(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error {
 			deleteCalled = true // 削除が呼ばれたことを記録する
 			return nil          // 削除成功を返す
