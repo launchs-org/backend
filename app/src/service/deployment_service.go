@@ -293,6 +293,21 @@ func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID s
 	}
 	namespace := projectData.Namespace // namespace を取得する
 
+	// k8s Deployment リソースが存在しない場合（pending のまま apply 未実施）は直接 DB クリーンアップを実行する
+	exists, existsErr := k8s.ExistsDeployment(ctx, svc.k8sClient, namespace, deploymentData.Name) // k8s リソースの存在を確認する
+	if existsErr != nil {
+		return nil, existsErr // 確認エラーを返す
+	}
+	if !exists { // k8s リソースが存在しない場合は Watch イベントが発生しないため直接削除する
+		if err := svc.buildRepo.DeleteAllByDeploymentID(ctx, deploymentData.ID); err != nil { // ビルド履歴を削除する
+			return nil, err // 削除エラーを返す
+		}
+		if err := svc.deploymentRepo.Delete(ctx, deploymentData.ID); err != nil { // deployment レコードを削除する
+			return nil, err // 削除エラーを返す
+		}
+		return deploymentData, nil // 削除完了を返す
+	}
+
 	deploymentData.Status         = models.DeploymentStatusDeleting // ステータスを deleting に変更する
 	deploymentData.DeleteProgress = "k8s リソースを削除中"            // 初期進捗を設定する
 	if err := svc.deploymentRepo.Save(ctx, deploymentData); err != nil { // リポジトリ経由で保存する

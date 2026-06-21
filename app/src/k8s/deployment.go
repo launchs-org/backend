@@ -39,6 +39,26 @@ func DeleteDeployment(ctx context.Context, client kubernetes.Interface, namespac
 	return client.AppsV1().Deployments(namespace).Delete(ctx, name, metav1.DeleteOptions{}) // Deployment を削除する
 }
 
+// ExistsDeployment は namespace/name に対応する k8s Deployment が存在するかどうかを返す
+func ExistsDeployment(ctx context.Context, client kubernetes.Interface, namespace, name string) (bool, error) {
+	_, err := client.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{}) // k8s から Deployment を取得する
+	if err != nil {
+		if isNotFound(err) { // 404 の場合は存在しないと判定する
+			return false, nil
+		}
+		return false, err // その他のエラーは伝播する
+	}
+	return true, nil // 存在する場合は true を返す
+}
+
+// isNotFound は k8s の 404 エラーかどうかを判定する
+func isNotFound(err error) bool {
+	if err == nil { // nil の場合は false を返す
+		return false
+	}
+	return strings.Contains(err.Error(), "not found") // エラーメッセージで判定する
+}
+
 // pollDeployments は 10 秒ごとに全 Deployment を List して app_status を同期する
 // Watch 接続切断中のイベント取りこぼしを補完するためのポーリングループ
 func pollDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]context.CancelFunc, streamCancelMu *sync.Mutex) {
