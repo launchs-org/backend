@@ -17,9 +17,9 @@ var ErrDuplicatePathPrefix = errors.New("path_prefix already exists in this ingr
 
 // IngressRouteService は IngressRoute・PathRule CRUD のビジネスロジックを定義するインターフェース
 type IngressRouteService interface {
-	GetIngressRoute(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error)                             // ingress_route を取得する
+	ListIngressRoutes(ctx context.Context, userID string, projectID string) ([]*models.IngressRoute, error)                        // ingress_route 一覧を取得する
 	CreateIngressRoute(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error)                         // ingress_route を作成する（ホストは自動生成）
-	DeleteIngressRoute(ctx context.Context, userID string, projectID string) error                                                  // ingress_route を status=deleting にする
+	DeleteIngressRoute(ctx context.Context, userID string, ingressRouteID string) error                                            // ingress_route を status=deleting にする
 	ListPathRules(ctx context.Context, userID string, ingressRouteID string) ([]*models.PathRule, error)                           // path_rule 一覧を取得する
 	CreatePathRule(ctx context.Context, userID string, ingressRouteID string, req CreatePathRuleRequest) (*models.PathRule, error) // path_rule を作成する
 	DeletePathRule(ctx context.Context, userID string, pathRuleID string) error                                                    // path_rule を status=deleting にする
@@ -54,12 +54,12 @@ func NewIngressRouteService(
 	}
 }
 
-// GetIngressRoute は projectID に紐づく ingress_route を返す
-func (svc *ingressRouteServiceImpl) GetIngressRoute(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error) {
+// ListIngressRoutes は projectID に紐づく ingress_route 一覧を返す
+func (svc *ingressRouteServiceImpl) ListIngressRoutes(ctx context.Context, userID string, projectID string) ([]*models.IngressRoute, error) {
 	if err := svc.checkProjectOwnership(ctx, userID, projectID); err != nil { // 所有権を確認する
 		return nil, err
 	}
-	return svc.ingressRouteRepo.FindByProjectID(ctx, projectID) // リポジトリ経由で ingress_route を取得する
+	return svc.ingressRouteRepo.FindAllByProjectID(ctx, projectID) // リポジトリ経由で ingress_route 一覧を取得する
 }
 
 // CreateIngressRoute は projectID に紐づく ingress_route を作成する
@@ -88,16 +88,16 @@ func (svc *ingressRouteServiceImpl) CreateIngressRoute(ctx context.Context, user
 }
 
 // DeleteIngressRoute は ingress_route を status=deleting にする
-func (svc *ingressRouteServiceImpl) DeleteIngressRoute(ctx context.Context, userID string, projectID string) error {
-	if err := svc.checkProjectOwnership(ctx, userID, projectID); err != nil { // 所有権を確認する
-		return err
-	}
-	ingressRouteData, err := svc.ingressRouteRepo.FindByProjectID(ctx, projectID) // ingress_route を取得する
+func (svc *ingressRouteServiceImpl) DeleteIngressRoute(ctx context.Context, userID string, ingressRouteID string) error {
+	ingressRouteData, err := svc.ingressRouteRepo.FindByID(ctx, ingressRouteID) // ingress_route を取得する
 	if err != nil {
 		return err // 取得エラーを返す
 	}
-	ingressRouteData.Status = models.IngressRouteStatusDeleting                       // 削除待ち状態に変更する
-	return svc.ingressRouteRepo.Update(ctx, nil, ingressRouteData)                    // DB に保存する
+	if err := svc.checkProjectOwnership(ctx, userID, ingressRouteData.ProjectID); err != nil { // 所有権を確認する
+		return err
+	}
+	ingressRouteData.Status = models.IngressRouteStatusDeleting        // 削除待ち状態に変更する
+	return svc.ingressRouteRepo.Update(ctx, nil, ingressRouteData)     // DB に保存する
 }
 
 // ListPathRules は ingressRouteID に紐づく path_rule 一覧を返す
