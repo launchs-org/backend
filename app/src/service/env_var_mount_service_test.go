@@ -113,6 +113,10 @@ func (mock *mockDeploymentRepositoryForMount) Delete(ctx context.Context, deploy
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *mockDeploymentRepositoryForMount) UpdateDeploymentStatus(ctx context.Context, deploymentID string, status models.DeploymentStatus) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 func (mock *mockDeploymentRepositoryForMount) FindAllRunning(ctx context.Context) ([]models.Deployment, error) {
 	return nil, nil // テストでは使用しないためデフォルト nil を返す
 }

@@ -26,6 +26,7 @@ var ErrBuildNotCancellable = errors.New("build is not cancellable")
 type BuildService interface {
 	TriggerBuild(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error)         // ビルドをトリガーする
 	CancelBuild(ctx context.Context, userID string, buildID string) error                                          // ビルドをキャンセルする
+	GetBuild(ctx context.Context, userID string, buildID string) (*models.DeploymentBuild, error)                  // ビルド情報を取得する
 	GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error) // ビルドログを取得する（ログ文字列・最終チャンク時刻・エラー）
 	ListBuilds(ctx context.Context, userID string, deploymentID string) ([]models.DeploymentBuild, error)          // ビルド一覧を取得する
 }
@@ -152,7 +153,10 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 		return nil, fmt.Errorf("未知のビルドタイプ: %s", buildData.BuildType) // 未知のビルドタイプはエラーを返す
 	}
 	if err != nil {
-		return nil, err // Job 作成エラーを返す
+		// Job 起動失敗時はビルドレコードを failed に更新してから返す（pending のまま残すと再ビルドが永久に弾かれるため）
+		finishedAt := time.Now()
+		_ = svc.buildRepo.UpdateBuildResult(ctx, buildData.ID, models.BuildStatusFailed, "", finishedAt) // ロールバック：failed に更新する
+		return nil, err                                                                                   // Job 作成エラーを返す
 	}
 
 	// 8. k8s Job 名をビルドレコードに保存する
@@ -162,6 +166,30 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 	}
 
 	return buildData, nil // 作成したビルドレコードを返す
+}
+
+// GetBuild は指定したビルドレコードを返す
+func (svc *buildServiceImpl) GetBuild(ctx context.Context, userID string, buildID string) (*models.DeploymentBuild, error) {
+	buildData, err := svc.buildRepo.FindByID(ctx, buildID) // ビルドレコードを取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+
+	deploymentData, err := svc.deploymentRepo.FindByID(ctx, buildData.DeploymentID) // 所有権チェック用にデプロイメントを取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+
+	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // プロジェクトを取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+
+	if projectData.UserID != userID { // 所有権を確認する
+		return nil, ErrForbidden // 権限なしエラーを返す
+	}
+
+	return buildData, nil // ビルドレコードを返す
 }
 
 // CancelBuild は実行中のビルドをキャンセルする

@@ -128,6 +128,9 @@ func (mock *mockDeploymentRepoForBuild) UpdateDeleteProgress(ctx context.Context
 func (mock *mockDeploymentRepoForBuild) Delete(ctx context.Context, deploymentID string) error {
 	return nil // テストでは使用しない
 }
+func (mock *mockDeploymentRepoForBuild) UpdateDeploymentStatus(ctx context.Context, deploymentID string, status models.DeploymentStatus) error {
+	return nil // テストでは使用しない
+}
 func (mock *mockDeploymentRepoForBuild) FindAllRunning(ctx context.Context) ([]models.Deployment, error) {
 	return nil, nil // テストでは使用しない
 }

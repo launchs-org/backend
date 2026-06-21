@@ -168,12 +168,20 @@ func handleBuildJobEvent(
 			logger.PrintErr("WatchBuildJobs: pending_image_url 更新に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + err.Error()) // エラーをログ出力する
 			return
 		}
+		if err := deploymentRepo.UpdateDeploymentStatus(ctx, buildData.DeploymentID, models.DeploymentStatusPending); err != nil { // not_init → pending に遷移する（ビルド成功で apply 可能になる）
+			logger.PrintErr("WatchBuildJobs: DeploymentStatus 更新に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + err.Error()) // エラーをログ出力する
+			return
+		}
 		logger.Println("WatchBuildJobs: ビルド成功。succeeded に更新し pending_image_url をセットしました: " + buildID) // 成功ログを出力する
 
 	case k8sJob.Status.Failed > 0 && buildData.Status == models.BuildStatusBuilding: // Job が失敗かつ DB が building の場合
 		finishedAt := time.Now()                                                                                               // 完了時刻を取得する
 		if err := buildRepo.UpdateBuildResult(ctx, buildID, models.BuildStatusFailed, "", finishedAt); err != nil { // ビルド結果を failed で更新する
 			logger.PrintErr("WatchBuildJobs: ビルド失敗結果更新に失敗しました（buildID=" + buildID + "）: " + err.Error()) // エラーをログ出力する
+			return
+		}
+		if err := deploymentRepo.UpdateDeploymentStatus(ctx, buildData.DeploymentID, models.DeploymentStatusFailed); err != nil { // not_init → failed に遷移する（ビルド失敗）
+			logger.PrintErr("WatchBuildJobs: DeploymentStatus 更新に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + err.Error()) // エラーをログ出力する
 			return
 		}
 		logger.Println("WatchBuildJobs: ビルド失敗。failed に更新しました: " + buildID) // 失敗ログを出力する
