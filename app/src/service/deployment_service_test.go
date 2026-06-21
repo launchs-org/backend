@@ -9,6 +9,8 @@ import (
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	appsv1 "k8s.io/api/apps/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
 
@@ -402,8 +404,10 @@ func TestUpdateDeployment_存在しないdeploymentはエラーを返す(t *test
 // TestDeleteDeployment_statusがdeletingになる は status が deleting に変更されることを確認する
 func TestDeleteDeployment_statusがdeletingになる(t *testing.T) {
 	originalDeployment := &models.Deployment{
-		ID:     "deployment-id-1",
-		Status: models.DeploymentStatusRunning, // 更新前の status を設定する
+		ID:        "deployment-id-1",
+		Name:      "test-deploy",
+		ProjectID: "project-id-1",
+		Status:    models.DeploymentStatusRunning, // 更新前の status を設定する
 	}
 
 	var savedDeployment *models.Deployment // 保存された deployment を格納する変数を定義する
@@ -417,8 +421,16 @@ func TestDeleteDeployment_statusがdeletingになる(t *testing.T) {
 		},
 	}
 	serviceRepo := &mockServiceRepository{}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return &models.Project{UserID: "test-user-id", Namespace: "test-ns"}, nil // namespace 付きの project を返す
+		},
+	}
 
-	deploymentSvc := newTestDeploymentService(deploymentRepo, serviceRepo, &mockProjectRepository{}) // サービスを生成する
+	// k8s Deployment が存在することを示すために fake client に登録する
+	fakeK8sClient := k8sfake.NewSimpleClientset(makeK8sDeployment("test-ns", "test-deploy")) // fake k8s クライアントを生成する
+
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &noopUserQuotaRepository{}, fakeK8sClient) // サービスを生成する
 
 	result, err := deploymentSvc.DeleteDeployment(context.Background(), "test-user-id", "deployment-id-1") // サービスを実行する
 	if err != nil {
@@ -472,7 +484,9 @@ func TestDeleteDeployment_k8sリソースが削除される(t *testing.T) {
 			return &models.Project{UserID: "test-user-id", Namespace: "test-ns"}, nil // namespace 付きの project を返す
 		},
 	}
-	fakeK8sClient := k8sfake.NewSimpleClientset()                             // fake k8s クライアントを生成する
+
+	// k8s Deployment が存在することを示すために fake client に登録する
+	fakeK8sClient := k8sfake.NewSimpleClientset(makeK8sDeployment("test-ns", "test-deploy")) // fake k8s クライアントを生成する
 	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &noopUserQuotaRepository{}, fakeK8sClient) // サービスを生成する
 
 	result, err := deploymentSvc.DeleteDeployment(context.Background(), "test-user-id", "deployment-id-k8s") // サービスを実行する
@@ -639,3 +653,13 @@ func TestUpdateService_他ユーザーのDeploymentはErrForbiddenを返す(t *t
 	}
 }
 
+
+// makeK8sDeployment はテスト用の k8s Deployment オブジェクトを生成する
+func makeK8sDeployment(namespace, name string) *appsv1.Deployment {
+	return &appsv1.Deployment{ // k8s Deployment を生成する
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace, // namespace を設定する
+			Name:      name,      // 名前を設定する
+		},
+	}
+}
