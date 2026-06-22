@@ -778,7 +778,6 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
   const [ghDirs, setGhDirs]           = useState<string[]>([])       // ディレクトリ一覧
   const [ghLoading, setGhLoading]     = useState<'branches' | 'commits' | 'dirs' | null>(null) // ローディング中の対象
   const [ghError, setGhError]         = useState<string | null>(null) // エラーメッセージ
-  const [manualInput, setManualInput] = useState(false) // GitHub API 失敗時の手動入力モード
 
   // コミット・ディレクトリ一覧を取得する共通関数
   const loadCommitsAndDirs = useCallback(async (repoUrl: string, branch: string) => {
@@ -909,87 +908,49 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
                   {ghLoading === 'branches' ? '取得中...' : '読み込む'}
                 </button>
               </div>
-              {ghError && (
-                <div className="mt-1 flex items-center justify-between">
-                  <p className="text-xs text-red-500">{ghError}</p>
-                  <button
-                    type="button"
-                    onClick={() => { setManualInput(true); setGhError(null) }} // 手動入力モードに切り替える
-                    className="text-xs text-[#00C2D1] hover:underline shrink-0 ml-2"
-                  >
-                    手動で入力する
-                  </button>
-                </div>
-              )}
+              {ghError && <p className="text-xs text-red-500 mt-1">{ghError}</p>}
             </div>
 
-            {/* 手動入力モード */}
-            {manualInput && (
-              <>
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className={labelClass}>ブランチ名</label>
-                    <button type="button" onClick={() => setManualInput(false)} className="text-xs text-gray-400 hover:text-gray-600">APIから取得する</button>
-                  </div>
-                  <input
-                    type="text"
-                    value={formData.github_branch}
-                    onChange={(event) => setFormData(prev => ({ ...prev, github_branch: event.target.value }))}
-                    placeholder="main"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>コミットSHA（空欄で HEAD）</label>
-                  <input
-                    type="text"
-                    value={formData.github_commit_sha}
-                    onChange={(event) => setFormData(prev => ({ ...prev, github_commit_sha: event.target.value }))}
-                    placeholder="例: abc1234（空欄で最新）"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>ビルドディレクトリ</label>
-                  <input
-                    type="text"
-                    value={formData.github_repo_directory}
-                    onChange={(event) => setFormData(prev => ({ ...prev, github_repo_directory: event.target.value }))}
-                    placeholder="./"
-                    className={inputClass}
-                  />
-                </div>
-              </>
-            )}
-
-            {/* ブランチ選択（ブランチ一覧取得後に表示） */}
-            {!manualInput && ghBranches.length > 0 && (
-              <div>
-                <label className={labelClass}>ブランチ</label>
+            {/* ブランチ：常にテキスト入力、API取得済みならドロップダウンも表示 */}
+            <div>
+              <label className={labelClass}>ブランチ</label>
+              <input
+                type="text"
+                value={formData.github_branch}
+                onChange={(event) => setFormData(prev => ({ ...prev, github_branch: event.target.value }))}
+                placeholder="main"
+                className={inputClass}
+              />
+              {ghBranches.length > 0 && (
                 <select
                   value={formData.github_branch}
                   onChange={(event) => void handleBranchSelect(event.target.value)}
-                  className={inputClass}
+                  className={`${inputClass} mt-1`}
                 >
-                  <option value="">ブランチを選択してください</option>
+                  <option value="">ブランチを選択...</option>
                   {ghBranches.map(branchItem => (
                     <option key={branchItem.name} value={branchItem.name}>{branchItem.name}</option>
                   ))}
                 </select>
-              </div>
-            )}
+              )}
+            </div>
 
-            {/* コミット選択（コミット一覧取得後に表示） */}
-            {!manualInput && ghLoading === 'commits' && (
-              <p className="text-xs text-gray-400">コミット・ディレクトリを取得中...</p>
-            )}
-            {!manualInput && ghCommits.length > 0 && (
-              <div>
-                <label className={labelClass}>コミット</label>
+            {/* コミットSHA：常にテキスト入力、API取得済みならドロップダウンも表示 */}
+            {ghLoading === 'commits' && <p className="text-xs text-gray-400">コミット・ディレクトリを取得中...</p>}
+            <div>
+              <label className={labelClass}>コミットSHA（空欄で最新）</label>
+              <input
+                type="text"
+                value={formData.github_commit_sha}
+                onChange={(event) => setFormData(prev => ({ ...prev, github_commit_sha: event.target.value }))}
+                placeholder="例: abc1234（空欄で最新）"
+                className={inputClass}
+              />
+              {ghCommits.length > 0 && (
                 <select
                   value={formData.github_commit_sha}
                   onChange={(event) => setFormData(prev => ({ ...prev, github_commit_sha: event.target.value }))}
-                  className={inputClass}
+                  className={`${inputClass} mt-1`}
                 >
                   <option value="">最新のコミット（HEAD）</option>
                   {ghCommits.map(commitItem => (
@@ -998,33 +959,32 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
                     </option>
                   ))}
                 </select>
-              </div>
-            )}
+              )}
+            </div>
 
-            {/* ディレクトリ選択（ディレクトリ一覧取得後に表示） */}
-            {!manualInput && ghDirs.length > 0 && (
-              <div>
-                <label className={labelClass}>ビルドディレクトリ</label>
+            {/* ビルドディレクトリ：常にテキスト入力、API取得済みならドロップダウンも表示 */}
+            <div>
+              <label className={labelClass}>ビルドディレクトリ</label>
+              <input
+                type="text"
+                value={formData.github_repo_directory}
+                onChange={(event) => setFormData(prev => ({ ...prev, github_repo_directory: event.target.value }))}
+                placeholder="./"
+                className={inputClass}
+              />
+              {ghDirs.length > 0 && (
                 <select
                   value={formData.github_repo_directory}
                   onChange={(event) => setFormData(prev => ({ ...prev, github_repo_directory: event.target.value }))}
-                  className={inputClass}
+                  className={`${inputClass} mt-1`}
                 >
                   <option value="./">./（ルート）</option>
                   {ghDirs.map(dirPath => (
                     <option key={dirPath} value={dirPath}>{dirPath}</option>
                   ))}
                 </select>
-              </div>
-            )}
-
-            {/* ディレクトリが取得できてもサブディレクトリが存在しない場合 */}
-            {!manualInput && ghCommits.length > 0 && ghDirs.length === 0 && ghLoading === null && (
-              <div>
-                <label className={labelClass}>ビルドディレクトリ</label>
-                <p className="text-xs text-gray-400">サブディレクトリがないため、./（ルート）でビルドします</p>
-              </div>
-            )}
+              )}
+            </div>
 
             {deployment.type === 'dockerfile' && (
               <div>
