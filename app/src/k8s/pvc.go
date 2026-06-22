@@ -44,7 +44,7 @@ func BuildPVCManifest(namespace, name string, sizeMB int, storageClassName strin
 		},
 		Spec: corev1.PersistentVolumeClaimSpec{
 			AccessModes: []corev1.PersistentVolumeAccessMode{
-				corev1.ReadWriteOnce, // 単一ノードからの読み書きアクセスを許可する
+				corev1.ReadWriteMany, // 複数からのアクセスを許可する
 			},
 			Resources: corev1.VolumeResourceRequirements{
 				Requests: corev1.ResourceList{
