@@ -38,7 +38,7 @@ export function Layout({ children, breadcrumbs, actions, fullWidth }: LayoutProp
     : []
 
   return (
-    <div className="bg-[#F0F2F5]">
+    <div className="bg-[#F0F2F5] flex flex-col h-screen">
       {/* ヘッダー */}
       <header className="h-12 bg-white border-b border-gray-200 flex items-center px-4 gap-4 sticky top-0 z-50">
         {!isEmbedded && (
@@ -100,8 +100,10 @@ export function Layout({ children, breadcrumbs, actions, fullWidth }: LayoutProp
       </header>
 
       {/* メインコンテンツ */}
-      <main className={`min-h-screen ${fullWidth ? '' : 'max-w-7xl mx-auto px-4 py-6'}`}>
-        {children}
+      <main className={`flex-1 min-h-0 overflow-y-auto ${fullWidth ? '' : 'px-4 py-6'}`}>
+        <div className={fullWidth ? 'h-full' : 'min-h-full max-w-7xl mx-auto'}>
+          {children}
+        </div>
       </main>
 
       {/* フッター：インスタンスサイズ別使用状況 */}

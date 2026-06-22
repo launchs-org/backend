@@ -136,9 +136,14 @@ export type ApplyHistory = {
 
 // ── Logs ──────────────────────────────────────────────────────
 
-export type PodLogsResponse = {
+export type PodLogEntry = {
+  pod_name: string
   logs: string
   last_timestamp: string | null
+}
+
+export type PodLogsResponse = {
+  pods: PodLogEntry[]
 }
 
 export type BuildLogsResponse = {

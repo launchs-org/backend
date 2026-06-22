@@ -71,8 +71,10 @@ export function BuildLogPage() {
   const statusMeta = buildData ? BUILD_STATUS_META[buildData.status] : null // ステータスメタデータを取得する
   const isTerminal = buildData ? TERMINAL_STATUSES.includes(buildData.status) : false // 終了状態かどうかを判定する
 
+  const isEmbedded = window.self !== window.top // iframe 内で表示されているかどうかを判定する
+
   return (
-    <div className="h-screen flex flex-col bg-[#0D1117] text-[#E6EDF3] overflow-hidden">
+    <div className={`${isEmbedded ? 'h-full' : 'h-screen'} flex flex-col bg-[#0D1117] text-[#E6EDF3] overflow-hidden`}>
       {/* ヘッダー */}
       <header className="border-b border-[#30363D] px-4 py-3 flex items-center gap-3 shrink-0" style={{ background: '#161B22' }}>
         <button

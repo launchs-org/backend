@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Play, Trash2, GitBranch, Container, Package, ExternalLink, Clock, CheckCircle2, XCircle, AlertCircle, Ban, GitCommit, X, Hammer } from 'lucide-react'
 import { Layout } from '@/components/Layout'
@@ -11,6 +11,7 @@ import type {
   K8sService,
   ApplyHistory,
   PodLogsResponse,
+  PodLogEntry,
   Volume,
   VolumeMount,
   EnvVar,
@@ -467,21 +468,90 @@ function InfoCard({
 // ── Logs タブ ─────────────────────────────────────────────────
 
 function LogsTab({ deploymentId }: { deploymentId: string }) {
-  const fetchPodLogs = useCallback(async (since?: string) => {
+  const [podEntries, setPodEntries] = useState<PodLogEntry[]>([]) // Pod ごとのログエントリ一覧を管理する
+  const [selectedPodName, setSelectedPodName] = useState<string | null>(null) // 選択中の Pod 名を管理する
+  const lastTimestampMapRef = useRef<Record<string, string>>({}) // Pod ごとの最後のタイムスタンプを管理する
+
+  // 初回ロードと差分ポーリングのベース関数
+  const fetchAllPodLogs = useCallback(async (since?: string) => {
     const params: Record<string, string> = {}
     if (since) params.since = since // since パラメータを設定する
     const result = await get<PodLogsResponse>(`/deployments/${deploymentId}/logs`, params)
-    return { logs: result.logs ?? '', lastTimestamp: result.last_timestamp }
+    return result.pods ?? []
   }, [deploymentId])
 
+  // 初回ロード：全 Pod のログを取得して状態に反映する
+  useEffect(() => {
+    const loadInitial = async () => {
+      try {
+        const pods = await fetchAllPodLogs()
+        setPodEntries(pods) // Pod 一覧を設定する
+        if (pods.length > 0 && selectedPodName === null) {
+          setSelectedPodName(pods[0].pod_name) // 初回は最初の Pod を選択する
+        }
+        for (const pod of pods) {
+          if (pod.last_timestamp) {
+            lastTimestampMapRef.current[pod.pod_name] = pod.last_timestamp // タイムスタンプを記録する
+          }
+        }
+      } catch (loadError) {
+        console.error('Pod ログ取得エラー:', loadError)
+      }
+    }
+    void loadInitial()
+  }, [fetchAllPodLogs]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 選択中の Pod 用の fetchLogs（LogViewer に渡す）
+  const fetchSelectedPodLogs = useCallback(async (since?: string) => {
+    if (!selectedPodName) return { logs: '', lastTimestamp: null }
+    const pods = await fetchAllPodLogs(since)
+    const pod = pods.find((podEntry) => podEntry.pod_name === selectedPodName) // 選択中の Pod のエントリを検索する
+    if (!pod) return { logs: '', lastTimestamp: null }
+    // 新しい Pod が追加されていれば Pod 一覧を更新する
+    setPodEntries((prev) => {
+      const existingNames = new Set(prev.map((podEntry) => podEntry.pod_name))
+      const newPods = pods.filter((podEntry) => !existingNames.has(podEntry.pod_name))
+      return newPods.length > 0 ? [...prev, ...newPods] : prev // 新規 Pod を追加する
+    })
+    return { logs: pod.logs, lastTimestamp: pod.last_timestamp }
+  }, [selectedPodName, fetchAllPodLogs])
+
   return (
-    <div style={{ height: 'calc(100vh - 220px)' }}>
-      <LogViewer
-        fetchLogs={fetchPodLogs}
-        title={`Pod Logs — ${deploymentId}`}
-        pollInterval={POLL_INTERVAL_NORMAL}
-        initialLive={true}
-      />
+    <div style={{ height: 'calc(100vh - 220px)' }} className="flex flex-col">
+      {/* Pod タブ */}
+      {podEntries.length > 1 && (
+        <div className="flex gap-1 px-3 py-2 shrink-0 border-b border-[#30363D] bg-[#161B22] overflow-x-auto">
+          {podEntries.map((podEntry) => (
+            <button
+              key={podEntry.pod_name}
+              onClick={() => setSelectedPodName(podEntry.pod_name)}
+              className={`text-xs px-3 py-1 rounded-md font-mono whitespace-nowrap transition-colors ${
+                selectedPodName === podEntry.pod_name
+                  ? 'bg-[#00C2D1]/20 text-[#00C2D1] border border-[#00C2D1]/40'
+                  : 'text-[#8B949E] hover:text-[#E6EDF3] border border-transparent hover:border-[#30363D]'
+              }`}
+            >
+              {podEntry.pod_name}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* ログビューアー */}
+      {selectedPodName ? (
+        <div className="flex-1 min-h-0">
+          <LogViewer
+            key={selectedPodName}
+            fetchLogs={fetchSelectedPodLogs}
+            title={`${selectedPodName}`}
+            pollInterval={POLL_INTERVAL_NORMAL}
+            initialLive={true}
+          />
+        </div>
+      ) : (
+        <div className="flex items-center justify-center flex-1 text-xs text-[#8B949E]">
+          Pod 待機中...
+        </div>
+      )}
     </div>
   )
 }
