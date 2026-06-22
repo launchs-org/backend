@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -30,8 +31,13 @@ func ApplyPVC(ctx context.Context, client kubernetes.Interface, pvcManifest *cor
 }
 
 // DeletePVC は k8s から PersistentVolumeClaim を削除する
+// PVC が存在しない場合（既に削除済みまたは未作成）は正常終了とみなす
 func DeletePVC(ctx context.Context, client kubernetes.Interface, namespace, name string) error {
-	return client.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{}) // PVC を削除する
+	err := client.CoreV1().PersistentVolumeClaims(namespace).Delete(ctx, name, metav1.DeleteOptions{}) // PVC を削除する
+	if err != nil && !errors.IsNotFound(err) {                                                          // Not Found 以外のエラーは返す
+		return err // 削除エラーを返す
+	}
+	return nil // 正常終了
 }
 
 // BuildPVCManifest は Volume モデルの情報から PVC マニフェストを生成する

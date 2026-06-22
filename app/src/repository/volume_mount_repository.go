@@ -12,6 +12,7 @@ type VolumeMountRepository interface {
 	Create(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount) error                               // マウント設定を作成する
 	FindByID(ctx context.Context, mountID string) (*models.VolumeMount, error)                              // ID でマウント設定を取得する
 	FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.VolumeMount, error)          // deploymentID に紐づくマウント設定一覧を取得する
+	FindAllByVolumeID(ctx context.Context, volumeID string) ([]*models.VolumeMount, error)                  // volumeID に紐づくマウント設定一覧を取得する
 	FindByDeploymentIDAndMountPath(ctx context.Context, deploymentID string, mountPath string) (*models.VolumeMount, error) // deploymentID と mountPath でマウント設定を取得する（重複チェック用）
 	UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount, status models.VolumeMountStatus) error // ステータスを更新する
 	Delete(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount) error                               // マウント設定を削除する
@@ -45,6 +46,15 @@ func (repo *volumeMountRepositoryImpl) FindByID(ctx context.Context, mountID str
 func (repo *volumeMountRepositoryImpl) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.VolumeMount, error) {
 	var mountList []*models.VolumeMount                                                                                              // マウント設定一覧を格納する変数を定義する
 	if err := repo.db.WithContext(ctx).Where("deployment_id = ?", deploymentID).Find(&mountList).Error; err != nil {                 // db から一覧を取得する
+		return nil, err // 取得エラーを返す
+	}
+	return mountList, nil // マウント設定一覧を返す
+}
+
+// FindAllByVolumeID は volumeID に紐づくマウント設定一覧を返す
+func (repo *volumeMountRepositoryImpl) FindAllByVolumeID(ctx context.Context, volumeID string) ([]*models.VolumeMount, error) {
+	var mountList []*models.VolumeMount                                                                                          // マウント設定一覧を格納する変数を定義する
+	if err := repo.db.WithContext(ctx).Where("volume_id = ?", volumeID).Find(&mountList).Error; err != nil {                     // db から一覧を取得する
 		return nil, err // 取得エラーを返す
 	}
 	return mountList, nil // マウント設定一覧を返す

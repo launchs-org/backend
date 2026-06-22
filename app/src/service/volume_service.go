@@ -14,6 +14,9 @@ import (
 // ErrDuplicateVolumeMount は同一DeploymentID・同一MountPathのマウントが既に存在する場合のエラー
 var ErrDuplicateVolumeMount = errors.New("duplicate volume mount: this mount_path is already used in the deployment")
 
+// ErrVolumeMountedCannotDelete は mounted 状態のマウントが存在するためボリュームを削除できない場合のエラー
+var ErrVolumeMountedCannotDelete = errors.New("volume is still mounted: unmount all deployments before deleting")
+
 // VolumeService はボリューム CRUD のビジネスロジックを定義するインターフェース
 type VolumeService interface {
 	ListVolumes(ctx context.Context, userID string, projectID string) ([]*models.Volume, error)                                                        // ボリューム一覧を取得する
@@ -136,6 +139,7 @@ func (svc *volumeServiceImpl) CreateVolume(ctx context.Context, userID string, p
 }
 
 // DeleteVolume は volumeID に対応する volume を削除する
+// mounted 状態のマウントが1件でも存在する場合は ErrVolumeMountedCannotDelete を返す
 func (svc *volumeServiceImpl) DeleteVolume(ctx context.Context, userID string, volumeID string) error {
 	volumeData, err := svc.volumeRepo.FindByID(ctx, volumeID) // volume を取得する
 	if err != nil {
@@ -144,6 +148,26 @@ func (svc *volumeServiceImpl) DeleteVolume(ctx context.Context, userID string, v
 
 	if err := svc.checkProjectOwner(ctx, userID, volumeData.ProjectID); err != nil { // 認可チェックを行う
 		return err // エラーを返す
+	}
+
+	mountList, err := svc.volumeMountRepo.FindAllByVolumeID(ctx, volumeID) // このボリュームのマウント一覧を取得する
+	if err != nil {
+		return err // 取得エラーを返す
+	}
+	for _, mountData := range mountList { // 各マウントのステータスを確認する
+		if mountData.Status == models.VolumeMountStatusMounted { // mounted 状態が残っている場合は削除を拒否する
+			return ErrVolumeMountedCannotDelete // マウント中エラーを返す
+		}
+	}
+
+	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, volumeData.ProjectID) // namespace 解決のために project を取得する
+	if err != nil {
+		return err // 取得エラーを返す
+	}
+
+	pvcName := volumeData.ID + "-pvc" // PVC 名を VolumeID から生成する
+	if pvcErr := k8s.DeletePVC(ctx, svc.k8sClient, projectData.Namespace, pvcName); pvcErr != nil { // k8s から PVC を削除する
+		return pvcErr // PVC 削除エラーを返す
 	}
 
 	return svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error { // トランザクションを開始する

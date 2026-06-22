@@ -3,6 +3,7 @@ package service
 import (
 	"app/models"
 	"context"
+	"errors"
 	"testing"
 
 	"gorm.io/datatypes"
@@ -56,6 +57,7 @@ type mockVolumeMountRepository struct {
 	createFunc                        func(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount) error
 	findByIDFunc                      func(ctx context.Context, mountID string) (*models.VolumeMount, error)
 	findAllByDeploymentIDFunc         func(ctx context.Context, deploymentID string) ([]*models.VolumeMount, error)
+	findAllByVolumeIDFunc             func(ctx context.Context, volumeID string) ([]*models.VolumeMount, error)
 	findByDeploymentIDAndMountPathFunc func(ctx context.Context, deploymentID string, mountPath string) (*models.VolumeMount, error)
 	deleteFunc                        func(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount) error
 }
@@ -77,6 +79,13 @@ func (mock *mockVolumeMountRepository) FindByID(ctx context.Context, mountID str
 func (mock *mockVolumeMountRepository) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.VolumeMount, error) {
 	if mock.findAllByDeploymentIDFunc != nil { // モック関数が設定されている場合は呼び出す
 		return mock.findAllByDeploymentIDFunc(ctx, deploymentID)
+	}
+	return []*models.VolumeMount{}, nil // デフォルトは空一覧を返す
+}
+
+func (mock *mockVolumeMountRepository) FindAllByVolumeID(ctx context.Context, volumeID string) ([]*models.VolumeMount, error) {
+	if mock.findAllByVolumeIDFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.findAllByVolumeIDFunc(ctx, volumeID)
 	}
 	return []*models.VolumeMount{}, nil // デフォルトは空一覧を返す
 }
@@ -203,6 +212,108 @@ func TestCreateVolume_他ユーザーはErrForbiddenを返す_service(t *testing
 	_, err := svc.CreateVolume(context.Background(), "other-user-id", "project-id-1", req) // 他ユーザーとして作成する
 	if err != ErrForbidden {                                                                 // ErrForbidden であることを確認する
 		t.Errorf("期待するエラー: ErrForbidden, 実際のエラー: %v", err)
+	}
+}
+
+// TestDeleteVolume_mounted状態のマウントが存在する場合はErrVolumeMountedCannotDeleteを返す はガード処理を確認する
+func TestDeleteVolume_mounted状態のマウントが存在する場合はErrVolumeMountedCannotDeleteを返す_service(t *testing.T) {
+	volumeRepo := &mockVolumeRepository{
+		findByIDFunc: func(ctx context.Context, volumeID string) (*models.Volume, error) {
+			return &models.Volume{ID: volumeID, ProjectID: "project-id-1"}, nil // volume を返す
+		},
+	}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return &models.Project{ID: projectID, UserID: "test-user-id"}, nil // 所有者として返す
+		},
+	}
+	volumeMountRepo := &mockVolumeMountRepository{
+		findAllByVolumeIDFunc: func(ctx context.Context, volumeID string) ([]*models.VolumeMount, error) {
+			return []*models.VolumeMount{ // mounted 状態のマウントを返す
+				{ID: "mount-id-1", VolumeID: volumeID, Status: models.VolumeMountStatusMounted},
+			}, nil
+		},
+	}
+
+	svc := NewVolumeService(nil, volumeRepo, volumeMountRepo, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}, nil, "") // サービスを生成する
+
+	err := svc.DeleteVolume(context.Background(), "test-user-id", "volume-id-1") // 削除を試みる
+	if !errors.Is(err, ErrVolumeMountedCannotDelete) {                            // ErrVolumeMountedCannotDelete であることを確認する
+		t.Errorf("期待するエラー: ErrVolumeMountedCannotDelete, 実際のエラー: %v", err)
+	}
+}
+
+// TestDeleteVolume_pendingのみのマウントは削除成功してPVCも削除される はガード通過と PVC 削除を確認する
+func TestDeleteVolume_pendingのみのマウントは削除成功してPVCも削除される_service(t *testing.T) {
+	deleteCalled := false // リポジトリの Delete が呼ばれたか記録する
+
+	volumeRepo := &mockVolumeRepository{
+		findByIDFunc: func(ctx context.Context, volumeID string) (*models.Volume, error) {
+			return &models.Volume{ID: "volume-id-1", ProjectID: "project-id-1"}, nil // volume を返す
+		},
+		deleteFunc: func(ctx context.Context, tx *gorm.DB, volume *models.Volume) error {
+			deleteCalled = true // 呼ばれたことを記録する
+			return nil
+		},
+	}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return &models.Project{ID: projectID, UserID: "test-user-id", Namespace: "ns-test"}, nil // 所有者として返す
+		},
+	}
+	volumeMountRepo := &mockVolumeMountRepository{
+		findAllByVolumeIDFunc: func(ctx context.Context, volumeID string) ([]*models.VolumeMount, error) {
+			return []*models.VolumeMount{ // pending 状態のみのマウントを返す
+				{ID: "mount-id-1", VolumeID: volumeID, Status: models.VolumeMountStatusPending},
+			}, nil
+		},
+	}
+
+	db := setupApplyTestDB(t)                   // テスト用 DB を準備する
+	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
+	svc := NewVolumeService(db, volumeRepo, volumeMountRepo, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}, fakeK8sClient, "") // サービスを生成する
+
+	err := svc.DeleteVolume(context.Background(), "test-user-id", "volume-id-1") // 削除を実行する
+	if err != nil {                                                                // エラーが発生した場合は失敗する
+		t.Fatalf("DeleteVolume がエラーを返しました: %v", err)
+	}
+	if !deleteCalled { // リポジトリの Delete が呼ばれていない場合は失敗する
+		t.Error("volumeRepo.Delete が呼ばれていません")
+	}
+}
+
+// TestDeleteVolume_マウントなしは削除成功してPVCも削除される はマウントが存在しない場合の正常系を確認する
+func TestDeleteVolume_マウントなしは削除成功してPVCも削除される_service(t *testing.T) {
+	deleteCalled := false // リポジトリの Delete が呼ばれたか記録する
+
+	volumeRepo := &mockVolumeRepository{
+		findByIDFunc: func(ctx context.Context, volumeID string) (*models.Volume, error) {
+			return &models.Volume{ID: "volume-id-1", ProjectID: "project-id-1"}, nil // volume を返す
+		},
+		deleteFunc: func(ctx context.Context, tx *gorm.DB, volume *models.Volume) error {
+			deleteCalled = true // 呼ばれたことを記録する
+			return nil
+		},
+	}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return &models.Project{ID: projectID, UserID: "test-user-id", Namespace: "ns-test"}, nil // 所有者として返す
+		},
+	}
+
+	db := setupApplyTestDB(t)                   // テスト用 DB を準備する
+	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
+	svc := NewVolumeService(db, &mockVolumeRepository{
+		findByIDFunc: volumeRepo.findByIDFunc,
+		deleteFunc:   volumeRepo.deleteFunc,
+	}, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}, fakeK8sClient, "") // サービスを生成する
+
+	err := svc.DeleteVolume(context.Background(), "test-user-id", "volume-id-1") // 削除を実行する
+	if err != nil {                                                                // エラーが発生した場合は失敗する
+		t.Fatalf("DeleteVolume がエラーを返しました: %v", err)
+	}
+	if !deleteCalled { // リポジトリの Delete が呼ばれていない場合は失敗する
+		t.Error("volumeRepo.Delete が呼ばれていません")
 	}
 }
 
