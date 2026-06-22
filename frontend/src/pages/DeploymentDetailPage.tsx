@@ -780,28 +780,6 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
   const [ghError, setGhError]         = useState<string | null>(null) // エラーメッセージ
   const [manualInput, setManualInput] = useState(false) // GitHub API 失敗時の手動入力モード
 
-  // リポジトリURLが確定したときにブランチ一覧を取得する
-  const loadBranches = useCallback(async (repoUrl: string, currentBranch?: string) => {
-    const repo = extractGitHubRepo(repoUrl) // owner/repo を抽出する
-    if (!repo) return
-    setGhLoading('branches') // ブランチ取得中を示す
-    setGhError(null)
-    setGhBranches([])
-    setGhCommits([])
-    setGhDirs([])
-    try {
-      const branches = await fetchGitHubBranches(repo) // ブランチ一覧を取得する
-      setGhBranches(branches)
-      if (currentBranch) {
-        await loadCommitsAndDirs(repoUrl, currentBranch) // 現在のブランチのコミット一覧も取得する
-      }
-    } catch {
-      setGhError('ブランチの取得に失敗しました。リポジトリURLを確認してください。') // エラーを表示する
-    } finally {
-      setGhLoading(null)
-    }
-  }, [loadCommitsAndDirs])
-
   // コミット・ディレクトリ一覧を取得する共通関数
   const loadCommitsAndDirs = useCallback(async (repoUrl: string, branch: string) => {
     const repo = extractGitHubRepo(repoUrl) // owner/repo を抽出する
@@ -823,6 +801,28 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
       setGhLoading(null)
     }
   }, [])
+
+  // リポジトリURLが確定したときにブランチ一覧を取得する（loadCommitsAndDirs より後に定義する必要がある）
+  const loadBranches = useCallback(async (repoUrl: string, currentBranch?: string) => {
+    const repo = extractGitHubRepo(repoUrl) // owner/repo を抽出する
+    if (!repo) return
+    setGhLoading('branches') // ブランチ取得中を示す
+    setGhError(null)
+    setGhBranches([])
+    setGhCommits([])
+    setGhDirs([])
+    try {
+      const branches = await fetchGitHubBranches(repo) // ブランチ一覧を取得する
+      setGhBranches(branches)
+      if (currentBranch) {
+        await loadCommitsAndDirs(repoUrl, currentBranch) // 現在のブランチのコミット一覧も取得する
+      }
+    } catch {
+      setGhError('ブランチの取得に失敗しました。リポジトリURLを確認してください。') // エラーを表示する
+    } finally {
+      setGhLoading(null)
+    }
+  }, [loadCommitsAndDirs])
 
   // 初回マウント時に既存URLからブランチ・コミット一覧を取得する
   useEffect(() => {
