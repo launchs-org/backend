@@ -50,7 +50,7 @@ type PathRuleSpec struct {
 
 // buildIngressRouteManifest は Traefik IngressRoute の unstructured マニフェストを生成する
 func buildIngressRouteManifest(ingressRouteData models.IngressRoute, namespace string, pathRuleSpecList []PathRuleSpec) *unstructured.Unstructured {
-	middlewareRef := fmt.Sprintf("%s@kubernetescrd", middlewareName(ingressRouteData.ID)) // Middleware 参照文字列を生成する
+	middlewareRef := middlewareName(ingressRouteData.ID) // Middleware 参照文字列を生成する
 	routeList := make([]interface{}, 0, len(pathRuleSpecList))                            // ルート一覧を初期化する
 	for _, pathRuleSpec := range pathRuleSpecList {                                       // PathRuleSpec ごとに Traefik ルートを生成する
 		routeRule := buildRouterRule(ingressRouteData.Host, pathRuleSpec.PathPrefix) // ルールを生成する
