@@ -1449,9 +1449,7 @@ function VolumesTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
                 <div key={vol.id} className="flex items-center gap-2 bg-gray-50 rounded-md px-3 py-2 border border-gray-100">
                   <span className="text-sm font-medium text-[#111827] truncate">{vol.name}</span>
                   <span className="text-xs text-gray-400">{vol.size_mb} MB</span>
-                  <span className={`text-[10px] ${vol.status === 'bound' ? 'text-green-500' : vol.status === 'deleting' ? 'text-red-400' : 'text-amber-500'}`}>
-                    {vol.status}
-                  </span>
+                  <StatusBadge status={vol.status} size="sm" />
                   {isMounted && (
                     <span className="text-[10px] bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded">マウント済み</span>
                   )}

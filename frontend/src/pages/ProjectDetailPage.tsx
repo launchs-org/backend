@@ -1370,9 +1370,7 @@ function VolumeSidebar({
                   <p className="text-sm font-medium text-[#111827] truncate">{vol.name}</p>
                   <div className="flex items-center gap-1.5">
                     <span className="text-[10px] text-gray-400">{vol.size_mb} MB</span>
-                    <span className={`text-[10px] ${vol.status === 'bound' ? 'text-green-500' : vol.status === 'deleting' ? 'text-red-400' : 'text-amber-500'}`}>
-                      {vol.status}
-                    </span>
+                    <StatusBadge status={vol.status} size="sm" />
                   </div>
                 </div>
                 <button
