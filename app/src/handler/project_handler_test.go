@@ -270,11 +270,11 @@ func TestGetProject_存在しないprojectは404になる(t *testing.T) {
 	}
 }
 
-// TestCreateProject_プロジェクト数がQuota超過の場合は400になる はQuota超過時に400が返ることを確認する
-func TestCreateProject_プロジェクト数がQuota超過の場合は400になる(t *testing.T) {
+// TestCreateProject_プロジェクト数がQuota超過の場合は403になる はQuota超過時に403が返ることを確認する
+func TestCreateProject_プロジェクト数がQuota超過の場合は403になる(t *testing.T) {
 	mockService := &mockProjectService{
 		createProjectFunc: func(ctx context.Context, userID string, req service.CreateProjectRequest) (*models.Project, error) {
-			return nil, service.ErrProjectQuotaExceeded // Quota超過エラーを返す
+			return nil, &service.QuotaExceededError{Resource: "projects", Current: 3, Limit: 3} // Quota超過エラーを返す
 		},
 	}
 
@@ -285,7 +285,7 @@ func TestCreateProject_プロジェクト数がQuota超過の場合は400にな�
 	if err != nil {
 		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
 	}
-	if responseRecorder.Code != http.StatusBadRequest { // 400 が返ることを確認する
-		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusBadRequest, responseRecorder.Code)
+	if responseRecorder.Code != http.StatusForbidden { // 403 が返ることを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusForbidden, responseRecorder.Code)
 	}
 }

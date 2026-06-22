@@ -47,13 +47,18 @@ func setupEchoContext(method, path, body string, userID string) (echo.Context, *
 func TestGetQuota_正常にquotaと使用量が返る(t *testing.T) {
 	expectedResponse := &service.QuotaResponse{ // 期待するレスポンスを定義する
 		UserID:                   "test-user-id",
+		PlanID:                   "plan-free-id",
 		MaxProjects:              5,
 		MaxDeployments:           20,
 		MaxReplicasPerDeployment: 5,
-		MaxVolumeMB:              10240,
+		MaxVolumes:               10,
+		MaxVolumeSizeMB:          10240,
+		MaxTotalVolumeMB:         51200,
+		InstanceLimits:           map[string]int{"small": 5, "medium": 2},
 		CurrentProjects:          2,
 		CurrentDeployments:       3,
-		CurrentVolumeMB:          2048,
+		CurrentVolumes:           1,
+		CurrentTotalVolumeMB:     2048,
 	}
 
 	mockService := &mockQuotaService{
@@ -94,13 +99,18 @@ func TestGetQuota_正常にquotaと使用量が返る(t *testing.T) {
 func TestGetQuota_レコードが存在しないユーザーでもデフォルト値で200が返る(t *testing.T) {
 	defaultResponse := &service.QuotaResponse{ // デフォルト値のレスポンスを定義する
 		UserID:                   "new-user-id",
+		PlanID:                   "plan-free-id",
 		MaxProjects:              5,
 		MaxDeployments:           20,
 		MaxReplicasPerDeployment: 5,
-		MaxVolumeMB:              10240,
+		MaxVolumes:               10,
+		MaxVolumeSizeMB:          10240,
+		MaxTotalVolumeMB:         51200,
+		InstanceLimits:           map[string]int{},
 		CurrentProjects:          0,
 		CurrentDeployments:       0,
-		CurrentVolumeMB:          0,
+		CurrentVolumes:           0,
+		CurrentTotalVolumeMB:     0,
 	}
 
 	mockService := &mockQuotaService{
@@ -139,18 +149,23 @@ func TestGetQuota_レコードが存在しないユーザーでもデフォル�
 
 // TestUpdateQuota_部分更新が正しく反映される は PUT /users/:user_id/quota で部分更新できることを確認する
 func TestUpdateQuota_部分更新が正しく反映される(t *testing.T) {
-	updatedMaxDeployments := 30   // 更新後のデプロイメント上限
-	updatedMaxVolumeMB := 20480  // 更新後のボリューム上限
+	updatedMaxDeployments := 30  // 更新後のデプロイメント上限
+	updatedMaxTotalVolumeMB := 20480 // 更新後のボリューム総容量上限
 
 	updatedResponse := &service.QuotaResponse{ // 更新後のレスポンスを定義する
 		UserID:                   "test-user-id",
+		PlanID:                   "plan-free-id",
 		MaxProjects:              5,
 		MaxDeployments:           updatedMaxDeployments,
 		MaxReplicasPerDeployment: 5,
-		MaxVolumeMB:              updatedMaxVolumeMB,
+		MaxVolumes:               10,
+		MaxVolumeSizeMB:          10240,
+		MaxTotalVolumeMB:         updatedMaxTotalVolumeMB,
+		InstanceLimits:           map[string]int{},
 		CurrentProjects:          2,
 		CurrentDeployments:       3,
-		CurrentVolumeMB:          2048,
+		CurrentVolumes:           1,
+		CurrentTotalVolumeMB:     2048,
 	}
 
 	var capturedRequest service.UpdateQuotaRequest // キャプチャしたリクエストを保持する変数
@@ -162,7 +177,7 @@ func TestUpdateQuota_部分更新が正しく反映される(t *testing.T) {
 	}
 
 	quotaHandler := NewUserQuotaHandler(mockService) // ハンドラーを生成する
-	requestBodyJSON := `{"max_deployments": 30, "max_volume_mb": 20480}` // 部分更新リクエストボディ
+	requestBodyJSON := `{"override_max_deployments": 30, "override_max_total_volume_mb": 20480}` // 部分更新リクエストボディ
 	echoCtx, responseRecorder := setupEchoContext(http.MethodPut, "/api/v1/users/test-user-id/quota", requestBodyJSON, "test-user-id") // テスト用コンテキストを生成する
 
 	err := quotaHandler.UpdateQuota(echoCtx) // ハンドラーを実行する
@@ -174,14 +189,14 @@ func TestUpdateQuota_部分更新が正しく反映される(t *testing.T) {
 		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusOK, responseRecorder.Code)
 	}
 
-	if capturedRequest.MaxDeployments == nil || *capturedRequest.MaxDeployments != 30 { // 部分更新リクエストの max_deployments を確認する
-		t.Errorf("期待するMaxDeployments: 30, 実際のMaxDeployments: %v", capturedRequest.MaxDeployments)
+	if capturedRequest.OverrideMaxDeployments == nil || *capturedRequest.OverrideMaxDeployments != 30 { // 部分更新リクエストの override_max_deployments を確認する
+		t.Errorf("期待するOverrideMaxDeployments: 30, 実際の値: %v", capturedRequest.OverrideMaxDeployments)
 	}
-	if capturedRequest.MaxVolumeMB == nil || *capturedRequest.MaxVolumeMB != 20480 { // 部分更新リクエストの max_volume_mb を確認する
-		t.Errorf("期待するMaxVolumeMB: 20480, 実際のMaxVolumeMB: %v", capturedRequest.MaxVolumeMB)
+	if capturedRequest.OverrideMaxTotalVolumeMB == nil || *capturedRequest.OverrideMaxTotalVolumeMB != 20480 { // 部分更新リクエストの override_max_total_volume_mb を確認する
+		t.Errorf("期待するOverrideMaxTotalVolumeMB: 20480, 実際の値: %v", capturedRequest.OverrideMaxTotalVolumeMB)
 	}
-	if capturedRequest.MaxProjects != nil { // 指定していないフィールドが nil のままであることを確認する
-		t.Errorf("MaxProjects は nil であるべきですが、値が設定されています: %d", *capturedRequest.MaxProjects)
+	if capturedRequest.OverrideMaxProjects != nil { // 指定していないフィールドが nil のままであることを確認する
+		t.Errorf("OverrideMaxProjects は nil であるべきですが、値が設定されています: %d", *capturedRequest.OverrideMaxProjects)
 	}
 
 	var actualResponse service.QuotaResponse
@@ -192,7 +207,7 @@ func TestUpdateQuota_部分更新が正しく反映される(t *testing.T) {
 	if actualResponse.MaxDeployments != updatedMaxDeployments { // 更新後のデプロイメント上限を確認する
 		t.Errorf("期待するMaxDeployments: %d, 実際のMaxDeployments: %d", updatedMaxDeployments, actualResponse.MaxDeployments)
 	}
-	if actualResponse.MaxVolumeMB != updatedMaxVolumeMB { // 更新後のボリューム上限を確認する
-		t.Errorf("期待するMaxVolumeMB: %d, 実際のMaxVolumeMB: %d", updatedMaxVolumeMB, actualResponse.MaxVolumeMB)
+	if actualResponse.MaxTotalVolumeMB != updatedMaxTotalVolumeMB { // 更新後のボリューム総容量上限を確認する
+		t.Errorf("期待するMaxTotalVolumeMB: %d, 実際のMaxTotalVolumeMB: %d", updatedMaxTotalVolumeMB, actualResponse.MaxTotalVolumeMB)
 	}
 }
