@@ -781,7 +781,7 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
   const [manualInput, setManualInput] = useState(false) // GitHub API 失敗時の手動入力モード
 
   // リポジトリURLが確定したときにブランチ一覧を取得する
-  const loadBranches = useCallback(async (repoUrl: string) => {
+  const loadBranches = useCallback(async (repoUrl: string, currentBranch?: string) => {
     const repo = extractGitHubRepo(repoUrl) // owner/repo を抽出する
     if (!repo) return
     setGhLoading('branches') // ブランチ取得中を示す
@@ -792,12 +792,15 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
     try {
       const branches = await fetchGitHubBranches(repo) // ブランチ一覧を取得する
       setGhBranches(branches)
+      if (currentBranch) {
+        await loadCommitsAndDirs(repoUrl, currentBranch) // 現在のブランチのコミット一覧も取得する
+      }
     } catch {
       setGhError('ブランチの取得に失敗しました。リポジトリURLを確認してください。') // エラーを表示する
     } finally {
       setGhLoading(null)
     }
-  }, [])
+  }, [loadCommitsAndDirs])
 
   // コミット・ディレクトリ一覧を取得する共通関数
   const loadCommitsAndDirs = useCallback(async (repoUrl: string, branch: string) => {
@@ -920,7 +923,7 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
                 />
                 <button
                   type="button"
-                  onClick={() => void loadBranches(formData.github_repo_url)}
+                  onClick={() => void loadBranches(formData.github_repo_url, formData.github_branch || undefined)}
                   disabled={ghLoading === 'branches'}
                   className="shrink-0 px-3 py-2 text-xs rounded-md bg-[#111827] text-white hover:bg-gray-800 transition-colors disabled:opacity-50"
                 >
