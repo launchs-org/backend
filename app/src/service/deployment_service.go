@@ -148,9 +148,13 @@ func (svc *deploymentServiceImpl) CreateDeployment(ctx context.Context, req Crea
 		Status:                     initialStatus,                               // 初期ステータスを設定する
 		AppStatus:                  models.AppStatusPending,                     // 初期アプリステータスを設定する
 		PendingImageURL:            req.ImageURL,                                // pending に設定する
+		GithubRepoURL:              req.GithubRepoURL,                           // 作成時点の値を確定フィールドにも保持する
 		PendingGithubRepoURL:       req.GithubRepoURL,                          // pending に設定する
+		GithubBranch:               req.GithubBranch,                            // 作成時点の値を確定フィールドにも保持する
 		PendingGithubBranch:        req.GithubBranch,                           // pending に設定する
+		GithubCommitSHA:            req.GithubCommitSHA,                         // 作成時点の値を確定フィールドにも保持する
 		PendingGithubCommitSHA:     req.GithubCommitSHA,                        // pending に設定する
+		GithubRepoDirectory:        req.GithubRepoDirectory,                     // 作成時点の値を確定フィールドにも保持する
 		PendingGithubRepoDirectory: req.GithubRepoDirectory,                    // pending に設定する
 		PendingDockerfilePath:      req.DockerfilePath,                         // pending に設定する
 		PendingInstanceSize:        req.InstanceSize,                           // pending に設定する

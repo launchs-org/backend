@@ -424,9 +424,9 @@ function OverviewTab({ deployment }: { deployment: Deployment; projectId: string
       )}
       {deployment.type !== 'image_url' && (
         <>
-          <InfoCard label="リポジトリ" value={deployment.github_repo_url || deployment.pending_github_repo_url || '—'} mono fullWidth />
-          <InfoCard label="ブランチ" value={deployment.github_branch || deployment.pending_github_branch || '—'} mono />
-          <InfoCard label="コミットSHA" value={deployment.github_commit_sha || deployment.pending_github_commit_sha || '—'} mono />
+          <InfoCard label="リポジトリ" value={deployment.github_repo_url || '—'} mono fullWidth />
+          <InfoCard label="ブランチ" value={deployment.github_branch || '—'} mono />
+          <InfoCard label="コミットSHA" value={deployment.github_commit_sha || '—'} mono />
         </>
       )}
       {deployment.current_build_id && (
