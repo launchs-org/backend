@@ -480,6 +480,13 @@ export function ProjectDetailPage() {
                     <HardDrive className="w-3.5 h-3.5 text-gray-400" />
                     Volume
                   </button>
+                  <button
+                    onClick={() => { setShowAddMenu(false); setShowEnvVarSidebar(true) }}
+                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-[#111827] hover:bg-gray-50 transition-colors"
+                  >
+                    <KeyRound className="w-3.5 h-3.5 text-gray-400" />
+                    EnvVar
+                  </button>
                 </div>
               </>
             )}

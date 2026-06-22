@@ -16,6 +16,7 @@ import type {
   VolumeMount,
   EnvVar,
   EnvVarMount,
+  DeploymentTemplate,
 } from '@/lib/types'
 import {
   POLL_INTERVAL_NORMAL,
@@ -841,10 +842,10 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
       if (deployment.type === 'image_url') {
         body.image_url = formData.image_url // image_url タイプの場合はイメージURLを設定する
       } else {
-        body.github_repo_url = formData.github_repo_url // GitHub リポジトリURLを設定する
-        body.github_branch = formData.github_branch // ブランチを設定する
-        body.github_commit_sha = formData.github_commit_sha // コミットSHAを設定する
-        body.github_repo_directory = formData.github_repo_directory // ディレクトリを設定する
+        body.github_repo_url = formData.github_repo_url || null // 空文字はnullにして更新をスキップする
+        body.github_branch = formData.github_branch || null // 空文字はnullにして更新をスキップする
+        body.github_commit_sha = formData.github_commit_sha || null // 空文字はnullにして更新をスキップする
+        body.github_repo_directory = formData.github_repo_directory || null // 空文字はnullにして更新をスキップする
         if (deployment.type === 'dockerfile') {
           body.dockerfile_path = formData.dockerfile_path // Dockerfileのパスを設定する
         }
@@ -1203,6 +1204,10 @@ function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
   const [newOverrideKey, setNewOverrideKey] = useState('') // オーバーライドキー（任意）
   const [addingMount, setAddingMount] = useState(false) // マウント作成中フラグ
   const [deletingMountId, setDeletingMountId] = useState<string | null>(null) // 削除中のマウントID
+  const [templateList, setTemplateList] = useState<DeploymentTemplate[]>([]) // テンプレート一覧を管理する
+  const [selectedTemplateId, setSelectedTemplateId] = useState('') // 選択中のテンプレートID
+  const [applyingTemplate, setApplyingTemplate] = useState(false) // テンプレート適用中フラグ
+  const [templateError, setTemplateError] = useState('') // テンプレート適用エラー
 
   const fetchData = useCallback(async () => {
     const [envVars, mounts] = await Promise.all([
@@ -1215,6 +1220,9 @@ function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
 
   useEffect(() => {
     void fetchData() // 初回データ取得
+    get<DeploymentTemplate[]>('/deployment-templates')
+      .then(data => setTemplateList(data ?? []))
+      .catch(console.error) // テンプレート一覧を取得する
   }, [fetchData])
 
   const handleAddMount = async () => {
@@ -1249,9 +1257,39 @@ function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
     }
   }
 
+  const handleApplyEnvTemplate = async () => {
+    if (!selectedTemplateId) return
+    const tmpl = templateList.find(tl => tl.id === selectedTemplateId) // 選択されたテンプレートを取得する
+    if (!tmpl || !tmpl.env_vars || tmpl.env_vars.length === 0) return
+    setApplyingTemplate(true) // テンプレート適用中フラグを立てる
+    setTemplateError('') // エラーをリセットする
+    try {
+      for (const envVar of tmpl.env_vars) {
+        const created = await post<EnvVar>(`/projects/${projectId}/env-vars`, { // プロジェクトに環境変数を作成する
+          key: envVar.key,
+          value: envVar.value ?? '',
+          is_secret: envVar.is_secret,
+        })
+        if (created) {
+          await post(`/deployments/${deploymentId}/env-var-mounts`, { // 作成した環境変数をマウントする
+            env_var_id: created.id,
+          })
+        }
+      }
+      setSelectedTemplateId('') // 選択をリセットする
+      await Promise.all([fetchData(), onUpdated()]) // データを再取得する
+    } catch (applyError) {
+      console.error(applyError)
+      setTemplateError('テンプレートの適用に失敗しました')
+    } finally {
+      setApplyingTemplate(false) // テンプレート適用中フラグを下げる
+    }
+  }
+
   const inputClass = 'w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00C2D1]/50 focus:border-[#00C2D1] transition-colors'
   const labelClass = 'block text-xs font-medium text-gray-500 mb-1'
   const unmountedEnvVars = envVarList.filter(ev => !mountList.some(mount => mount.env_var_id === ev.id)) // まだマウントされていない環境変数
+  const selectedEnvTemplate = templateList.find(tl => tl.id === selectedTemplateId) // 選択中テンプレート
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -1370,6 +1408,51 @@ function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
           </div>
         )}
       </div>
+
+      {/* ── テンプレートから環境変数を追加 ─── */}
+      {templateList.some(tl => tl.env_vars && tl.env_vars.length > 0) && (
+        <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-[#111827]">テンプレートから環境変数を追加</h3>
+          <p className="text-xs text-gray-400">テンプレートを選ぶと、定義された環境変数を一括でプロジェクトに追加してマウントします。</p>
+          <div className="flex gap-2">
+            <select
+              value={selectedTemplateId}
+              onChange={ev => setSelectedTemplateId(ev.target.value)}
+              className={inputClass}
+            >
+              <option value="">テンプレートを選択...</option>
+              {templateList.filter(tl => tl.env_vars && tl.env_vars.length > 0).map(tl => (
+                <option key={tl.id} value={tl.id}>{tl.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => void handleApplyEnvTemplate()}
+              disabled={applyingTemplate || !selectedTemplateId}
+              className="shrink-0 bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
+            >
+              {applyingTemplate ? '追加中...' : '追加'}
+            </button>
+          </div>
+          {selectedEnvTemplate?.env_vars && (
+            <div className="space-y-1">
+              {selectedEnvTemplate.env_vars.map((envVar, envVarIndex) => (
+                <div key={envVarIndex} className="flex items-center gap-2 bg-gray-50 rounded-md px-3 py-1.5 border border-gray-100">
+                  <span className="font-mono text-xs text-[#111827]">{envVar.key}</span>
+                  {envVar.auto_generate ? (
+                    <span className="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded shrink-0">自動生成</span>
+                  ) : (
+                    <span className="font-mono text-xs text-gray-400 truncate">{envVar.value || '(空)'}</span>
+                  )}
+                  {envVar.is_secret && (
+                    <span className="text-[10px] bg-purple-50 text-purple-500 px-1.5 py-0.5 rounded shrink-0">secret</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {templateError && <p className="text-xs text-red-500">{templateError}</p>}
+        </div>
+      )}
     </div>
   )
 }
@@ -1383,6 +1466,10 @@ function VolumesTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
   const [newMountPath, setNewMountPath] = useState('') // マウントパス
   const [addingMount, setAddingMount] = useState(false) // マウント作成中フラグ
   const [deletingMountId, setDeletingMountId] = useState<string | null>(null) // 削除中のマウントID
+  const [templateList, setTemplateList] = useState<DeploymentTemplate[]>([]) // テンプレート一覧を管理する
+  const [selectedTemplateId, setSelectedTemplateId] = useState('') // 選択中のテンプレートID
+  const [applyingTemplate, setApplyingTemplate] = useState(false) // テンプレート適用中フラグ
+  const [templateError, setTemplateError] = useState('') // テンプレート適用エラー
 
   const fetchData = useCallback(async () => {
     const [volumes, mounts] = await Promise.all([
@@ -1395,6 +1482,9 @@ function VolumesTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
 
   useEffect(() => {
     void fetchData() // 初回データ取得
+    get<DeploymentTemplate[]>('/deployment-templates')
+      .then(data => setTemplateList(data ?? []))
+      .catch(console.error) // テンプレート一覧を取得する
   }, [fetchData])
 
   const handleAddMount = async () => {
@@ -1429,9 +1519,39 @@ function VolumesTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
     }
   }
 
+  const handleApplyVolumeTemplate = async () => {
+    if (!selectedTemplateId) return
+    const tmpl = templateList.find(tl => tl.id === selectedTemplateId) // 選択されたテンプレートを取得する
+    if (!tmpl || !tmpl.volumes || tmpl.volumes.length === 0) return
+    setApplyingTemplate(true) // テンプレート適用中フラグを立てる
+    setTemplateError('') // エラーをリセットする
+    try {
+      for (const volDef of tmpl.volumes) {
+        const created = await post<Volume>(`/projects/${projectId}/volumes`, { // プロジェクトにボリュームを作成する
+          name: volDef.name,
+          size_mb: volDef.size_mb,
+        })
+        if (created) {
+          await post(`/deployments/${deploymentId}/volume-mounts`, { // 作成したボリュームをマウントする
+            volume_id: created.id,
+            mount_path: volDef.mount_path,
+          })
+        }
+      }
+      setSelectedTemplateId('') // 選択をリセットする
+      await Promise.all([fetchData(), onUpdated()]) // データを再取得する
+    } catch (applyError) {
+      console.error(applyError)
+      setTemplateError('テンプレートの適用に失敗しました')
+    } finally {
+      setApplyingTemplate(false) // テンプレート適用中フラグを下げる
+    }
+  }
+
   const inputClass = 'w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#00C2D1]/50 focus:border-[#00C2D1] transition-colors'
   const labelClass = 'block text-xs font-medium text-gray-500 mb-1'
   const unmountedVolumes = volumeList.filter(vol => !mountList.some(mount => mount.volume_id === vol.id)) // まだマウントされていないボリューム
+  const selectedVolTemplate = templateList.find(tl => tl.id === selectedTemplateId) // 選択中テンプレート
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -1542,6 +1662,45 @@ function VolumesTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
           </div>
         )}
       </div>
+
+      {/* ── テンプレートからボリュームを追加 ─── */}
+      {templateList.some(tl => tl.volumes && tl.volumes.length > 0) && (
+        <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-[#111827]">テンプレートからボリュームを追加</h3>
+          <p className="text-xs text-gray-400">テンプレートを選ぶと、定義されたボリュームを一括でプロジェクトに作成してマウントします。</p>
+          <div className="flex gap-2">
+            <select
+              value={selectedTemplateId}
+              onChange={ev => setSelectedTemplateId(ev.target.value)}
+              className={inputClass}
+            >
+              <option value="">テンプレートを選択...</option>
+              {templateList.filter(tl => tl.volumes && tl.volumes.length > 0).map(tl => (
+                <option key={tl.id} value={tl.id}>{tl.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => void handleApplyVolumeTemplate()}
+              disabled={applyingTemplate || !selectedTemplateId}
+              className="shrink-0 bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
+            >
+              {applyingTemplate ? '追加中...' : '追加'}
+            </button>
+          </div>
+          {selectedVolTemplate?.volumes && (
+            <div className="space-y-1">
+              {selectedVolTemplate.volumes.map((volDef, volIndex) => (
+                <div key={volIndex} className="flex items-center gap-2 bg-gray-50 rounded-md px-3 py-1.5 border border-gray-100">
+                  <span className="text-xs font-medium text-[#111827]">{volDef.name}</span>
+                  <span className="text-xs text-gray-400">{volDef.size_mb} MB</span>
+                  <span className="font-mono text-xs text-gray-400">→ {volDef.mount_path}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {templateError && <p className="text-xs text-red-500">{templateError}</p>}
+        </div>
+      )}
     </div>
   )
 }
