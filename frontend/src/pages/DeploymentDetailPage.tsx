@@ -799,17 +799,9 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
     }
   }, [])
 
-  // 初回マウント時に既存URLからブランチ一覧を取得する
-  useEffect(() => {
-    if (formData.github_repo_url) {
-      void loadBranches(formData.github_repo_url)
-    }
-  }, []) // 意図的に初回のみ実行する
-
-  // ブランチが選択されたときにコミット一覧とディレクトリ一覧を取得する
-  const handleBranchSelect = async (branch: string) => {
-    setFormData(prev => ({ ...prev, github_branch: branch, github_commit_sha: '', github_repo_directory: './' })) // ブランチを設定しコミット・ディレクトリをリセットする
-    const repo = extractGitHubRepo(formData.github_repo_url)
+  // コミット・ディレクトリ一覧を取得する共通関数
+  const loadCommitsAndDirs = useCallback(async (repoUrl: string, branch: string) => {
+    const repo = extractGitHubRepo(repoUrl) // owner/repo を抽出する
     if (!repo || !branch) return
     setGhLoading('commits')
     setGhError(null)
@@ -827,6 +819,34 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
     } finally {
       setGhLoading(null)
     }
+  }, [])
+
+  // 初回マウント時に既存URLからブランチ・コミット一覧を取得する
+  useEffect(() => {
+    if (formData.github_repo_url) {
+      void (async () => {
+        const repo = extractGitHubRepo(formData.github_repo_url)
+        if (!repo) return
+        setGhLoading('branches')
+        try {
+          const branches = await fetchGitHubBranches(repo) // ブランチ一覧を取得する
+          setGhBranches(branches)
+          if (formData.github_branch) {
+            await loadCommitsAndDirs(formData.github_repo_url, formData.github_branch) // 既存ブランチのコミット一覧も取得する
+          }
+        } catch {
+          setGhError('ブランチの取得に失敗しました。リポジトリURLを確認してください。')
+        } finally {
+          setGhLoading(null)
+        }
+      })()
+    }
+  }, []) // 意図的に初回のみ実行する
+
+  // ブランチが選択されたときにコミット一覧とディレクトリ一覧を取得する
+  const handleBranchSelect = async (branch: string) => {
+    setFormData(prev => ({ ...prev, github_branch: branch, github_commit_sha: '', github_repo_directory: './' })) // ブランチを設定しコミット・ディレクトリをリセットする
+    await loadCommitsAndDirs(formData.github_repo_url, branch) // コミット・ディレクトリ一覧を取得する
   }
 
   const handleSave = async () => {
