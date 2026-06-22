@@ -134,6 +134,9 @@ func (mock *mockDeploymentRepoForBuild) UpdateDeploymentStatus(ctx context.Conte
 func (mock *mockDeploymentRepoForBuild) UpdateCurrentBuildID(ctx context.Context, deploymentID string, buildID string) error {
 	return nil // テストでは使用しない
 }
+func (mock *mockDeploymentRepoForBuild) ClearCurrentBuildID(ctx context.Context, deploymentID string) error {
+	return nil // テストでは使用しない
+}
 func (mock *mockDeploymentRepoForBuild) FindAllRunning(ctx context.Context) ([]models.Deployment, error) {
 	return nil, nil // テストでは使用しない
 }

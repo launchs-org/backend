@@ -164,6 +164,10 @@ func (mock *mockDeploymentRepo) UpdateCurrentBuildID(ctx context.Context, deploy
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *mockDeploymentRepo) ClearCurrentBuildID(ctx context.Context, deploymentID string) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 // mockEnvVarMountRepoForDeployment は EnvVarMountRepository のテスト用モック
 type mockEnvVarMountRepoForDeployment struct {
 	findAllFunc func(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error)
@@ -204,6 +208,9 @@ func (mock *mockVolumeMountRepoForDeployment) FindByID(ctx context.Context, moun
 }
 func (mock *mockVolumeMountRepoForDeployment) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.VolumeMount, error) {
 	return []*models.VolumeMount{}, nil // 空スライスを返す
+}
+func (mock *mockVolumeMountRepoForDeployment) FindAllByVolumeID(ctx context.Context, volumeID string) ([]*models.VolumeMount, error) {
+	return []*models.VolumeMount{}, nil // 使用しない
 }
 func (mock *mockVolumeMountRepoForDeployment) FindByDeploymentIDAndMountPath(ctx context.Context, deploymentID string, mountPath string) (*models.VolumeMount, error) {
 	return nil, nil // 使用しない
