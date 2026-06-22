@@ -824,27 +824,6 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
     }
   }, [loadCommitsAndDirs])
 
-  // 初回マウント時に既存URLからブランチ・コミット一覧を取得する
-  useEffect(() => {
-    if (formData.github_repo_url) {
-      void (async () => {
-        const repo = extractGitHubRepo(formData.github_repo_url)
-        if (!repo) return
-        setGhLoading('branches')
-        try {
-          const branches = await fetchGitHubBranches(repo) // ブランチ一覧を取得する
-          setGhBranches(branches)
-          if (formData.github_branch) {
-            await loadCommitsAndDirs(formData.github_repo_url, formData.github_branch) // 既存ブランチのコミット一覧も取得する
-          }
-        } catch {
-          setGhError('ブランチの取得に失敗しました。リポジトリURLを確認してください。')
-        } finally {
-          setGhLoading(null)
-        }
-      })()
-    }
-  }, []) // 意図的に初回のみ実行する
 
   // ブランチが選択されたときにコミット一覧とディレクトリ一覧を取得する
   const handleBranchSelect = async (branch: string) => {
