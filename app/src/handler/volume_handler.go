@@ -77,6 +77,16 @@ func (volumeHandler *VolumeHandler) CreateVolume(echoCtx echo.Context) error {
 
 	volumeData, err := volumeHandler.volumeService.CreateVolume(echoCtx.Request().Context(), userID, projectID, requestBody) // サービスを呼び出して volume を作成する
 	if err != nil {
+		var quotaErr *service.QuotaExceededError
+		if errors.As(err, &quotaErr) { // quota 超過の場合は 403 と詳細情報を返す
+			logger.PrintHandlerError("VolumeHandler", "CreateVolume", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusForbidden, map[string]interface{}{
+				"error":    "quota_exceeded",
+				"resource": quotaErr.Resource,
+				"current":  quotaErr.Current,
+				"limit":    quotaErr.Limit,
+			})
+		}
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
 			logger.PrintHandlerError("VolumeHandler", "CreateVolume", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{

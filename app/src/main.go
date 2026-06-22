@@ -53,9 +53,9 @@ func main() {
 
 
 	// quota ハンドラーを DI 組み立てする
-	userQuotaRepo := repository.NewUserQuotaRepository(repository.Database) // quota リポジトリを生成する
-	quotaServiceImpl := service.NewQuotaService(userQuotaRepo)              // quota サービスを生成する
-	userQuotaHandler := handler.NewUserQuotaHandler(quotaServiceImpl)       // quota ハンドラーを生成する
+	userQuotaRepo := repository.NewUserQuotaRepository(repository.Database)                   // quota リポジトリを生成する
+	quotaServiceImpl := service.NewQuotaService(userQuotaRepo, repository.FreePlanID)         // quota サービスを生成する（free プラン ID を注入する）
+	userQuotaHandler := handler.NewUserQuotaHandler(quotaServiceImpl)                         // quota ハンドラーを生成する
 
 	// Harbor クライアントを初期化する
 	harborClient := k8s.NewHarborClient(

@@ -100,7 +100,13 @@ func (svc *volumeServiceImpl) CreateVolume(ctx context.Context, userID string, p
 	if projectData.UserID != userID { // 所有者チェックを行う
 		return nil, ErrForbidden
 	}
-	if err := CheckVolumeQuota(ctx, svc.userQuotaRepo, userID, req.SizeMB); err != nil { // ボリューム容量のQuotaチェックを行う
+	if err := CheckVolumeSizeQuota(ctx, svc.userQuotaRepo, userID, req.SizeMB); err != nil { // 1ボリューム最大サイズのQuotaチェックを行う
+		return nil, err // Quota超過エラーを返す
+	}
+	if err := CheckVolumeCountQuota(ctx, svc.userQuotaRepo, userID); err != nil { // ボリューム数のQuotaチェックを行う
+		return nil, err // Quota超過エラーを返す
+	}
+	if err := CheckTotalVolumeQuota(ctx, svc.userQuotaRepo, userID, req.SizeMB); err != nil { // ボリューム総容量のQuotaチェックを行う
 		return nil, err // Quota超過エラーを返す
 	}
 

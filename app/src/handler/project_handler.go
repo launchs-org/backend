@@ -57,10 +57,14 @@ func (handler *ProjectHandler) CreateProject(echoCtx echo.Context) error {
 
 	projectData, err := handler.projectService.CreateProject(echoCtx.Request().Context(), userID, requestBody) // サービスを呼び出して project を作成する
 	if err != nil {
-		if errors.Is(err, service.ErrProjectQuotaExceeded) { // プロジェクト数が上限に達している場合は 400 を返す
-			logger.PrintHandlerError("ProjectHandler", "CreateProject", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
-			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
-				"error": "プロジェクト数の上限に達しています",
+		var quotaErr *service.QuotaExceededError
+		if errors.As(err, &quotaErr) { // quota 超過の場合は 403 と詳細情報を返す
+			logger.PrintHandlerError("ProjectHandler", "CreateProject", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusForbidden, map[string]interface{}{
+				"error":    "quota_exceeded",
+				"resource": quotaErr.Resource,
+				"current":  quotaErr.Current,
+				"limit":    quotaErr.Limit,
 			})
 		}
 		logger.PrintHandlerError("ProjectHandler", "CreateProject", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
