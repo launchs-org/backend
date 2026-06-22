@@ -226,7 +226,12 @@ func seedDeploymentTemplates() error {
 			templateRecord.Replicas = 1 // レプリカ数のデフォルトを設定する
 		}
 
-		if err := Database.Where("name = ?", templateRecord.Name).Assign(templateRecord).FirstOrCreate(&templateRecord).Error; err != nil {
+		// 既存レコードを名前で検索して上書き upsert する（YAML 変更が即座に反映されるようにする）
+		var existingTemplate models.DeploymentTemplate
+		if err := Database.Where("name = ?", templateRecord.Name).First(&existingTemplate).Error; err == nil {
+			templateRecord.ID = existingTemplate.ID // 既存 ID を引き継いで上書きする
+		}
+		if err := Database.Save(&templateRecord).Error; err != nil {
 			return fmt.Errorf("テンプレートシードの upsert に失敗しました (%s): %w", yamlData.Name, err) // upsert エラーを返す
 		}
 	}

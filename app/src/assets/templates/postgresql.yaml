@@ -22,6 +22,9 @@ env_vars:
   - key: POSTGRES_USER
     value: postgres
     is_secret: false
+  - key: PGDATA
+    value: /var/lib/postgresql/data/pgdata
+    is_secret: false
 
 volumes:
   - name: postgres-data
