@@ -106,8 +106,10 @@ export function Layout({ children, breadcrumbs, actions, fullWidth }: LayoutProp
 
       {/* フッター：インスタンスサイズ別使用状況 */}
       {!isEmbedded && quota && instanceSizeList.length > 0 && (
-        <footer className="h-8 bg-white border-t border-gray-200 flex items-center px-4 gap-4 sticky bottom-0 z-40">
-          <span className="text-xs text-gray-400 shrink-0">instances</span>
+        <footer className="h-8 bg-white border-t border-gray-200 flex items-center px-4 gap-3 sticky bottom-0 z-40">
+          <span className="text-xs text-gray-400 shrink-0">リソース制限</span>
+          <div className="w-px h-3 bg-gray-200 shrink-0" />
+          <span className="text-xs text-gray-400 shrink-0">インスタンスサイズ別:</span>
           <div className="flex items-center gap-3">
             {instanceSizeList.map((size) => {
               const current = quota.current_instances[size] ?? 0 // 現在数を取得する
@@ -123,27 +125,15 @@ export function Layout({ children, breadcrumbs, actions, fullWidth }: LayoutProp
               )
             })}
           </div>
-          <div className="w-px h-3 bg-gray-200 mx-1 shrink-0" />
-          <span className="text-xs text-gray-400 shrink-0">volumes</span>
-          <div className="flex items-center gap-3">
-            {(() => {
-              const volWarning = quota.max_volumes > 0 && quota.current_volumes / quota.max_volumes >= 0.8 // ボリューム数の警告判定
-              const totalWarning = quota.max_total_volume_mb > 0 && quota.current_total_volume_mb / quota.max_total_volume_mb >= 0.8 // 総容量の警告判定
-              return (
-                <>
-                  <span className={`text-xs font-mono ${volWarning ? 'text-amber-600 font-medium' : 'text-gray-500'}`}>
-                    count: {quota.current_volumes}/{quota.max_volumes}
-                  </span>
-                  <span className={`text-xs font-mono ${totalWarning ? 'text-amber-600 font-medium' : 'text-gray-500'}`}>
-                    total: {quota.current_total_volume_mb}/{quota.max_total_volume_mb}MB
-                  </span>
-                  <span className="text-xs font-mono text-gray-500">
-                    max: {quota.max_volume_size_mb}MB/vol
-                  </span>
-                </>
-              )
-            })()}
-          </div>
+          <div className="w-px h-3 bg-gray-200 shrink-0" />
+          {(() => {
+            const isWarning = quota.max_total_volume_mb > 0 && quota.current_total_volume_mb / quota.max_total_volume_mb >= 0.8 // 80% 以上で警告色にする
+            return (
+              <span className={`text-xs font-mono ${isWarning ? 'text-amber-600 font-medium' : 'text-gray-500'}`}>
+                ボリューム容量: {quota.current_total_volume_mb}/{quota.max_total_volume_mb}MB
+              </span>
+            )
+          })()}
         </footer>
       )}
     </div>
