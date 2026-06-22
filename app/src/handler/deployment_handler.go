@@ -54,10 +54,14 @@ func (deploymentHandler *DeploymentHandler) CreateDeployment(echoCtx echo.Contex
 
 	deploymentData, err := deploymentHandler.deploymentService.CreateDeployment(echoCtx.Request().Context(), requestBody) // サービスを呼び出して deployment を作成する
 	if err != nil {                                                                                                         // エラーが発生した場合
-		if errors.Is(err, service.ErrDeploymentQuotaExceeded) { // デプロイメント数が上限に達している場合は 400 を返す
-			logger.PrintHandlerError("DeploymentHandler", "CreateDeployment", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
-			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
-				"error": "デプロイメント数の上限に達しています",
+		var quotaErr *service.QuotaExceededError
+		if errors.As(err, &quotaErr) { // quota 超過の場合は 403 と詳細情報を返す
+			logger.PrintHandlerError("DeploymentHandler", "CreateDeployment", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusForbidden, map[string]interface{}{
+				"error":    "quota_exceeded",
+				"resource": quotaErr.Resource,
+				"current":  quotaErr.Current,
+				"limit":    quotaErr.Limit,
 			})
 		}
 		logger.PrintHandlerError("DeploymentHandler", "CreateDeployment", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
@@ -141,10 +145,14 @@ func (deploymentHandler *DeploymentHandler) UpdateDeployment(echoCtx echo.Contex
 				"error": "アクセスが禁止されています",
 			})
 		}
-		if errors.Is(err, service.ErrReplicasQuotaExceeded) { // レプリカ数が上限を超えている場合は 400 を返す
-			logger.PrintHandlerError("DeploymentHandler", "UpdateDeployment", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
-			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
-				"error": "レプリカ数の上限を超えています",
+		var quotaErrUpdate *service.QuotaExceededError
+		if errors.As(err, &quotaErrUpdate) { // quota 超過の場合は 403 と詳細情報を返す
+			logger.PrintHandlerError("DeploymentHandler", "UpdateDeployment", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusForbidden, map[string]interface{}{
+				"error":    "quota_exceeded",
+				"resource": quotaErrUpdate.Resource,
+				"current":  quotaErrUpdate.Current,
+				"limit":    quotaErrUpdate.Limit,
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
@@ -351,10 +359,14 @@ func (deploymentHandler *DeploymentHandler) ApplyDeployment(echoCtx echo.Context
 				"error": "apply が実行中です",
 			})
 		}
-		if errors.Is(err, service.ErrReplicasQuotaExceeded) { // レプリカ数が上限を超えている場合は 400 を返す
-			logger.PrintHandlerError("DeploymentHandler", "ApplyDeployment", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
-			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
-				"error": "レプリカ数の上限を超えています",
+		var quotaErrApply *service.QuotaExceededError
+		if errors.As(err, &quotaErrApply) { // quota 超過の場合は 403 と詳細情報を返す
+			logger.PrintHandlerError("DeploymentHandler", "ApplyDeployment", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusForbidden, map[string]interface{}{
+				"error":    "quota_exceeded",
+				"resource": quotaErrApply.Resource,
+				"current":  quotaErrApply.Current,
+				"limit":    quotaErrApply.Limit,
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // deployment が存在しない場合は 404 を返す
