@@ -180,20 +180,9 @@ func handleBuildJobEvent(
 			logger.PrintErr("WatchBuildJobs: ビルド失敗結果更新に失敗しました（buildID=" + buildID + "）: " + err.Error()) // エラーをログ出力する
 			return
 		}
-		// not_init 状態のときのみ failed に遷移する
-		// not_init 以外（pending / running など）は既に apply 済みであり、ビルド失敗でステータスを壊してはいけない
-		deploymentData, deployErr := deploymentRepo.FindByID(ctx, buildData.DeploymentID) // deployment を取得してステータスを確認する
-		if deployErr != nil {
-			logger.PrintErr("WatchBuildJobs: deployment 取得に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + deployErr.Error()) // エラーをログ出力する
-			return
-		}
-		if deploymentData.Status == models.DeploymentStatusNotInit { // not_init 状態の場合のみステータスを更新する
-			if err := deploymentRepo.UpdateDeploymentStatus(ctx, buildData.DeploymentID, models.DeploymentStatusFailed); err != nil { // not_init → failed に遷移する
-				logger.PrintErr("WatchBuildJobs: DeploymentStatus 更新に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + err.Error()) // エラーをログ出力する
-				return
-			}
-		}
-		logger.Println("WatchBuildJobs: ビルド失敗。failed に更新しました: " + buildID) // 失敗ログを出力する
+		// deployment のステータスは変更しない
+		// not_init のまま維持することで再ビルドを促す。not_init 以外（pending / running など）も現状維持する
+		logger.Println("WatchBuildJobs: ビルド失敗。ビルドレコードを failed に更新しました: " + buildID) // 失敗ログを出力する
 	}
 }
 
