@@ -278,6 +278,9 @@ func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID s
 
 	// not_init 状態は k8s にリソースが存在しないため、直接 DB クリーンアップを実行する
 	if deploymentData.Status == models.DeploymentStatusNotInit {
+		if err := svc.deploymentRepo.ClearCurrentBuildID(ctx, deploymentData.ID); err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { // current_build_id を NULL にして外部キー制約を解除する
+			return nil, err // クリアエラーを返す
+		}
 		if err := svc.buildRepo.DeleteAllByDeploymentID(ctx, deploymentData.ID); err != nil { // ビルド履歴を削除する
 			return nil, err // 削除エラーを返す
 		}
@@ -299,6 +302,9 @@ func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID s
 		return nil, existsErr // 確認エラーを返す
 	}
 	if !exists { // k8s リソースが存在しない場合は Watch イベントが発生しないため直接削除する
+		if err := svc.deploymentRepo.ClearCurrentBuildID(ctx, deploymentData.ID); err != nil && !errors.Is(err, gorm.ErrRecordNotFound) { // current_build_id を NULL にして外部キー制約を解除する
+			return nil, err // クリアエラーを返す
+		}
 		if err := svc.buildRepo.DeleteAllByDeploymentID(ctx, deploymentData.ID); err != nil { // ビルド履歴を削除する
 			return nil, err // 削除エラーを返す
 		}

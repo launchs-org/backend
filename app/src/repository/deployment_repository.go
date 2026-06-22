@@ -24,6 +24,7 @@ type DeploymentRepository interface {
 	UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error               // GitHub push 時に pending_github_commit_sha を更新する
 	UpdateDeploymentStatus(ctx context.Context, deploymentID string, status models.DeploymentStatus) error       // deployment の status を更新する
 	UpdateCurrentBuildID(ctx context.Context, deploymentID string, buildID string) error                          // current_build_id を更新する
+	ClearCurrentBuildID(ctx context.Context, deploymentID string) error                                           // current_build_id を NULL にクリアする
 	Delete(ctx context.Context, deploymentID string) error                                                        // deployment を削除する
 }
 
@@ -161,6 +162,18 @@ func (repo *deploymentRepositoryImpl) UpdateDeploymentStatus(ctx context.Context
 func (repo *deploymentRepositoryImpl) UpdateCurrentBuildID(ctx context.Context, deploymentID string, buildID string) error {
 	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Update("current_build_id", buildID) // current_build_id を更新する
 	if result.Error != nil {                                                                                                           // エラーが発生した場合
+		return result.Error // エラーを返す
+	}
+	if result.RowsAffected == 0 { // 更新対象が存在しない場合
+		return gorm.ErrRecordNotFound // レコードなしエラーを返す
+	}
+	return nil // 正常終了
+}
+
+// ClearCurrentBuildID は deploymentID に対応する deployment の current_build_id を NULL にクリアする
+func (repo *deploymentRepositoryImpl) ClearCurrentBuildID(ctx context.Context, deploymentID string) error {
+	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Update("current_build_id", nil) // current_build_id を NULL にする
+	if result.Error != nil {                                                                                                      // エラーが発生した場合
 		return result.Error // エラーを返す
 	}
 	if result.RowsAffected == 0 { // 更新対象が存在しない場合
