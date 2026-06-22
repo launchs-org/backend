@@ -57,14 +57,24 @@ type UpdateTemplateRequest struct {
 	Volumes           []models.TemplateVolume  `json:"volumes"`             // nil の場合は更新しない
 }
 
+// ExtraEnvVar はテンプレート適用時に追加する環境変数
+type ExtraEnvVar struct {
+	Key      string `json:"key"`       // 環境変数のキー
+	Value    string `json:"value"`     // 環境変数の値
+	IsSecret bool   `json:"is_secret"` // シークレットフラグ
+}
+
 // CreateDeploymentFromTemplateRequest は POST /projects/:id/deployments/from-template のリクエスト構造体
 type CreateDeploymentFromTemplateRequest struct {
-	ProjectID  string  `json:"-"`          // パスパラメータから取得する
-	TemplateID string  `json:"template_id"` // 使用するテンプレートの ID
-	Name       string  `json:"name"`        // デプロイメント名（必須）
-	ImageURL   *string `json:"image_url"`   // nil の場合はテンプレート値を使用する
-	InstanceSize *string `json:"instance_size"` // nil の場合はテンプレート値を使用する
-	Replicas   *int32  `json:"replicas"`    // nil の場合はテンプレート値を使用する
+	ProjectID         string        `json:"-"`                  // パスパラメータから取得する
+	TemplateID        string        `json:"template_id"`        // 使用するテンプレートの ID
+	Name              string        `json:"name"`               // デプロイメント名（必須）
+	ImageURL          *string       `json:"image_url"`          // nil の場合はテンプレート値を使用する
+	InstanceSize      *string       `json:"instance_size"`      // nil の場合はテンプレート値を使用する
+	Replicas          *int32        `json:"replicas"`           // nil の場合はテンプレート値を使用する
+	SkipVolumeNames   []string      `json:"skip_volume_names"`  // 作成をスキップするボリューム名の一覧
+	OverrideEnvVars   []ExtraEnvVar `json:"override_env_vars"`  // テンプレートのenv_varの値を上書きする（同キーのテンプレートenv_varに適用）
+	ExtraEnvVars      []ExtraEnvVar `json:"extra_env_vars"`     // テンプレートに追加する環境変数（新規キーのみ）
 }
 
 // deploymentTemplateServiceImpl は DeploymentTemplateService の実装
@@ -300,8 +310,16 @@ func (svc *deploymentTemplateServiceImpl) CreateDeploymentFromTemplate(ctx conte
 			}
 		}
 
+		overrideEnvVarMap := make(map[string]string, len(req.OverrideEnvVars)) // オーバーライドマップを構築する
+		for _, overrideEnvVar := range req.OverrideEnvVars {
+			overrideEnvVarMap[overrideEnvVar.Key] = overrideEnvVar.Value // キーに対する上書き値を登録する
+		}
+
 		for _, envVarDef := range envVarList { // 環境変数をループして作成する
 			envVarValue := envVarDef.Value // デフォルト値を設定する
+			if overriddenValue, hasOverride := overrideEnvVarMap[envVarDef.Key]; hasOverride && !envVarDef.AutoGenerate { // オーバーライドが指定されていてauto_generateでない場合
+				envVarValue = overriddenValue // オーバーライド値を使用する
+			}
 			if envVarDef.AutoGenerate {    // auto_generate=true の場合はランダム値を生成する
 				length := envVarDef.Length // 生成文字数を取得する
 				if length == 0 {
@@ -332,7 +350,15 @@ func (svc *deploymentTemplateServiceImpl) CreateDeploymentFromTemplate(ctx conte
 			}
 		}
 
+		skipVolumeSet := make(map[string]bool, len(req.SkipVolumeNames)) // スキップするボリューム名のセットを構築する
+		for _, skipName := range req.SkipVolumeNames {
+			skipVolumeSet[skipName] = true // スキップ対象として登録する
+		}
+
 		for _, volDef := range volumeList { // ボリュームをループして作成する
+			if skipVolumeSet[volDef.Name] { // スキップ対象のボリュームは作成しない
+				continue
+			}
 			volumeData := &models.Volume{
 				ProjectID: req.ProjectID, // プロジェクト ID を設定する
 				Name:      volDef.Name,   // ボリューム名を設定する
@@ -349,6 +375,26 @@ func (svc *deploymentTemplateServiceImpl) CreateDeploymentFromTemplate(ctx conte
 				Status:       models.VolumeMountStatusPending, // pending ステータスで作成する
 			}
 			if err := svc.volumeMountRepo.Create(ctx, tx, volumeMountData); err != nil { // マウント設定を作成する
+				return err // 作成エラーを返してロールバックする
+			}
+		}
+
+		for _, extraEnvVar := range req.ExtraEnvVars { // 追加の環境変数をループして作成する
+			extraEnvVarData := &models.EnvVar{
+				ProjectID: req.ProjectID,       // プロジェクト ID を設定する
+				Key:       extraEnvVar.Key,     // キーを設定する
+				Value:     extraEnvVar.Value,   // 値を設定する
+				IsSecret:  extraEnvVar.IsSecret, // シークレットフラグを設定する
+			}
+			if err := svc.envVarRepo.Create(ctx, tx, extraEnvVarData); err != nil { // 追加環境変数を作成する
+				return err // 作成エラーを返してロールバックする
+			}
+			extraMountData := &models.EnvVarMount{
+				EnvVarID:     extraEnvVarData.ID, // 環境変数 ID を設定する
+				DeploymentID: deploymentData.ID,  // デプロイメント ID を設定する
+				Status:       models.EnvVarMountStatusPending, // pending ステータスで作成する
+			}
+			if err := svc.envVarMountRepo.Create(ctx, tx, extraMountData); err != nil { // マウント設定を作成する
 				return err // 作成エラーを返してロールバックする
 			}
 		}
