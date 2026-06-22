@@ -22,5 +22,5 @@ env_vars:
 
 volumes:
   - name: mysql-data
-    size_mb: 10240
+    size_mb: 3072
     mount_path: /var/lib/mysql
