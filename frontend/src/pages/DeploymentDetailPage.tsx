@@ -778,6 +778,7 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
   const [ghDirs, setGhDirs]           = useState<string[]>([])       // ディレクトリ一覧
   const [ghLoading, setGhLoading]     = useState<'branches' | 'commits' | 'dirs' | null>(null) // ローディング中の対象
   const [ghError, setGhError]         = useState<string | null>(null) // エラーメッセージ
+  const [manualInput, setManualInput] = useState(false) // GitHub API 失敗時の手動入力モード
 
   // リポジトリURLが確定したときにブランチ一覧を取得する
   const loadBranches = useCallback(async (repoUrl: string) => {
@@ -906,11 +907,61 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
                   {ghLoading === 'branches' ? '取得中...' : '読み込む'}
                 </button>
               </div>
-              {ghError && <p className="text-xs text-red-500 mt-1">{ghError}</p>}
+              {ghError && (
+                <div className="mt-1 flex items-center justify-between">
+                  <p className="text-xs text-red-500">{ghError}</p>
+                  <button
+                    type="button"
+                    onClick={() => { setManualInput(true); setGhError(null) }} // 手動入力モードに切り替える
+                    className="text-xs text-[#00C2D1] hover:underline shrink-0 ml-2"
+                  >
+                    手動で入力する
+                  </button>
+                </div>
+              )}
             </div>
 
+            {/* 手動入力モード */}
+            {manualInput && (
+              <>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className={labelClass}>ブランチ名</label>
+                    <button type="button" onClick={() => setManualInput(false)} className="text-xs text-gray-400 hover:text-gray-600">APIから取得する</button>
+                  </div>
+                  <input
+                    type="text"
+                    value={formData.github_branch}
+                    onChange={(event) => setFormData(prev => ({ ...prev, github_branch: event.target.value }))}
+                    placeholder="main"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>コミットSHA（空欄で HEAD）</label>
+                  <input
+                    type="text"
+                    value={formData.github_commit_sha}
+                    onChange={(event) => setFormData(prev => ({ ...prev, github_commit_sha: event.target.value }))}
+                    placeholder="例: abc1234（空欄で最新）"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>ビルドディレクトリ</label>
+                  <input
+                    type="text"
+                    value={formData.github_repo_directory}
+                    onChange={(event) => setFormData(prev => ({ ...prev, github_repo_directory: event.target.value }))}
+                    placeholder="./"
+                    className={inputClass}
+                  />
+                </div>
+              </>
+            )}
+
             {/* ブランチ選択（ブランチ一覧取得後に表示） */}
-            {ghBranches.length > 0 && (
+            {!manualInput && ghBranches.length > 0 && (
               <div>
                 <label className={labelClass}>ブランチ</label>
                 <select
@@ -927,10 +978,10 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
             )}
 
             {/* コミット選択（コミット一覧取得後に表示） */}
-            {ghLoading === 'commits' && (
+            {!manualInput && ghLoading === 'commits' && (
               <p className="text-xs text-gray-400">コミット・ディレクトリを取得中...</p>
             )}
-            {ghCommits.length > 0 && (
+            {!manualInput && ghCommits.length > 0 && (
               <div>
                 <label className={labelClass}>コミット</label>
                 <select
@@ -949,7 +1000,7 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
             )}
 
             {/* ディレクトリ選択（ディレクトリ一覧取得後に表示） */}
-            {ghDirs.length > 0 && (
+            {!manualInput && ghDirs.length > 0 && (
               <div>
                 <label className={labelClass}>ビルドディレクトリ</label>
                 <select
@@ -966,7 +1017,7 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
             )}
 
             {/* ディレクトリが取得できてもサブディレクトリが存在しない場合 */}
-            {ghCommits.length > 0 && ghDirs.length === 0 && ghLoading === null && (
+            {!manualInput && ghCommits.length > 0 && ghDirs.length === 0 && ghLoading === null && (
               <div>
                 <label className={labelClass}>ビルドディレクトリ</label>
                 <p className="text-xs text-gray-400">サブディレクトリがないため、./（ルート）でビルドします</p>
@@ -1652,24 +1703,23 @@ function NotInitScreen({
           </p>
         </div>
         <div className="flex items-center gap-3">
-          {deployment.current_build_id ? (
+          {deployment.current_build_id && (
             <Link
               to={`/builds/${deployment.current_build_id}/logs`}
-              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm px-4 py-2 rounded-md transition-colors"
+              className="flex items-center gap-2 border border-purple-300 text-purple-600 hover:bg-purple-50 text-sm px-4 py-2 rounded-md transition-colors"
             >
               <ExternalLink className="w-4 h-4" />
               ビルドログを表示
             </Link>
-          ) : (
-            <button
-              onClick={() => void handleBuild()}
-              disabled={building}
-              className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm px-4 py-2 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Hammer className="w-4 h-4" />
-              {building ? 'ビルド開始中...' : 'ビルドを実行'}
-            </button>
           )}
+          <button
+            onClick={() => void handleBuild()}
+            disabled={building}
+            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white text-sm px-4 py-2 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Hammer className="w-4 h-4" />
+            {building ? 'ビルド開始中...' : deployment.current_build_id ? '再ビルド' : 'ビルドを実行'}
+          </button>
           <button
             onClick={onDelete}
             disabled={deleting}
