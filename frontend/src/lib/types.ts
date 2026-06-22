@@ -158,6 +158,7 @@ export type Quota = {
   max_volume_size_mb: number
   max_total_volume_mb: number
   instance_limits: Record<string, number>
+  current_instances: Record<string, number>
   current_projects: number
   current_deployments: number
   current_volumes: number

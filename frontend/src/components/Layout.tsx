@@ -1,6 +1,8 @@
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Cloud, Settings, LogOut, ChevronRight } from 'lucide-react'
-import { logout } from '@/lib/api'
+import { logout, get } from '@/lib/api'
+import type { Quota } from '@/lib/types'
 
 type BreadcrumbItem = { label: string; href?: string; sub?: string }
 
@@ -11,16 +13,32 @@ type LayoutProps = {
   fullWidth?: boolean
 }
 
+const INSTANCE_SIZE_ORDER = ['small', 'medium', 'large'] // 表示順を固定する
+
 export function Layout({ children, breadcrumbs, actions, fullWidth }: LayoutProps) {
   const navigate = useNavigate() // ナビゲーションフックを取得する
   const isEmbedded = window.self !== window.top // iframeで表示されているかどうかを判定する
+  const [quota, setQuota] = useState<Quota | null>(null) // フッター表示用 quota
+
+  useEffect(() => {
+    if (isEmbedded) return // iframe 内ではフッターを表示しないので取得不要
+    get<Quota>('/users/quota').then(setQuota).catch(() => {}) // quota を取得する（失敗は無視）
+  }, [isEmbedded])
 
   const handleLogout = async () => {
     await logout() // ログアウトしてリダイレクトする
   }
 
+  // instance_limits に含まれるサイズを決まった順序で並べる
+  const instanceSizeList = quota
+    ? [
+        ...INSTANCE_SIZE_ORDER.filter((size) => size in quota.instance_limits),
+        ...Object.keys(quota.instance_limits).filter((size) => !INSTANCE_SIZE_ORDER.includes(size)),
+      ]
+    : []
+
   return (
-    <div className="min-h-screen bg-[#F0F2F5]">
+    <div className="min-h-screen bg-[#F0F2F5] flex flex-col">
       {/* ヘッダー */}
       <header className="h-12 bg-white border-b border-gray-200 flex items-center px-4 gap-4 sticky top-0 z-50">
         {!isEmbedded && (
@@ -82,9 +100,31 @@ export function Layout({ children, breadcrumbs, actions, fullWidth }: LayoutProp
       </header>
 
       {/* メインコンテンツ */}
-      <main className={fullWidth ? '' : 'max-w-7xl mx-auto px-4 py-6'}>
+      <main className={`flex-1 ${fullWidth ? '' : 'max-w-7xl mx-auto px-4 py-6'}`}>
         {children}
       </main>
+
+      {/* フッター：インスタンスサイズ別使用状況 */}
+      {!isEmbedded && quota && instanceSizeList.length > 0 && (
+        <footer className="h-8 bg-white border-t border-gray-200 flex items-center px-4 gap-4">
+          <span className="text-xs text-gray-400 shrink-0">instances</span>
+          <div className="flex items-center gap-3">
+            {instanceSizeList.map((size) => {
+              const current = quota.current_instances[size] ?? 0 // 現在数を取得する
+              const limit = quota.instance_limits[size] // 上限数を取得する
+              const isWarning = limit > 0 && current / limit >= 0.8 // 80% 以上で警告色にする
+              return (
+                <span
+                  key={size}
+                  className={`text-xs font-mono ${isWarning ? 'text-amber-600 font-medium' : 'text-gray-500'}`}
+                >
+                  {size}: {current}/{limit}
+                </span>
+              )
+            })}
+          </div>
+        </footer>
+      )}
     </div>
   )
 }
