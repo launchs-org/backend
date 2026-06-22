@@ -1,11 +1,11 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Container, GitBranch, Package } from 'lucide-react'
+import { Container, GitBranch, Package, LayoutTemplate } from 'lucide-react'
 import { Layout } from '@/components/Layout'
-import { post, QuotaExceededApiError } from '@/lib/api'
-import type { Deployment, DeploymentType } from '@/lib/types'
+import { get, post, QuotaExceededApiError } from '@/lib/api'
+import type { Deployment, DeploymentType, DeploymentTemplate } from '@/lib/types'
 
-type Step = 'type' | 'form'
+type Step = 'type' | 'form' | 'template'
 
 const DEPLOYMENT_TYPES: { type: DeploymentType; label: string; description: string; Icon: React.ElementType }[] = [
   {
@@ -70,6 +70,15 @@ export function DeploymentNewPage() {
 
   const [step, setStep] = useState<Step>('type') // 現在のステップを管理する
   const [selectedType, setSelectedType] = useState<DeploymentType | null>(null) // 選択したタイプを管理する
+
+  // テンプレート関連状態
+  const [templates, setTemplates] = useState<DeploymentTemplate[]>([]) // テンプレート一覧
+  const [templatesLoading, setTemplatesLoading] = useState(false) // テンプレート取得中フラグ
+  const [selectedTemplate, setSelectedTemplate] = useState<DeploymentTemplate | null>(null) // 選択中のテンプレート
+  const [templateName, setTemplateName] = useState('') // テンプレートから作成するデプロイメント名
+  const [templateCreating, setTemplateCreating] = useState(false) // テンプレート作成中フラグ
+  const [templateError, setTemplateError] = useState<string | null>(null) // テンプレートエラー
+
   const [formData, setFormData] = useState({
     name: '',
     image_url: '',
@@ -138,9 +147,52 @@ export function DeploymentNewPage() {
     }
   }
 
+  // テンプレート一覧を取得する（templateステップ表示時）
+  useEffect(() => {
+    if (step !== 'template') return
+    setTemplatesLoading(true)
+    void get<DeploymentTemplate[]>('/deployment-templates')
+      .then(setTemplates)
+      .catch(() => setTemplates([]))
+      .finally(() => setTemplatesLoading(false))
+  }, [step])
+
   const handleTypeSelect = (type: DeploymentType) => {
     setSelectedType(type) // タイプを選択する
     setStep('form') // フォームステップへ進む
+  }
+
+  // テンプレートを選択する
+  const handleTemplateSelect = (template: DeploymentTemplate) => {
+    setSelectedTemplate(template) // テンプレートを選択する
+    setTemplateName('') // 名前をリセットする
+    setTemplateError(null)
+  }
+
+  // テンプレートからデプロイメントを作成する
+  const handleCreateFromTemplate = async () => {
+    if (!selectedTemplate || !projectId) return
+    if (!templateName.trim()) {
+      setTemplateError('デプロイメント名を入力してください')
+      return
+    }
+    setTemplateCreating(true)
+    setTemplateError(null)
+    try {
+      await post<Deployment>(`/projects/${projectId}/deployments/from-template`, {
+        template_id: selectedTemplate.id, // テンプレート ID を設定する
+        name: templateName.trim(),         // デプロイメント名を設定する
+      })
+      navigate(`/projects/${projectId}`) // プロジェクト画面へ遷移する
+    } catch (createError) {
+      if (createError instanceof QuotaExceededApiError) {
+        setTemplateError(createError.message)
+      } else {
+        setTemplateError('デプロイメントの作成に失敗しました')
+      }
+    } finally {
+      setTemplateCreating(false)
+    }
   }
 
   const handleCreate = async () => {
@@ -205,8 +257,8 @@ export function DeploymentNewPage() {
             タイプ選択
           </span>
           <span className="text-gray-300">→</span>
-          <span className={`flex items-center gap-1.5 ${step === 'form' ? 'text-[#00C2D1] font-medium' : 'text-gray-400'}`}>
-            <span className={`w-5 h-5 rounded-full text-xs flex items-center justify-center ${step === 'form' ? 'bg-[#00C2D1] text-white' : 'bg-gray-200 text-gray-500'}`}>2</span>
+          <span className={`flex items-center gap-1.5 ${step === 'form' || step === 'template' ? 'text-[#00C2D1] font-medium' : 'text-gray-400'}`}>
+            <span className={`w-5 h-5 rounded-full text-xs flex items-center justify-center ${step === 'form' || step === 'template' ? 'bg-[#00C2D1] text-white' : 'bg-gray-200 text-gray-500'}`}>2</span>
             設定
           </span>
         </div>
@@ -216,6 +268,19 @@ export function DeploymentNewPage() {
           <div className="space-y-4">
             <h1 className="text-xl font-semibold text-[#111827]">デプロイメントタイプを選択</h1>
             <div className="grid grid-cols-1 gap-3">
+              {/* テンプレートから作成 */}
+              <button
+                onClick={() => setStep('template')}
+                className="flex items-start gap-4 p-4 bg-white rounded-lg border border-[#00C2D1]/40 text-left hover:border-[#00C2D1] hover:shadow-sm transition-all group"
+              >
+                <span className="p-2.5 rounded-lg bg-[#00C2D1]/10 text-[#00C2D1] group-hover:bg-[#00C2D1]/20 transition-colors shrink-0">
+                  <LayoutTemplate className="w-5 h-5" />
+                </span>
+                <div>
+                  <p className="font-medium text-[#111827] mb-1">テンプレートから作成</p>
+                  <p className="text-sm text-gray-500 leading-relaxed">MySQL・PostgreSQL・Redis などのプリセット構成から素早くデプロイできます。</p>
+                </div>
+              </button>
               {DEPLOYMENT_TYPES.map(({ type, label, description, Icon }) => (
                 <button
                   key={type}
@@ -232,6 +297,124 @@ export function DeploymentNewPage() {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* テンプレートステップ */}
+        {step === 'template' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h1 className="text-xl font-semibold text-[#111827]">テンプレートを選択</h1>
+              <button
+                onClick={() => { setStep('type'); setSelectedTemplate(null); setTemplateError(null) }}
+                className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                ← 戻る
+              </button>
+            </div>
+
+            {templatesLoading && (
+              <p className="text-sm text-gray-400">テンプレートを読み込んでいます...</p>
+            )}
+
+            {!templatesLoading && templates.length === 0 && (
+              <p className="text-sm text-gray-400">テンプレートが見つかりませんでした。</p>
+            )}
+
+            {/* テンプレート一覧 */}
+            {!templatesLoading && templates.length > 0 && (
+              <div className="grid grid-cols-1 gap-3">
+                {templates.map((template) => (
+                  <button
+                    key={template.id}
+                    onClick={() => handleTemplateSelect(template)}
+                    className={`flex items-start gap-4 p-4 bg-white rounded-lg border text-left hover:shadow-sm transition-all ${selectedTemplate?.id === template.id ? 'border-[#00C2D1] ring-2 ring-[#00C2D1]/20' : 'border-gray-200 hover:border-[#00C2D1]'}`}
+                  >
+                    <span className={`p-2.5 rounded-lg shrink-0 ${selectedTemplate?.id === template.id ? 'bg-[#00C2D1]/10 text-[#00C2D1]' : 'bg-gray-50 text-gray-500'}`}>
+                      <LayoutTemplate className="w-5 h-5" />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-[#111827] mb-1">{template.name}</p>
+                      {template.description && (
+                        <p className="text-sm text-gray-500 leading-relaxed">{template.description}</p>
+                      )}
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{template.image_url}</span>
+                        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{template.instance_size}</span>
+                        {template.service_port > 0 && (
+                          <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded">ポート {template.service_port}</span>
+                        )}
+                        {(template.volumes ?? []).length > 0 && (
+                          <span className="text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded">ボリューム {(template.volumes ?? []).length}個</span>
+                        )}
+                        {(template.env_vars ?? []).length > 0 && (
+                          <span className="text-xs bg-green-50 text-green-600 px-2 py-0.5 rounded">環境変数 {(template.env_vars ?? []).length}個</span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* テンプレート選択後のフォーム */}
+            {selectedTemplate && (
+              <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-4">
+                <div>
+                  <label className={labelClass}>デプロイメント名 *</label>
+                  <input
+                    type="text"
+                    value={templateName}
+                    onChange={(event) => setTemplateName(event.target.value)}
+                    placeholder="my-app"
+                    maxLength={63}
+                    className={inputClass}
+                    autoFocus
+                  />
+                  <p className="text-xs text-gray-400 mt-1">英小文字・数字・ハイフンのみ、最大63文字</p>
+                </div>
+
+                {/* テンプレート内容プレビュー */}
+                <div className="pt-2 border-t border-gray-100 space-y-2">
+                  <p className="text-xs font-medium text-gray-500">作成されるリソース（変更不可）</p>
+                  <div className="text-xs text-gray-400 space-y-1">
+                    <p>イメージ: <span className="font-mono text-gray-600">{selectedTemplate.image_url}</span></p>
+                    <p>サイズ: <span className="text-gray-600">{selectedTemplate.instance_size}</span> / レプリカ: <span className="text-gray-600">{selectedTemplate.replicas}</span></p>
+                    {selectedTemplate.service_port > 0 && (
+                      <p>Service: <span className="text-gray-600">{selectedTemplate.service_port} → {selectedTemplate.service_target_port} ({selectedTemplate.service_type})</span></p>
+                    )}
+                    {(selectedTemplate.env_vars ?? []).map((envVar) => (
+                      <p key={envVar.key}>
+                        {envVar.is_secret ? '🔑' : '  '} {envVar.key}: <span className="font-mono text-gray-600">{envVar.auto_generate ? '（自動生成）' : envVar.value}</span>
+                      </p>
+                    ))}
+                    {(selectedTemplate.volumes ?? []).map((volume) => (
+                      <p key={volume.name}>📦 {volume.name}: <span className="text-gray-600">{volume.size_mb >= 1024 ? `${volume.size_mb / 1024}GB` : `${volume.size_mb}MB`} → {volume.mount_path}</span></p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* エラーメッセージ */}
+            {templateError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+                {templateError}
+              </div>
+            )}
+
+            {/* アクションボタン */}
+            {selectedTemplate && (
+              <div className="flex items-center justify-end">
+                <button
+                  onClick={() => void handleCreateFromTemplate()}
+                  disabled={templateCreating}
+                  className="bg-[#111827] text-white text-sm px-6 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
+                >
+                  {templateCreating ? '作成中...' : 'デプロイメントを作成 →'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -305,34 +488,48 @@ export function DeploymentNewPage() {
                     {ghError && <p className="text-xs text-red-500 mt-1">{ghError}</p>}
                   </div>
 
-                  {/* ブランチ選択 */}
-                  {ghBranches.length > 0 && (
-                    <div>
-                      <label className={labelClass}>ブランチ *</label>
+                  {/* ブランチ */}
+                  <div>
+                    <label className={labelClass}>ブランチ</label>
+                    <input
+                      type="text"
+                      value={formData.github_branch}
+                      onChange={(event) => setFormData(prev => ({ ...prev, github_branch: event.target.value }))}
+                      placeholder="main"
+                      className={inputClass}
+                    />
+                    {ghBranches.length > 0 && (
                       <select
                         value={formData.github_branch}
                         onChange={(event) => void handleBranchSelect(event.target.value)}
-                        className={inputClass}
+                        className={`${inputClass} mt-1`}
                       >
-                        <option value="">ブランチを選択してください</option>
+                        <option value="">— 一覧から選択 —</option>
                         {ghBranches.map(branchItem => (
                           <option key={branchItem.name} value={branchItem.name}>{branchItem.name}</option>
                         ))}
                       </select>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
-                  {/* コミット選択 */}
-                  {ghLoading === 'commits' && (
-                    <p className="text-xs text-gray-400">コミット・ディレクトリを取得中...</p>
-                  )}
-                  {ghCommits.length > 0 && (
-                    <div>
-                      <label className={labelClass}>コミット</label>
+                  {/* コミットSHA */}
+                  <div>
+                    <label className={labelClass}>コミットSHA（空欄で最新）</label>
+                    <input
+                      type="text"
+                      value={formData.github_commit_sha}
+                      onChange={(event) => setFormData(prev => ({ ...prev, github_commit_sha: event.target.value }))}
+                      placeholder="例: abc1234（空欄で最新）"
+                      className={`${inputClass} font-mono`}
+                    />
+                    {ghLoading === 'commits' && (
+                      <p className="text-xs text-gray-400 mt-1">コミット・ディレクトリを取得中...</p>
+                    )}
+                    {ghCommits.length > 0 && (
                       <select
                         value={formData.github_commit_sha}
                         onChange={(event) => setFormData(prev => ({ ...prev, github_commit_sha: event.target.value }))}
-                        className={`${inputClass} font-mono`}
+                        className={`${inputClass} font-mono mt-1`}
                       >
                         <option value="">最新のコミット（HEAD）</option>
                         {ghCommits.map(commitItem => (
@@ -341,29 +538,32 @@ export function DeploymentNewPage() {
                           </option>
                         ))}
                       </select>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
-                  {/* ディレクトリ選択 */}
-                  {ghCommits.length > 0 && ghLoading === null && (
-                    <div>
-                      <label className={labelClass}>ビルドディレクトリ</label>
-                      {ghDirs.length > 0 ? (
-                        <select
-                          value={formData.github_repo_directory}
-                          onChange={(event) => setFormData(prev => ({ ...prev, github_repo_directory: event.target.value }))}
-                          className={`${inputClass} font-mono`}
-                        >
-                          <option value="./">./（ルート）</option>
-                          {ghDirs.map(dirPath => (
-                            <option key={dirPath} value={dirPath}>{dirPath}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <p className="text-xs text-gray-400 py-2">サブディレクトリなし — ./（ルート）でビルドします</p>
-                      )}
-                    </div>
-                  )}
+                  {/* ビルドディレクトリ */}
+                  <div>
+                    <label className={labelClass}>ビルドディレクトリ</label>
+                    <input
+                      type="text"
+                      value={formData.github_repo_directory}
+                      onChange={(event) => setFormData(prev => ({ ...prev, github_repo_directory: event.target.value }))}
+                      placeholder="./"
+                      className={`${inputClass} font-mono`}
+                    />
+                    {ghDirs.length > 0 && (
+                      <select
+                        value={formData.github_repo_directory}
+                        onChange={(event) => setFormData(prev => ({ ...prev, github_repo_directory: event.target.value }))}
+                        className={`${inputClass} font-mono mt-1`}
+                      >
+                        <option value="./">./（ルート）</option>
+                        {ghDirs.map(dirPath => (
+                          <option key={dirPath} value={dirPath}>{dirPath}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
 
                   {/* Dockerfile パス */}
                   {selectedType === 'dockerfile' && (
@@ -426,7 +626,7 @@ export function DeploymentNewPage() {
               </button>
               <button
                 onClick={() => void handleCreate()}
-                disabled={creating || (selectedType !== 'image_url' && !formData.github_branch)}
+                disabled={creating}
                 className="bg-[#111827] text-white text-sm px-6 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
               >
                 {creating ? '作成中...' : 'デプロイメントを作成 →'}

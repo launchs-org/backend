@@ -232,6 +232,42 @@ export type VolumeMount = {
   updated_at: string
 }
 
+// ── DeploymentTemplate ────────────────────────────────────────
+
+export type TemplateEnvVar = {
+  key: string
+  value: string
+  is_secret: boolean
+  auto_generate: boolean
+  length: number
+}
+
+export type TemplateVolume = {
+  name: string
+  size_mb: number
+  mount_path: string
+}
+
+export type DeploymentTemplate = {
+  id: string
+  name: string
+  description: string
+  type: DeploymentType
+  image_url: string
+  instance_size: string
+  replicas: number
+  command: string[]
+  args: string[]
+  service_port: number
+  service_target_port: number
+  service_type: string
+  env_vars: TemplateEnvVar[] | null
+  volumes: TemplateVolume[] | null
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
 // ── Webhook ───────────────────────────────────────────────────
 
 export type Webhook = {
