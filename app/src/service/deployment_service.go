@@ -186,6 +186,10 @@ func (svc *deploymentServiceImpl) UpdateDeployment(ctx context.Context, userID s
 		return nil, err
 	}
 
+	if deploymentData.Status == models.DeploymentStatusNotInit { // not_init 状態では設定変更を禁止する
+		return nil, errors.New("not_init 状態のデプロイメントは設定変更できません。先にビルドを実行してください")
+	}
+
 	if req.Replicas != nil { // replicas が指定されている場合のみQuotaチェックを行う
 		if err := CheckReplicasQuota(ctx, svc.userQuotaRepo, userID, *req.Replicas); err != nil { // レプリカ数のQuotaチェックを行う
 			return nil, err // Quota超過エラーを返す
