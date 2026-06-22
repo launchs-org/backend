@@ -134,6 +134,10 @@ export function Layout({ children, breadcrumbs, actions, fullWidth }: LayoutProp
               </span>
             )
           })()}
+          <div className="w-px h-3 bg-gray-200 shrink-0" />
+          <span className="text-xs font-mono text-gray-500">
+            最大レプリカ: {quota.max_replicas_per_deployment}
+          </span>
         </footer>
       )}
     </div>
