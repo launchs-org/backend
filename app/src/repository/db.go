@@ -82,17 +82,17 @@ func seedMasterData() error {
 		}
 	}
 
-	// free プランを挿入する（存在しない場合のみ）
-	freePlan := models.Plan{
-		Name:                     "free",  // プラン名
-		MaxProjects:              3,       // プロジェクト上限
-		MaxDeployments:           5,       // デプロイメント上限
-		MaxReplicasPerDeployment: 2,       // レプリカ上限
-		MaxVolumes:               5,       // ボリューム数上限
-		MaxVolumeSizeMB:          10240,   // 1ボリューム最大サイズ（10GB）
-		MaxTotalVolumeMB:         51200,   // ボリューム総容量上限（50GB）
+	// free プランを挿入または更新する
+	freePlanAttrs := models.Plan{
+		MaxProjects:              3,     // プロジェクト上限
+		MaxDeployments:           5,     // デプロイメント上限
+		MaxReplicasPerDeployment: 2,     // レプリカ上限
+		MaxVolumes:               5,     // ボリューム数上限
+		MaxVolumeSizeMB:          10240, // 1ボリューム最大サイズ（10GB）
+		MaxTotalVolumeMB:         10240, // ボリューム総容量上限（10GB）
 	}
-	if err := Database.Where(models.Plan{Name: "free"}).FirstOrCreate(&freePlan).Error; err != nil {
+	freePlan := models.Plan{Name: "free"} // 検索キー
+	if err := Database.Where(models.Plan{Name: "free"}).Assign(freePlanAttrs).FirstOrCreate(&freePlan).Error; err != nil {
 		return fmt.Errorf("plans (free) シードデータの挿入に失敗しました: %w", err) // シードエラーを返す
 	}
 	FreePlanID = freePlan.ID // free プランの ID をパッケージ変数に保持する
@@ -125,15 +125,15 @@ func seedMasterData() error {
 		return fmt.Errorf("plans (enterprise) シードデータの挿入に失敗しました: %w", err) // シードエラーを返す
 	}
 
-	// free プランのインスタンスサイズ別上限を挿入する
+	// free プランのインスタンスサイズ別上限を挿入または更新する
 	freeInstanceLimitList := []models.PlanInstanceLimit{
-		{PlanID: freePlan.ID, InstanceSize: "small",  MaxCount: 5}, // small: 5台まで
-		{PlanID: freePlan.ID, InstanceSize: "medium", MaxCount: 2}, // medium: 2台まで
-		{PlanID: freePlan.ID, InstanceSize: "large",  MaxCount: 0}, // large: 使用不可
+		{PlanID: freePlan.ID, InstanceSize: "small",  MaxCount: 20}, // small: 20台まで
+		{PlanID: freePlan.ID, InstanceSize: "medium", MaxCount: 10}, // medium: 10台まで
+		{PlanID: freePlan.ID, InstanceSize: "large",  MaxCount: 5},  // large: 5台まで
 	}
 	for _, limitData := range freeInstanceLimitList {
-		if err := Database.Where(models.PlanInstanceLimit{PlanID: limitData.PlanID, InstanceSize: limitData.InstanceSize}).
-			FirstOrCreate(&limitData).Error; err != nil {
+		record := models.PlanInstanceLimit{PlanID: limitData.PlanID, InstanceSize: limitData.InstanceSize} // 検索キー
+		if err := Database.Where(record).Assign(models.PlanInstanceLimit{MaxCount: limitData.MaxCount}).FirstOrCreate(&record).Error; err != nil {
 			return fmt.Errorf("plan_instance_limits (free/%s) シードデータの挿入に失敗しました: %w", limitData.InstanceSize, err) // シードエラーを返す
 		}
 	}
