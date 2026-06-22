@@ -8,10 +8,16 @@ import (
 	"time"
 )
 
-// GetPodLogsResult は GetPodLogs の返却値
-type GetPodLogsResult struct {
+// PodLogsEntry は1 Pod 分のログを表す
+type PodLogsEntry struct {
+	PodName       string     `json:"pod_name"`       // Pod 名
 	Logs          string     `json:"logs"`           // 結合したログ文字列
 	LastTimestamp *time.Time `json:"last_timestamp"` // 最後のチャンクの CreatedAt（次回の since に使う）
+}
+
+// GetPodLogsResult は GetPodLogs の返却値
+type GetPodLogsResult struct {
+	Pods []PodLogsEntry `json:"pods"` // Pod ごとのログ一覧
 }
 
 // LogService は Pod ログ取得のビジネスロジックを定義するインターフェース
@@ -63,19 +69,36 @@ func (svc *logServiceImpl) GetPodLogs(ctx context.Context, userID string, deploy
 		return nil, err // 取得エラーを返す
 	}
 
-	// 4. チャンクを結合して返す
-	var logBuilder strings.Builder                       // ログ文字列ビルダーを生成する
-	for _, chunkData := range chunkList {                // 各チャンクを結合する
-		logBuilder.WriteString(chunkData.Content)        // チャンクの内容を追記する
+	// 4. チャンクを Pod 名でグループ化して結合する
+	podOrderList := make([]string, 0)                        // Pod 名の登場順を記録するスライスを生成する
+	podChunkMap := make(map[string][]models.PodLogChunk)     // Pod 名をキーにしたチャンクマップを生成する
+	for _, chunkData := range chunkList {                    // 各チャンクを Pod 名でグループ化する
+		if _, exists := podChunkMap[chunkData.PodName]; !exists { // Pod 名が未登録の場合は順序リストに追加する
+			podOrderList = append(podOrderList, chunkData.PodName) // 登場順を記録する
+		}
+		podChunkMap[chunkData.PodName] = append(podChunkMap[chunkData.PodName], chunkData) // Pod 名に対応するチャンクを追加する
+	}
+
+	podEntryList := make([]PodLogsEntry, 0, len(podOrderList)) // Pod ごとのログエントリ一覧を生成する
+	for _, podName := range podOrderList {                     // 登場順に Pod ごとのエントリを生成する
+		chunks := podChunkMap[podName]                         // 対応するチャンク一覧を取得する
+		var logBuilder strings.Builder                         // ログ文字列ビルダーを生成する
+		for _, chunkData := range chunks {                     // 各チャンクを結合する
+			logBuilder.WriteString(chunkData.Content)          // チャンクの内容を追記する
+		}
+		entry := PodLogsEntry{ // Pod ログエントリを生成する
+			PodName: podName,         // Pod 名を設定する
+			Logs:    logBuilder.String(), // 結合したログ文字列を設定する
+		}
+		if len(chunks) > 0 { // チャンクが1件以上ある場合は最後のチャンクの CreatedAt を設定する
+			lastTimestamp := chunks[len(chunks)-1].CreatedAt // 最後のチャンクの CreatedAt を取得する
+			entry.LastTimestamp = &lastTimestamp             // LastTimestamp を設定する
+		}
+		podEntryList = append(podEntryList, entry) // エントリ一覧に追加する
 	}
 
 	result := &GetPodLogsResult{ // 結果を生成する
-		Logs: logBuilder.String(), // 結合したログ文字列を設定する
-	}
-
-	if len(chunkList) > 0 { // チャンクが1件以上ある場合は最後のチャンクの CreatedAt を設定する
-		lastTimestamp := chunkList[len(chunkList)-1].CreatedAt // 最後のチャンクの CreatedAt を取得する
-		result.LastTimestamp = &lastTimestamp                  // LastTimestamp を設定する
+		Pods: podEntryList, // Pod ごとのログ一覧を設定する
 	}
 
 	return result, nil // 結果を返す

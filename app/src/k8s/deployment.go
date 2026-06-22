@@ -348,9 +348,25 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kub
 	}
 }
 
-// streamAndSavePodLogs は app=deploymentName ラベルの Pod のログをリアルタイムで取得し、chunk 単位で DB に保存する
+// streamAndSavePodLogs は app=deploymentName ラベルの Pod を取得し、Pod ごとに goroutine でログを収集・保存する
 func streamAndSavePodLogs(ctx context.Context, k8sClient kubernetes.Interface, podLogChunkRepo repository.PodLogChunkRepository, deploymentID, namespace, deploymentName string) {
-	logCh := collectDeploymentPodLogs(ctx, k8sClient, namespace, deploymentName) // Pod のログをチャンネルで取得する
+	podList, err := waitForDeploymentPod(ctx, k8sClient, namespace, deploymentName) // Pod が起動するまで待機する
+	if err != nil {
+		if ctx.Err() == nil { // コンテキストキャンセル以外のエラーをログ出力する
+			logger.PrintErr("WatchDeployments: Pod 取得に失敗しました（deploymentName=" + deploymentName + "）: " + err.Error()) // エラーをログ出力する
+		}
+		return
+	}
+
+	for podIndex := range podList { // 各 Pod ごとにログ収集 goroutine を起動する
+		pod := &podList[podIndex]
+		go streamAndSaveSinglePodLogs(ctx, k8sClient, podLogChunkRepo, deploymentID, namespace, pod.Name) // Pod 単体のログ収集を goroutine で開始する
+	}
+}
+
+// streamAndSaveSinglePodLogs は指定した1つの Pod の全コンテナのログをリアルタイムで取得し、chunk 単位で DB に保存する
+func streamAndSaveSinglePodLogs(ctx context.Context, k8sClient kubernetes.Interface, podLogChunkRepo repository.PodLogChunkRepository, deploymentID, namespace, podName string) {
+	logCh := collectSinglePodLogs(ctx, k8sClient, namespace, podName) // 1 Pod のログをチャンネルで取得する
 
 	ticker := time.NewTicker(3 * time.Second) // 3秒ごとにバッファをフラッシュするタイマーを生成する
 	defer ticker.Stop()                       // 終了時にタイマーを停止する
@@ -363,10 +379,11 @@ func streamAndSavePodLogs(ctx context.Context, k8sClient kubernetes.Interface, p
 		}
 		chunk := &models.PodLogChunk{ // ログチャンクレコードを生成する
 			DeploymentID: deploymentID, // デプロイメントIDを設定する
+			PodName:      podName,      // Pod 名を設定する
 			Content:      buf.String(), // バッファの内容を設定する
 		}
 		if err := podLogChunkRepo.Create(ctx, chunk); err != nil { // DB に保存する
-			logger.PrintErr("WatchDeployments: Podログチャンク保存に失敗しました（deploymentID=" + deploymentID + "）: " + err.Error()) // エラーをログ出力する
+			logger.PrintErr("WatchDeployments: Podログチャンク保存に失敗しました（deploymentID=" + deploymentID + ", pod=" + podName + "）: " + err.Error()) // エラーをログ出力する
 		}
 		buf.Reset() // バッファをリセットする
 	}
@@ -390,34 +407,30 @@ func streamAndSavePodLogs(ctx context.Context, k8sClient kubernetes.Interface, p
 	}
 }
 
-// collectDeploymentPodLogs は app=deploymentName ラベルの Pod を取得し、全コンテナのログをチャンネルで返す
-func collectDeploymentPodLogs(ctx context.Context, k8sClient kubernetes.Interface, namespace, deploymentName string) <-chan string {
+// collectSinglePodLogs は指定した Pod の全コンテナのログをチャンネルで返す
+func collectSinglePodLogs(ctx context.Context, k8sClient kubernetes.Interface, namespace, podName string) <-chan string {
 	logCh := make(chan string, 100) // ログ行を送るチャンネルを生成する
 
 	go func() {
 		defer close(logCh) // 終了時にチャンネルをクローズする
 
-		podList, err := waitForDeploymentPod(ctx, k8sClient, namespace, deploymentName) // Pod が起動するまで待機する
+		podData, err := k8sClient.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{}) // Pod の詳細を取得する
 		if err != nil {
 			if ctx.Err() == nil { // コンテキストキャンセル以外のエラーをログ出力する
-				logger.PrintErr("WatchDeployments: Pod 取得に失敗しました（deploymentName=" + deploymentName + "）: " + err.Error()) // エラーをログ出力する
+				logger.PrintErr("WatchDeployments: Pod 詳細取得に失敗しました（pod=" + podName + "）: " + err.Error()) // エラーをログ出力する
 			}
 			return
 		}
 
-		for podIndex := range podList { // 各 Pod のログを取得する
-			pod := &podList[podIndex]
+		containerNames := make([]string, 0) // コンテナ名一覧を初期化する
+		for containerIndex := range podData.Spec.Containers {
+			containerNames = append(containerNames, podData.Spec.Containers[containerIndex].Name) // container 名を追加する
+		}
 
-			containerNames := make([]string, 0) // コンテナ名一覧を初期化する
-			for containerIndex := range pod.Spec.Containers {
-				containerNames = append(containerNames, pod.Spec.Containers[containerIndex].Name) // container 名を追加する
-			}
-
-			for _, containerName := range containerNames { // 各コンテナのログをストリームする
-				if err := streamPodContainerLog(ctx, k8sClient, namespace, pod.Name, containerName, logCh); err != nil { // コンテナのログをストリームする
-					if ctx.Err() == nil { // コンテキストキャンセル以外のエラーをログ出力する
-						logger.PrintErr("WatchDeployments: コンテナログ取得に失敗しました（pod=" + pod.Name + ", container=" + containerName + "）: " + err.Error()) // エラーをログ出力する
-					}
+		for _, containerName := range containerNames { // 各コンテナのログをストリームする
+			if err := streamPodContainerLog(ctx, k8sClient, namespace, podName, containerName, logCh); err != nil { // コンテナのログをストリームする
+				if ctx.Err() == nil { // コンテキストキャンセル以外のエラーをログ出力する
+					logger.PrintErr("WatchDeployments: コンテナログ取得に失敗しました（pod=" + podName + ", container=" + containerName + "）: " + err.Error()) // エラーをログ出力する
 				}
 			}
 		}

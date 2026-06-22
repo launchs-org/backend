@@ -38,13 +38,15 @@ func newGetPodLogsHandlerTestContext(deploymentID string, since string) (echo.Co
 	return echoCtx, recorder
 }
 
-// TestGetPodLogs_正常系 は Pod ログが正常に取得できることを確認する
+// TestGetPodLogs_正常系 は Pod ログが正常に Pod ごとの配列形式で取得できることを確認する
 func TestGetPodLogs_正常系(t *testing.T) {
-	expectedLogs := "line1\nline2\n" // 期待するログ文字列を設定する
-
 	mockSvc := &mockLogService{
 		getPodLogsFunc: func(ctx context.Context, userID string, deploymentID string, since *time.Time) (*service.GetPodLogsResult, error) {
-			return &service.GetPodLogsResult{Logs: expectedLogs}, nil // テスト用ログを返す
+			return &service.GetPodLogsResult{ // テスト用レスポンスを返す
+				Pods: []service.PodLogsEntry{
+					{PodName: "my-app-xxx", Logs: "line1\nline2\n"}, // 1 Pod 目のエントリ
+				},
+			}, nil
 		},
 	}
 
@@ -63,16 +65,20 @@ func TestGetPodLogs_正常系(t *testing.T) {
 	if err := json.NewDecoder(recorder.Body).Decode(&responseBody); err != nil {
 		t.Fatalf("レスポンスボディのデコードに失敗しました: %v", err)
 	}
-	if responseBody["logs"] != expectedLogs { // ログ内容を確認する
-		t.Errorf("期待するログ %q、実際のログ %q", expectedLogs, responseBody["logs"])
+	pods, ok := responseBody["pods"].([]interface{}) // pods フィールドが配列であることを確認する
+	if !ok {
+		t.Fatal("レスポンスに pods フィールドがありません")
+	}
+	if len(pods) != 1 { // Pod 数を確認する
+		t.Errorf("期待する Pod 数 1、実際の Pod 数 %d", len(pods))
 	}
 }
 
-// TestGetPodLogs_チャンクなし は Pod ログが空の場合に last_timestamp が null で返ることを確認する
+// TestGetPodLogs_チャンクなし は Pod ログが空の場合に pods が空配列で返ることを確認する
 func TestGetPodLogs_チャンクなし(t *testing.T) {
 	mockSvc := &mockLogService{
 		getPodLogsFunc: func(ctx context.Context, userID string, deploymentID string, since *time.Time) (*service.GetPodLogsResult, error) {
-			return &service.GetPodLogsResult{Logs: "", LastTimestamp: nil}, nil // 空ログを返す
+			return &service.GetPodLogsResult{Pods: []service.PodLogsEntry{}}, nil // 空 pods を返す
 		},
 	}
 
@@ -91,8 +97,12 @@ func TestGetPodLogs_チャンクなし(t *testing.T) {
 	if err := json.NewDecoder(recorder.Body).Decode(&responseBody); err != nil {
 		t.Fatalf("レスポンスボディのデコードに失敗しました: %v", err)
 	}
-	if responseBody["last_timestamp"] != nil { // last_timestamp が nil であることを確認する
-		t.Errorf("last_timestamp が nil ではありません: %v", responseBody["last_timestamp"])
+	pods, ok := responseBody["pods"].([]interface{}) // pods フィールドが配列であることを確認する
+	if !ok {
+		t.Fatal("レスポンスに pods フィールドがありません")
+	}
+	if len(pods) != 0 { // 空配列であることを確認する
+		t.Errorf("期待する Pod 数 0、実際の Pod 数 %d", len(pods))
 	}
 }
 
@@ -102,8 +112,8 @@ func TestGetPodLogs_since指定(t *testing.T) {
 
 	mockSvc := &mockLogService{
 		getPodLogsFunc: func(ctx context.Context, userID string, deploymentID string, since *time.Time) (*service.GetPodLogsResult, error) {
-			capturedSince = since                                              // since を記録する
-			return &service.GetPodLogsResult{Logs: "line3\n"}, nil // テスト用ログを返す
+			capturedSince = since                                                                                    // since を記録する
+			return &service.GetPodLogsResult{Pods: []service.PodLogsEntry{{PodName: "pod-1", Logs: "line3\n"}}}, nil // テスト用ログを返す
 		},
 	}
 
