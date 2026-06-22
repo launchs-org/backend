@@ -167,6 +167,9 @@ func (mock *mockDeploymentRepo) UpdateCurrentBuildID(ctx context.Context, deploy
 func (mock *mockDeploymentRepo) ClearCurrentBuildID(ctx context.Context, deploymentID string) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
+func (mock *mockDeploymentRepo) CreateWithTx(ctx context.Context, tx *gorm.DB, deployment *models.Deployment) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
 
 // mockEnvVarMountRepoForDeployment は EnvVarMountRepository のテスト用モック
 type mockEnvVarMountRepoForDeployment struct {

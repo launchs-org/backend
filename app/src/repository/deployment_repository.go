@@ -11,6 +11,7 @@ import (
 // DeploymentRepository は deployments テーブルへのアクセスを定義するインターフェース
 type DeploymentRepository interface {
 	Create(ctx context.Context, deployment *models.Deployment) error                                              // deployment を作成する
+	CreateWithTx(ctx context.Context, tx *gorm.DB, deployment *models.Deployment) error                           // トランザクション内で deployment を作成する
 	FindByID(ctx context.Context, deploymentID string) (*models.Deployment, error)                                // deployment を ID で取得する
 	FindByIDForUpdate(ctx context.Context, tx *gorm.DB, deploymentID string) (*models.Deployment, error)          // SELECT FOR UPDATE で deployment を取得する
 	FindAllByProjectID(ctx context.Context, projectID string) ([]models.Deployment, error)                        // projectID に紐づく deployment 一覧を取得する
@@ -41,6 +42,11 @@ func NewDeploymentRepository(db *gorm.DB) DeploymentRepository {
 // Create は deployment レコードを作成する
 func (repo *deploymentRepositoryImpl) Create(ctx context.Context, deployment *models.Deployment) error {
 	return repo.db.WithContext(ctx).Create(deployment).Error // db を使って作成する
+}
+
+// CreateWithTx はトランザクション内で deployment レコードを作成する
+func (repo *deploymentRepositoryImpl) CreateWithTx(ctx context.Context, tx *gorm.DB, deployment *models.Deployment) error {
+	return tx.WithContext(ctx).Create(deployment).Error // tx を使って作成する
 }
 
 // FindByID は deploymentID に対応する deployment を返す
@@ -197,6 +203,7 @@ func (repo *deploymentRepositoryImpl) Delete(ctx context.Context, deploymentID s
 // ServiceRepository は services テーブルへのアクセスを定義するインターフェース
 type ServiceRepository interface {
 	Create(ctx context.Context, service *models.Service) error                                                   // service を作成する
+	CreateWithTx(ctx context.Context, tx *gorm.DB, service *models.Service) error                                // トランザクション内で service を作成する
 	FindByDeploymentID(ctx context.Context, deploymentID string) (*models.Service, error)                        // deploymentID に紐づく service を取得する
 	FindByServiceID(ctx context.Context, serviceID string) (*models.Service, error)                              // serviceID に紐づく service を取得する
 	Update(ctx context.Context, service *models.Service) error                                                   // service を更新する
@@ -217,6 +224,11 @@ func NewServiceRepository(db *gorm.DB) ServiceRepository {
 // Create は service レコードを作成する
 func (repo *serviceRepositoryImpl) Create(ctx context.Context, service *models.Service) error {
 	return repo.db.WithContext(ctx).Create(service).Error // db を使って作成する
+}
+
+// CreateWithTx はトランザクション内で service レコードを作成する
+func (repo *serviceRepositoryImpl) CreateWithTx(ctx context.Context, tx *gorm.DB, service *models.Service) error {
+	return tx.WithContext(ctx).Create(service).Error // tx を使って作成する
 }
 
 // FindByDeploymentID は deploymentID に対応する service を返す

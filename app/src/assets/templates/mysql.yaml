@@ -1,0 +1,26 @@
+name: mysql
+description: "MySQL データベーステンプレート"
+image_url: mysql:8.0
+instance_size: small
+replicas: 1
+command: []
+args: []
+
+service:
+  port: 3306
+  target_port: 3306
+  type: ClusterIP
+
+env_vars:
+  - key: MYSQL_ROOT_PASSWORD
+    auto_generate: true
+    length: 32
+    is_secret: true
+  - key: MYSQL_DATABASE
+    value: app
+    is_secret: false
+
+volumes:
+  - name: mysql-data
+    size_mb: 10240
+    mount_path: /var/lib/mysql

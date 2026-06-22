@@ -10,15 +10,16 @@ import (
 
 // RouterOptions はルーター生成に必要なハンドラーをまとめた構造体
 type RouterOptions struct {
-	UserQuotaHandler    *handler.UserQuotaHandler    // quota ハンドラー
-	ProjectHandler      *handler.ProjectHandler      // project ハンドラー
-	DeploymentHandler   *handler.DeploymentHandler   // deployment ハンドラー
-	IngressRouteHandler *handler.IngressRouteHandler // ingress_route ハンドラー
-	EnvVarHandler       *handler.EnvVarHandler       // env_var ハンドラー
-	VolumeHandler       *handler.VolumeHandler       // volume ハンドラー
-	BuildHandler        *handler.BuildHandler        // build ハンドラー
-	WebhookHandler      *handler.WebhookHandler      // webhook ハンドラー
-	LogHandler          *handler.LogHandler          // log ハンドラー
+	UserQuotaHandler           *handler.UserQuotaHandler           // quota ハンドラー
+	ProjectHandler             *handler.ProjectHandler             // project ハンドラー
+	DeploymentHandler          *handler.DeploymentHandler          // deployment ハンドラー
+	DeploymentTemplateHandler  *handler.DeploymentTemplateHandler  // deployment template ハンドラー
+	IngressRouteHandler        *handler.IngressRouteHandler        // ingress_route ハンドラー
+	EnvVarHandler              *handler.EnvVarHandler              // env_var ハンドラー
+	VolumeHandler              *handler.VolumeHandler              // volume ハンドラー
+	BuildHandler               *handler.BuildHandler               // build ハンドラー
+	WebhookHandler             *handler.WebhookHandler             // webhook ハンドラー
+	LogHandler                 *handler.LogHandler                 // log ハンドラー
 }
 
 // New はミドルウェアとルーティングを設定した Echo インスタンスを返す
@@ -30,6 +31,9 @@ func New(opts RouterOptions) *echo.Echo {
 
 	// 認証必須の API グループを作成する
 	apiGroup := router.Group("/api/v1", middlewares.RequireAuth)
+
+	// 管理者専用の API グループを作成する
+	adminGroup := router.Group("/api/v1", middlewares.RequireAuth, middlewares.RequireAdmin)
 
 	// quota エンドポイントを登録する
 	apiGroup.GET("/users/quota", opts.UserQuotaHandler.GetQuota)    // quota 取得エンドポイント
@@ -103,6 +107,16 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.GET("/deployments/:id/volume-mounts", opts.VolumeHandler.ListVolumeMounts)    // volume-mount 一覧取得エンドポイント
 	apiGroup.POST("/deployments/:id/volume-mounts", opts.VolumeHandler.CreateVolumeMount)  // volume-mount 作成エンドポイント
 	apiGroup.DELETE("/volume-mounts/:id", opts.VolumeHandler.DeleteVolumeMount)            // volume-mount 削除エンドポイント
+
+	// deployment-templates エンドポイントを登録する（全認証ユーザー向け）
+	apiGroup.GET("/deployment-templates", opts.DeploymentTemplateHandler.ListTemplates)          // テンプレート一覧取得エンドポイント
+	apiGroup.GET("/deployment-templates/:id", opts.DeploymentTemplateHandler.GetTemplate)        // テンプレート詳細取得エンドポイント
+	apiGroup.POST("/projects/:id/deployments/from-template", opts.DeploymentTemplateHandler.CreateDeploymentFromTemplate) // テンプレートからデプロイメント作成エンドポイント
+
+	// deployment-templates 管理者専用エンドポイントを登録する
+	adminGroup.POST("/deployment-templates", opts.DeploymentTemplateHandler.CreateTemplate)         // テンプレート作成エンドポイント（管理者専用）
+	adminGroup.PUT("/deployment-templates/:id", opts.DeploymentTemplateHandler.UpdateTemplate)      // テンプレート更新エンドポイント（管理者専用）
+	adminGroup.DELETE("/deployment-templates/:id", opts.DeploymentTemplateHandler.DeleteTemplate)   // テンプレート削除エンドポイント（管理者専用）
 
 	return router
 }

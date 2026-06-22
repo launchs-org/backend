@@ -116,6 +116,11 @@ func main() {
 	webhookServiceImpl := service.NewWebhookService(webhookRepo, deploymentRepo, projectRepo, applyServiceImpl)                                       // webhook サービスを生成する
 	webhookHandler := handler.NewWebhookHandler(webhookServiceImpl)                                                                                  // webhook ハンドラーを生成する
 
+	// deployment-template ハンドラーを DI 組み立てする
+	deploymentTemplateRepo := repository.NewDeploymentTemplateRepository(repository.Database)                                                            // deployment template リポジトリを生成する
+	deploymentTemplateServiceImpl := service.NewDeploymentTemplateService(repository.Database, deploymentTemplateRepo, deploymentRepo, serviceRepo, envVarRepo, envVarMountRepo, volumeRepo, volumeMountRepo, projectRepo, userQuotaRepo) // deployment template サービスを生成する
+	deploymentTemplateHandler := handler.NewDeploymentTemplateHandler(deploymentTemplateServiceImpl)                                                     // deployment template ハンドラーを生成する
+
 	// 各 Watcher をリーダーエレクション経由でバックグラウンドで起動する
 	go leader.RunAsLeader(context.Background(), repository.Database, func(ctx context.Context) { // リーダーになった Pod のみ Watcher を起動する
 		go k8s.WatchServices(ctx, k8sClient, serviceRepo)                               // k8s Service の状態変化を監視して DB を自動更新する
@@ -128,15 +133,16 @@ func main() {
 
 	// ルーターを生成してサーバーを起動する
 	echoRouter := router.New(router.RouterOptions{
-		UserQuotaHandler:    userQuotaHandler,    // quota ハンドラーを注入する
-		ProjectHandler:      projectHandler,      // project ハンドラーを注入する
-		DeploymentHandler:   deploymentHandler,   // deployment ハンドラーを注入する
-		IngressRouteHandler: ingressRouteHandler, // ingress_route ハンドラーを注入する
-		EnvVarHandler:       envVarHandler,       // env_var ハンドラーを注入する
-		VolumeHandler:       volumeHandler,       // volume ハンドラーを注入する
-		BuildHandler:        buildHandler,        // build ハンドラーを注入する
-		WebhookHandler:      webhookHandler,      // webhook ハンドラーを注入する
-		LogHandler:          logHandler,          // log ハンドラーを注入する
+		UserQuotaHandler:          userQuotaHandler,          // quota ハンドラーを注入する
+		ProjectHandler:            projectHandler,            // project ハンドラーを注入する
+		DeploymentHandler:         deploymentHandler,         // deployment ハンドラーを注入する
+		DeploymentTemplateHandler: deploymentTemplateHandler, // deployment template ハンドラーを注入する
+		IngressRouteHandler:       ingressRouteHandler,       // ingress_route ハンドラーを注入する
+		EnvVarHandler:             envVarHandler,             // env_var ハンドラーを注入する
+		VolumeHandler:             volumeHandler,             // volume ハンドラーを注入する
+		BuildHandler:              buildHandler,              // build ハンドラーを注入する
+		WebhookHandler:            webhookHandler,            // webhook ハンドラーを注入する
+		LogHandler:                logHandler,                // log ハンドラーを注入する
 	})
 	if err := echoRouter.Start(":" + cfg.GetServerPort()); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("サーバーの起動に失敗しました", "error", err) // サーバー起動失敗時にエラーログを出す

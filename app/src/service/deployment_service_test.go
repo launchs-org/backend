@@ -97,6 +97,9 @@ func (mock *mockDeploymentRepository) ClearCurrentBuildID(ctx context.Context, d
 func (mock *mockDeploymentRepository) FindAllRunning(ctx context.Context) ([]models.Deployment, error) {
 	return nil, nil // テストでは使用しないためデフォルト nil を返す
 }
+func (mock *mockDeploymentRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, deployment *models.Deployment) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
 
 // mockServiceRepository は ServiceRepository のテスト用モック実装
 type mockServiceRepository struct {
@@ -141,6 +144,9 @@ func (mock *mockServiceRepository) UpdateStatus(ctx context.Context, serviceID s
 
 func (mock *mockServiceRepository) Delete(ctx context.Context, serviceID string) error {
 	return nil // デフォルトは成功を返す
+}
+func (mock *mockServiceRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, service *models.Service) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
 // mockProjectRepository は ProjectRepository のテスト用モック実装（所有権チェック用）

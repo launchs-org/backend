@@ -1,11 +1,14 @@
 package repository
 
 import (
+	"app/assets"
 	"app/logger"
 	"app/models"
+	"encoding/json"
 	"fmt"
 	"os"
 
+	"gopkg.in/yaml.v3"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -164,8 +167,70 @@ func seedMasterData() error {
 		}
 	}
 
+	// 埋め込み YAML テンプレートを deployment_templates テーブルへ upsert する
+	if err := seedDeploymentTemplates(); err != nil {
+		return err // テンプレートシードエラーを返す
+	}
+
 	logger.Println("マスターデータのシードが完了しました")
 	return nil
+}
+
+// seedDeploymentTemplates は assets/templates/*.yaml を読み込んで deployment_templates テーブルへ upsert する
+func seedDeploymentTemplates() error {
+	entries, err := assets.TemplateFS.ReadDir("templates") // 埋め込みテンプレート一覧を取得する
+	if err != nil {
+		return fmt.Errorf("テンプレートディレクトリの読み込みに失敗しました: %w", err) // 読み込みエラーを返す
+	}
+	for _, entry := range entries { // 各 YAML ファイルを処理する
+		data, err := assets.TemplateFS.ReadFile("templates/" + entry.Name()) // YAML ファイルを読み込む
+		if err != nil {
+			return fmt.Errorf("テンプレートファイルの読み込みに失敗しました (%s): %w", entry.Name(), err) // 読み込みエラーを返す
+		}
+		var yamlData models.TemplateYAML                                                          // YAML 中間構造体を定義する
+		if err := yaml.Unmarshal(data, &yamlData); err != nil {                                   // YAML をパースする
+			return fmt.Errorf("テンプレート YAML のパースに失敗しました (%s): %w", entry.Name(), err) // パースエラーを返す
+		}
+
+		envVarsJSON, err := json.Marshal(yamlData.EnvVars) // 環境変数を JSON に変換する
+		if err != nil {
+			return fmt.Errorf("環境変数の JSON 変換に失敗しました (%s): %w", entry.Name(), err) // 変換エラーを返す
+		}
+		volumesJSON, err := json.Marshal(yamlData.Volumes) // ボリュームを JSON に変換する
+		if err != nil {
+			return fmt.Errorf("ボリュームの JSON 変換に失敗しました (%s): %w", entry.Name(), err) // 変換エラーを返す
+		}
+
+		templateRecord := models.DeploymentTemplate{ // テンプレートレコードを構築する
+			Name:         yamlData.Name,                     // テンプレート名を設定する
+			Description:  yamlData.Description,              // 説明を設定する
+			Type:         models.DeploymentTypeImageURL,     // image_url 固定
+			ImageURL:     yamlData.ImageURL,                 // イメージ URL を設定する
+			InstanceSize: yamlData.InstanceSize,             // インスタンスサイズを設定する
+			Replicas:     yamlData.Replicas,                 // レプリカ数を設定する
+			Command:      yamlData.Command,                  // コマンドを設定する
+			Args:         yamlData.Args,                     // 引数を設定する
+			EnvVars:      envVarsJSON,                       // 環境変数 JSON を設定する
+			Volumes:      volumesJSON,                       // ボリューム JSON を設定する
+			CreatedBy:    "system",                          // システムシードであることを示す
+		}
+		if yamlData.Service != nil { // サービス設定がある場合は設定する
+			templateRecord.ServicePort = yamlData.Service.Port                          // 公開ポートを設定する
+			templateRecord.ServiceTargetPort = yamlData.Service.TargetPort              // ターゲットポートを設定する
+			templateRecord.ServiceType = models.ServiceType(yamlData.Service.Type)      // サービスタイプを設定する
+		}
+		if templateRecord.InstanceSize == "" {
+			templateRecord.InstanceSize = "small" // インスタンスサイズのデフォルトを設定する
+		}
+		if templateRecord.Replicas == 0 {
+			templateRecord.Replicas = 1 // レプリカ数のデフォルトを設定する
+		}
+
+		if err := Database.Where("name = ?", templateRecord.Name).Assign(templateRecord).FirstOrCreate(&templateRecord).Error; err != nil {
+			return fmt.Errorf("テンプレートシードの upsert に失敗しました (%s): %w", yamlData.Name, err) // upsert エラーを返す
+		}
+	}
+	return nil // シード完了を返す
 }
 
 func AutoMigrate() error {
@@ -189,5 +254,6 @@ func AutoMigrate() error {
 		&models.EnvVarMount{},
 		&models.Volume{},
 		&models.VolumeMount{},
+		&models.DeploymentTemplate{},
 	)
 }

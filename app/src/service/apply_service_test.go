@@ -406,6 +406,9 @@ func (mock *applyHistoryMockDeploymentRepository) ClearCurrentBuildID(ctx contex
 func (mock *applyHistoryMockDeploymentRepository) FindAllRunning(ctx context.Context) ([]models.Deployment, error) {
 	return nil, nil // テストでは使用しないためデフォルト nil を返す
 }
+func (mock *applyHistoryMockDeploymentRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, deployment *models.Deployment) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
 
 // applyHistoryMockProjectRepository は Apply テスト専用の ProjectRepository モック
 type applyHistoryMockProjectRepository struct {
