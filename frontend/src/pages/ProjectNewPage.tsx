@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Layout } from '@/components/Layout'
-import { post } from '@/lib/api'
+import { post, QuotaExceededApiError } from '@/lib/api'
 import type { Project } from '@/lib/types'
 
 export function ProjectNewPage() {
@@ -24,7 +24,11 @@ export function ProjectNewPage() {
       navigate(`/projects/${project.id}`) // 作成したプロジェクトの詳細ページへ遷移する
     } catch (createError) {
       console.error(createError)
-      setError('プロジェクトの作成に失敗しました')
+      if (createError instanceof QuotaExceededApiError) {
+        setError(createError.message)
+      } else {
+        setError('プロジェクトの作成に失敗しました')
+      }
     } finally {
       setCreating(false)
     }

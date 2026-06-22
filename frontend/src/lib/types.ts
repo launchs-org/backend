@@ -150,13 +150,25 @@ export type BuildLogsResponse = {
 
 export type Quota = {
   user_id: string
+  plan_id: string
   max_projects: number
   max_deployments: number
   max_replicas_per_deployment: number
-  max_volume_mb: number
+  max_volumes: number
+  max_volume_size_mb: number
+  max_total_volume_mb: number
+  instance_limits: Record<string, number>
   current_projects: number
   current_deployments: number
-  current_volume_mb: number
+  current_volumes: number
+  current_total_volume_mb: number
+}
+
+export type QuotaExceededError = {
+  error: 'quota_exceeded'
+  resource: string
+  current: number
+  limit: number
 }
 
 // ── EnvVar ────────────────────────────────────────────────────

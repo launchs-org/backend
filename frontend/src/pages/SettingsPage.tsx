@@ -47,9 +47,20 @@ export function SettingsPage() {
                 max={quota.max_replicas_per_deployment}
               />
               <QuotaRow
-                label="ボリュームストレージ"
-                current={quota.current_volume_mb}
-                max={quota.max_volume_mb}
+                label="ボリューム数"
+                current={quota.current_volumes}
+                max={quota.max_volumes}
+              />
+              <QuotaRow
+                label="ボリューム総容量"
+                current={quota.current_total_volume_mb}
+                max={quota.max_total_volume_mb}
+                unit="MB"
+              />
+              <QuotaRow
+                label="1ボリューム最大サイズ"
+                current={0}
+                max={quota.max_volume_size_mb}
                 unit="MB"
               />
             </div>

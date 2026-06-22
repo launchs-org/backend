@@ -81,7 +81,7 @@ export function DashboardPage() {
             <div className="grid grid-cols-3 gap-4">
               <QuotaBar label="プロジェクト" current={quota.current_projects} max={quota.max_projects} />
               <QuotaBar label="デプロイメント" current={quota.current_deployments} max={quota.max_deployments} />
-              <QuotaBar label="ボリューム" current={quota.current_volume_mb} max={quota.max_volume_mb} />
+              <QuotaBar label="ボリューム" current={quota.current_volumes} max={quota.max_volumes} />
             </div>
           </div>
         )}

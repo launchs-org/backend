@@ -116,6 +116,31 @@ export class ApiError extends Error {
   }
 }
 
+export class QuotaExceededApiError extends Error {
+  resource: string
+  current: number
+  limit: number
+
+  constructor(resource: string, current: number, limit: number) {
+    const resourceLabel: Record<string, string> = {
+      projects: 'プロジェクト',
+      deployments: 'デプロイメント',
+      replicas: 'レプリカ数',
+      volumes: 'ボリューム数',
+      volume_size_mb: 'ボリュームサイズ',
+      total_volume_mb: 'ボリューム総容量',
+    }
+    const label = resource.startsWith('instance:')
+      ? `インスタンス（${resource.replace('instance:', '')}）`
+      : (resourceLabel[resource] ?? resource)
+    super(`${label}の上限（${limit}）に達しています（現在: ${current}）`)
+    this.resource = resource
+    this.current = current
+    this.limit = limit
+    this.name = 'QuotaExceededApiError'
+  }
+}
+
 // ── fetch ラッパー ────────────────────────────────────────────
 
 async function buildHeaders(): Promise<Record<string, string>> {
@@ -143,6 +168,9 @@ async function handleResponse<T>(res: Response): Promise<T> {
   const json = await res.json() // レスポンスをJSONとして解析する
 
   if (!res.ok) {
+    if (res.status === 403 && json?.error === 'quota_exceeded') {
+      throw new QuotaExceededApiError(json.resource, json.current, json.limit) // quota 超過エラーを専用クラスで throw する
+    }
     const err = json?.error ?? { code: 'UNKNOWN', message: `HTTP ${res.status}` }
     throw new ApiError(err.code ?? 'UNKNOWN', err.message ?? String(res.status), res.status)
   }

@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Container, GitBranch, Package } from 'lucide-react'
 import { Layout } from '@/components/Layout'
-import { post } from '@/lib/api'
+import { post, QuotaExceededApiError } from '@/lib/api'
 import type { Deployment, DeploymentType } from '@/lib/types'
 
 type Step = 'type' | 'form'
@@ -173,11 +173,15 @@ export function DeploymentNewPage() {
         }
       }
 
-      const deployment = await post<Deployment>(`/projects/${projectId}/deployments`, body) // デプロイメントを作成する
+      await post<Deployment>(`/projects/${projectId}/deployments`, body) // デプロイメントを作成する
       navigate(`/projects/${projectId}`) // プロジェクト画面へ遷移する
     } catch (createError) {
       console.error(createError)
-      setError('デプロイメントの作成に失敗しました')
+      if (createError instanceof QuotaExceededApiError) {
+        setError(createError.message)
+      } else {
+        setError('デプロイメントの作成に失敗しました')
+      }
     } finally {
       setCreating(false)
     }
