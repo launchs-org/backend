@@ -24,6 +24,7 @@ type QuotaResponse struct {
 	MaxVolumeSizeMB          int            `json:"max_volume_size_mb"`          // 1ボリュームあたりの最大サイズ（MB）
 	MaxTotalVolumeMB         int            `json:"max_total_volume_mb"`         // ボリューム総容量上限（MB）
 	InstanceLimits           map[string]int `json:"instance_limits"`             // スペック別デプロイメント上限
+	CurrentInstances         map[string]int `json:"current_instances"`           // スペック別現在デプロイメント数
 	CurrentProjects          int            `json:"current_projects"`            // 現在のプロジェクト数
 	CurrentDeployments       int            `json:"current_deployments"`         // 現在のデプロイメント数
 	CurrentVolumes           int            `json:"current_volumes"`             // 現在のボリューム数
@@ -87,6 +88,15 @@ func (svc *quotaServiceImpl) GetQuota(ctx context.Context, userID string) (*Quot
 		return nil, err // 集計エラーを返す
 	}
 
+	currentInstances := make(map[string]int) // スペック別現在デプロイメント数マップを初期化する
+	for instanceSize := range resolvedQuota.InstanceLimits {
+		count, countErr := svc.userQuotaRepository.CountInstancesBySize(ctx, userID, instanceSize) // サイズごとの現在数を集計する
+		if countErr != nil {
+			return nil, countErr // 集計エラーを返す
+		}
+		currentInstances[instanceSize] = count // マップに格納する
+	}
+
 	return &QuotaResponse{
 		UserID:                   userID,
 		PlanID:                   quotaData.PlanID,
@@ -97,6 +107,7 @@ func (svc *quotaServiceImpl) GetQuota(ctx context.Context, userID string) (*Quot
 		MaxVolumeSizeMB:          resolvedQuota.MaxVolumeSizeMB,
 		MaxTotalVolumeMB:         resolvedQuota.MaxTotalVolumeMB,
 		InstanceLimits:           resolvedQuota.InstanceLimits,
+		CurrentInstances:         currentInstances,
 		CurrentProjects:          currentProjects,
 		CurrentDeployments:       currentDeployments,
 		CurrentVolumes:           currentVolumes,
