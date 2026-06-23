@@ -49,7 +49,7 @@ type DeploymentWithRelations = {
   volumeMounts: VolumeMount[] // このデプロイメントにマウントされているボリューム一覧
 }
 
-type SidebarMode = 'deployment' | 'ingress' | null // サイドバーの表示モードを定義する
+type SidebarMode = 'deployment' | 'deployment-new' | 'ingress' | null // サイドバーの表示モードを定義する
 
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -76,10 +76,18 @@ export function ProjectDetailPage() {
   const [showIngressListSidebar, setShowIngressListSidebar] = useState(false) // IngressRoute一覧サイドバーの表示フラグ
   const [envVarList, setEnvVarList] = useState<EnvVar[]>([]) // プロジェクトの環境変数一覧を管理する
   const [deletingEnvVarId, setDeletingEnvVarId] = useState<string | null>(null) // 削除中の環境変数ID
-  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_INITIAL_WIDTH) // サイドバー幅（px）
+  const sidebarWidth = useRef(SIDEBAR_INITIAL_WIDTH) // サイドバー幅（px）: re-render を避けるため ref で管理する
+  const sidebarElRef = useRef<HTMLDivElement>(null) // サイドバー DOM 要素への参照
+  const [isResizing, setIsResizing] = useState(false) // リサイズ中フラグ（iframe のイベント遮断に使う）
   const isDragging = useRef(false) // ドラッグ中フラグ
   const dragStartX = useRef(0) // ドラッグ開始X座標
   const dragStartWidth = useRef(SIDEBAR_INITIAL_WIDTH) // ドラッグ開始時の幅
+
+  const openDeploymentNewSidebar = useCallback(() => {
+    setSidebarMode('deployment-new') // デプロイメント作成サイドバーを開く
+    setSelectedDeploymentId(null) // デプロイメント選択をリセットする
+    setIframeLoaded(false) // iframe読み込みフラグをリセットする
+  }, [])
 
   const openIngressSidebar = useCallback((ingressRouteId: string) => {
     setSelectedIngressRouteId(ingressRouteId) // 選択した IngressRoute ID を設定する
@@ -321,16 +329,32 @@ export function ProjectDetailPage() {
     return () => clearInterval(intervalId) // クリーンアップ
   }, [fetchData])
 
+  // iframe から postMessage でデプロイメント作成完了を受信したらサイドバーを閉じてデータを再取得する
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'deployment-created') return
+      setSidebarMode(null) // サイドバーを閉じる
+      setSelectedDeploymentId(null) // 選択をリセットする
+      void fetchData() // データを再取得する
+    }
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [fetchData])
+
   useEffect(() => {
     const onMouseMove = (ev: MouseEvent) => {
       if (!isDragging.current) return
       const delta = dragStartX.current - ev.clientX // 左へドラッグすると幅が増える
       const next = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, dragStartWidth.current + delta))
-      setSidebarWidth(next)
+      sidebarWidth.current = next // ref を更新する
+      if (sidebarElRef.current) {
+        sidebarElRef.current.style.width = `${next}px` // re-render せず直接 DOM に反映する
+      }
     }
     const onMouseUp = () => {
       if (!isDragging.current) return
       isDragging.current = false
+      setIsResizing(false) // オーバーレイを外す
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
     }
@@ -345,7 +369,8 @@ export function ProjectDetailPage() {
   const handleDragStart = (ev: React.MouseEvent) => {
     isDragging.current = true
     dragStartX.current = ev.clientX
-    dragStartWidth.current = sidebarWidth
+    dragStartWidth.current = sidebarWidth.current // 現在の幅をドラッグ開始幅として記録する
+    setIsResizing(true) // iframe 上にオーバーレイを表示してマウスイベントを横取りさせない
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
   }
@@ -418,12 +443,20 @@ export function ProjectDetailPage() {
 
   const sidebarOpen = sidebarMode !== null // サイドバーが開いているかどうかを確認する
 
-  const sidebarIframeSrc = sidebarMode === 'deployment' && selectedDeploymentId && projectId
-    ? `/ui/projects/${projectId}/deployments/${selectedDeploymentId}`
-    : null
+  const sidebarIframeSrc = (() => {
+    if (sidebarMode === 'deployment' && selectedDeploymentId && projectId) {
+      return `/ui/projects/${projectId}/deployments/${selectedDeploymentId}` // デプロイメント詳細の iframe URL
+    }
+    if (sidebarMode === 'deployment-new' && projectId) {
+      return `/ui/projects/${projectId}/deployments/new` // デプロイメント作成フォームの iframe URL
+    }
+    return null
+  })()
   const sidebarNavigatePath = sidebarMode === 'deployment' && selectedDeploymentId && projectId
     ? `/projects/${projectId}/deployments/${selectedDeploymentId}`
-    : null
+    : sidebarMode === 'deployment-new' && projectId
+      ? `/projects/${projectId}/deployments/new`
+      : null
 
   if (loading) {
     return (
@@ -456,7 +489,7 @@ export function ProjectDetailPage() {
                 <div className="fixed inset-0 z-10" onClick={() => setShowAddMenu(false)} />
                 <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden w-48">
                   <button
-                    onClick={() => { setShowAddMenu(false); navigate(`/projects/${projectId}/deployments/new`) }}
+                    onClick={() => { setShowAddMenu(false); openDeploymentNewSidebar() }}
                     className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-[#111827] hover:bg-gray-50 transition-colors"
                   >
                     <Plus className="w-3.5 h-3.5 text-gray-400" />
@@ -504,22 +537,8 @@ export function ProjectDetailPage() {
       }
     >
       <div>
-        {/* デプロイメントがない場合の空状態 */}
-        {deploymentRelations.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-lg border border-dashed border-gray-200">
-            <p className="text-sm font-medium text-gray-500 mb-1">まだデプロイメントがありません</p>
-            <p className="text-xs text-gray-400 mb-4">最初のアプリケーションをデプロイしましょう</p>
-            <button
-              onClick={() => navigate(`/projects/${projectId}/deployments/new`)}
-              className="inline-flex items-center gap-1.5 bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              デプロイ
-            </button>
-          </div>
-        ) : (
-          /* ReactFlow グラフ + サイドバー */
-          <div className="flex overflow-hidden bg-white" style={{ height: 'calc(100vh - 48px)' }}>
+        {/* ReactFlow グラフ + サイドバー（空状態でもサイドバーを共有する） */}
+        <div className="flex overflow-hidden bg-white" style={{ height: 'calc(100vh - 48px)' }}>
             {/* 左アイコンレール */}
             <div className="w-14 shrink-0 flex flex-col items-center pt-3 gap-2 border-r border-gray-100 bg-gray-50 z-10">
               <button
@@ -580,7 +599,7 @@ export function ProjectDetailPage() {
                   }}
                   selectedDeploymentId={selectedDeploymentId}
                   onClose={() => setShowDeploymentListSidebar(false)}
-                  projectId={projectId!}
+                  onAddNew={openDeploymentNewSidebar} // サイドバーで新規作成フォームを開く
                 />
               </div>
             )}
@@ -627,8 +646,23 @@ export function ProjectDetailPage() {
               </div>
             )}
 
-            {/* ReactFlow */}
+            {/* 中央コンテンツ：空状態 or ReactFlow */}
             <div className="flex-1 min-w-0">
+              {deploymentRelations.length === 0 ? (
+                <div className="h-full flex items-center justify-center">
+                  <div className="text-center">
+                    <p className="text-sm font-medium text-gray-500 mb-1">まだデプロイメントがありません</p>
+                    <p className="text-xs text-gray-400 mb-4">最初のアプリケーションをデプロイしましょう</p>
+                    <button
+                      onClick={() => openDeploymentNewSidebar()}
+                      className="inline-flex items-center gap-1.5 bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      デプロイ
+                    </button>
+                  </div>
+                </div>
+              ) : (
               <ReactFlow
                 nodes={nodes}
                 edges={edges}
@@ -650,6 +684,7 @@ export function ProjectDetailPage() {
                   }}
                 />
               </ReactFlow>
+              )}
             </div>
 
             {/* サイドバーが開いているときのみリサイズハンドルとサイドバーを表示する */}
@@ -662,13 +697,16 @@ export function ProjectDetailPage() {
                 />
 
                 {/* サイドバー */}
-                <div className="shrink-0 flex flex-col border-l border-gray-200" style={{ width: sidebarWidth }}>
-                  {/* Deployment 詳細（iframe） */}
-                  {sidebarMode === 'deployment' && sidebarIframeSrc && (
+                <div ref={sidebarElRef} className="shrink-0 flex flex-col border-l border-gray-200" style={{ width: sidebarWidth.current }}>
+                  {/* Deployment 詳細・作成フォーム（iframe） */}
+                  {(sidebarMode === 'deployment' || sidebarMode === 'deployment-new') && sidebarIframeSrc && (
                     <>
                       <div className="h-10 flex items-center justify-between px-3 border-b border-gray-100 bg-gray-50 shrink-0">
                         <span className="text-xs font-medium text-gray-500">
-                          {deploymentRelations.find(rel => rel.deployment.id === selectedDeploymentId)?.deployment.name ?? 'デプロイメント詳細'}
+                          {sidebarMode === 'deployment-new'
+                            ? '新規デプロイメント'
+                            : (deploymentRelations.find(rel => rel.deployment.id === selectedDeploymentId)?.deployment.name ?? 'デプロイメント詳細')
+                          }
                         </span>
                         <div className="flex items-center gap-1">
                           <button
@@ -691,11 +729,15 @@ export function ProjectDetailPage() {
                             <div className="w-6 h-6 border-2 border-[#00C2D1] border-t-transparent rounded-full animate-spin" />
                           </div>
                         )}
+                        {/* リサイズ中は iframe 上にオーバーレイを被せてマウスイベントの横取りを防ぐ */}
+                        {isResizing && (
+                          <div className="absolute inset-0 z-20" />
+                        )}
                         <iframe
-                          key={selectedDeploymentId}
+                          key={sidebarMode === 'deployment-new' ? 'deployment-new' : selectedDeploymentId}
                           src={sidebarIframeSrc}
                           className="w-full h-full border-none"
-                          title="デプロイメント詳細"
+                          title={sidebarMode === 'deployment-new' ? '新規デプロイメント' : 'デプロイメント詳細'}
                           onLoad={() => setIframeLoaded(true)}
                         />
                       </div>
@@ -721,7 +763,6 @@ export function ProjectDetailPage() {
               </>
             )}
           </div>
-        )}
       </div>
 
     </Layout>
@@ -1436,16 +1477,14 @@ function DeploymentListSidebar({
   onSelect,
   selectedDeploymentId,
   onClose,
-  projectId,
+  onAddNew,
 }: {
   deploymentRelations: DeploymentWithRelations[]
   onSelect: (deploymentId: string) => void
   selectedDeploymentId: string | null
   onClose: () => void
-  projectId: string
+  onAddNew: () => void
 }) {
-  const navigate = useNavigate() // ページ遷移用フック
-
   return (
     <div className="flex flex-col h-full">
       {/* ヘッダー */}
@@ -1491,7 +1530,7 @@ function DeploymentListSidebar({
       {/* フッター：新規作成ボタン */}
       <div className="shrink-0 border-t border-gray-100 p-3">
         <button
-          onClick={() => navigate(`/projects/${projectId}/deployments/new`)} // 新規デプロイメント作成ページへ遷移する
+          onClick={onAddNew} // サイドバーで新規デプロイメント作成フォームを開く
           className="w-full flex items-center justify-center gap-1.5 bg-[#111827] text-white text-sm py-2 rounded-md hover:bg-gray-800 transition-colors"
         >
           <Plus className="w-3.5 h-3.5" />

@@ -223,7 +223,12 @@ export function DeploymentNewPage() {
         override_env_vars: overrideEnvVars,                                            // テンプレートenv_varの上書き値を設定する
         extra_env_vars: tmplExtraEnvVars,                                              // 追加環境変数を設定する
       })
-      navigate(`/projects/${projectId}`) // プロジェクト画面へ遷移する
+      // iframe 内で表示されている場合は親ウィンドウに完了を通知する
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: 'deployment-created', projectId }, '*')
+      } else {
+        navigate(`/projects/${projectId}`) // 通常遷移（単体ページとして開かれた場合）
+      }
     } catch (createError) {
       if (createError instanceof QuotaExceededApiError) {
         setTemplateError(createError.message)
@@ -280,7 +285,12 @@ export function DeploymentNewPage() {
           }
         }
       }
-      navigate(`/projects/${projectId}`) // プロジェクト画面へ遷移する
+      // iframe 内で表示されている場合は親ウィンドウに完了を通知する
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: 'deployment-created', projectId }, '*')
+      } else {
+        navigate(`/projects/${projectId}`) // 通常遷移（単体ページとして開かれた場合）
+      }
     } catch (createError) {
       console.error(createError)
       if (createError instanceof QuotaExceededApiError) {
