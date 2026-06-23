@@ -72,9 +72,10 @@ type CreateDeploymentFromTemplateRequest struct {
 	ImageURL          *string       `json:"image_url"`          // nil の場合はテンプレート値を使用する
 	InstanceSize      *string       `json:"instance_size"`      // nil の場合はテンプレート値を使用する
 	Replicas          *int32        `json:"replicas"`           // nil の場合はテンプレート値を使用する
-	SkipVolumeNames   []string      `json:"skip_volume_names"`  // 作成をスキップするボリューム名の一覧
-	OverrideEnvVars   []ExtraEnvVar `json:"override_env_vars"`  // テンプレートのenv_varの値を上書きする（同キーのテンプレートenv_varに適用）
-	ExtraEnvVars      []ExtraEnvVar `json:"extra_env_vars"`     // テンプレートに追加する環境変数（新規キーのみ）
+	SkipVolumeNames      []string         `json:"skip_volume_names"`      // 作成をスキップするボリューム名の一覧
+	VolumeSizeOverrides  map[string]int   `json:"volume_size_overrides"`  // ボリューム名→サイズ（MB）の上書きマップ
+	OverrideEnvVars      []ExtraEnvVar    `json:"override_env_vars"`      // テンプレートのenv_varの値を上書きする（同キーのテンプレートenv_varに適用）
+	ExtraEnvVars         []ExtraEnvVar    `json:"extra_env_vars"`         // テンプレートに追加する環境変数（新規キーのみ）
 }
 
 // deploymentTemplateServiceImpl は DeploymentTemplateService の実装
@@ -359,10 +360,14 @@ func (svc *deploymentTemplateServiceImpl) CreateDeploymentFromTemplate(ctx conte
 			if skipVolumeSet[volDef.Name] { // スキップ対象のボリュームは作成しない
 				continue
 			}
+			sizeMB := volDef.SizeMB // テンプレートのデフォルトサイズを使用する
+			if overrideSize, hasOverride := req.VolumeSizeOverrides[volDef.Name]; hasOverride && overrideSize > 0 {
+				sizeMB = overrideSize // 上書きサイズが指定されていれば使用する
+			}
 			volumeData := &models.Volume{
-				ProjectID: req.ProjectID, // プロジェクト ID を設定する
-				Name:      volDef.Name,   // ボリューム名を設定する
-				SizeMB:    volDef.SizeMB, // ボリュームサイズを設定する
+				ProjectID: req.ProjectID,           // プロジェクト ID を設定する
+				Name:      volDef.Name,             // ボリューム名を設定する
+				SizeMB:    sizeMB,                  // ボリュームサイズを設定する
 				Status:    models.VolumeStatusPending, // pending ステータスで作成する
 			}
 			if err := svc.volumeRepo.Create(ctx, tx, volumeData); err != nil { // ボリュームを作成する

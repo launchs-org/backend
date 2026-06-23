@@ -1,11 +1,18 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Container, GitBranch, Package, LayoutTemplate, Plus, Trash2 } from 'lucide-react'
+import { Container, GitBranch, Package, LayoutTemplate, Plus, Trash2, Dice6 } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { get, post, QuotaExceededApiError } from '@/lib/api'
 import type { Deployment, DeploymentType, DeploymentTemplate, EnvVar } from '@/lib/types'
 
 type Step = 'type' | 'form' | 'template'
+
+// 暗号学的に安全な32文字のランダム文字列を生成する
+function generateSecureRandom(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+  const bytes = crypto.getRandomValues(new Uint8Array(32))
+  return Array.from(bytes).map(byte => chars[byte % chars.length]).join('')
+}
 
 const DEPLOYMENT_TYPES: { type: DeploymentType; label: string; description: string; Icon: React.ElementType }[] = [
   {
@@ -79,6 +86,7 @@ export function DeploymentNewPage() {
   const [templateCreating, setTemplateCreating] = useState(false) // テンプレート作成中フラグ
   const [templateError, setTemplateError] = useState<string | null>(null) // テンプレートエラー
   const [enabledVolumeNames, setEnabledVolumeNames] = useState<Set<string>>(new Set()) // 有効化するボリューム名のセット
+  const [volumeSizeOverrides, setVolumeSizeOverrides] = useState<Record<string, number>>({}) // ボリューム名→サイズ（MB）の上書きマップ
   const [tmplEnvVarOverrides, setTmplEnvVarOverrides] = useState<Record<string, string>>({}) // テンプレート定義のenv_varの値の上書き（キー → 値）
   const [tmplExtraEnvVars, setTmplExtraEnvVars] = useState<{ key: string; value: string; is_secret: boolean }[]>([]) // 追加環境変数一覧
   const [tmplNewEnvKey, setTmplNewEnvKey] = useState('') // 追加環境変数キー入力
@@ -182,10 +190,18 @@ export function DeploymentNewPage() {
     setTemplateError(null)
     // ボリュームをすべてデフォルト有効にする
     setEnabledVolumeNames(new Set((template.volumes ?? []).map(vol => vol.name)))
+    // ボリュームサイズをテンプレートのデフォルト値で初期化する
+    const sizeInit: Record<string, number> = {}
+    for (const vol of template.volumes ?? []) {
+      sizeInit[vol.name] = vol.size_mb
+    }
+    setVolumeSizeOverrides(sizeInit)
     // テンプレートのenv_varのデフォルト値をオーバーライドマップに初期設定する
     const overridesInit: Record<string, string> = {}
     for (const envVar of template.env_vars ?? []) {
-      if (!envVar.auto_generate) {
+      if (envVar.auto_generate) {
+        overridesInit[envVar.key] = generateSecureRandom() // auto_generateはランダム値で初期化する
+      } else {
         overridesInit[envVar.key] = envVar.value // デフォルト値を設定する
       }
     }
@@ -208,18 +224,18 @@ export function DeploymentNewPage() {
     try {
       const allVolumeNames = (selectedTemplate.volumes ?? []).map(vol => vol.name)
       const skipVolumeNames = allVolumeNames.filter(name => !enabledVolumeNames.has(name)) // 無効化されたボリュームをスキップ対象にする
-      // テンプレートのenv_varの上書き値をリストに変換する（auto_generateでないもののみ）
+      // テンプレートのenv_varの上書き値をリストに変換する（全て対象）
       const overrideEnvVars = (selectedTemplate.env_vars ?? [])
-        .filter(envVar => !envVar.auto_generate)
         .map(envVar => ({
           key: envVar.key,
-          value: tmplEnvVarOverrides[envVar.key] ?? envVar.value, // 上書き値があれば使用する
+          value: tmplEnvVarOverrides[envVar.key] ?? (envVar.auto_generate ? generateSecureRandom() : envVar.value), // 上書き値があれば使用、auto_generateはランダム値
           is_secret: envVar.is_secret,
         }))
       await post<Deployment>(`/projects/${projectId}/deployments/from-template`, {
         template_id: selectedTemplate.id,                                              // テンプレート ID を設定する
         name: templateName.trim(),                                                     // デプロイメント名を設定する
         skip_volume_names: skipVolumeNames,                                            // スキップするボリューム名を設定する
+        volume_size_overrides: volumeSizeOverrides,                                    // ボリュームサイズの上書き値を設定する
         override_env_vars: overrideEnvVars,                                            // テンプレートenv_varの上書き値を設定する
         extra_env_vars: tmplExtraEnvVars,                                              // 追加環境変数を設定する
       })
@@ -461,7 +477,23 @@ export function DeploymentNewPage() {
                                 {envVar.is_secret && <span className="text-[10px] bg-purple-50 text-purple-500 px-1 py-0.5 rounded shrink-0">secret</span>}
                               </div>
                               {envVar.auto_generate ? (
-                                <span className="text-xs bg-amber-50 text-amber-600 px-2 py-1 rounded border border-amber-100">自動生成</span>
+                                <div className="flex-1 flex items-center gap-1.5">
+                                  <input
+                                    type="text"
+                                    value={tmplEnvVarOverrides[envVar.key] ?? ''}
+                                    onChange={overrideEv => setTmplEnvVarOverrides(prev => ({ ...prev, [envVar.key]: overrideEv.target.value }))}
+                                    className={`flex-1 ${inputClass} font-mono text-xs`}
+                                    placeholder=""
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => setTmplEnvVarOverrides(prev => ({ ...prev, [envVar.key]: generateSecureRandom() }))}
+                                    className="p-1.5 rounded border border-gray-200 hover:border-amber-400 hover:bg-amber-50 text-gray-400 hover:text-amber-500 transition-colors shrink-0"
+                                    title="ランダム生成"
+                                  >
+                                    <Dice6 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
                               ) : (
                                 <input
                                   type={envVar.is_secret ? 'password' : 'text'}
@@ -568,8 +600,22 @@ export function DeploymentNewPage() {
                                 className="rounded border-gray-300"
                               />
                               <span className="text-xs font-medium text-[#111827]">{vol.name}</span>
-                              <span className="text-xs text-gray-400">{vol.size_mb >= 1024 ? `${vol.size_mb / 1024}GB` : `${vol.size_mb}MB`}</span>
-                              <span className="font-mono text-xs text-gray-400 ml-auto">→ {vol.mount_path}</span>
+                              <div className="flex items-center gap-1 ml-auto" onClick={clickEv => clickEv.preventDefault()}>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={volumeSizeOverrides[vol.name] ?? vol.size_mb}
+                                  onChange={sizeEv => {
+                                    const mb = parseInt(sizeEv.target.value, 10)
+                                    if (!isNaN(mb) && mb > 0) {
+                                      setVolumeSizeOverrides(prev => ({ ...prev, [vol.name]: mb }))
+                                    }
+                                  }}
+                                  className="w-20 text-xs text-right border border-gray-200 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-400"
+                                />
+                                <span className="text-xs text-gray-400">MB</span>
+                              </div>
+                              <span className="font-mono text-xs text-gray-400">→ {vol.mount_path}</span>
                             </label>
                           ))}
                         </div>
