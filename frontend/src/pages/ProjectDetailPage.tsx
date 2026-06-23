@@ -146,11 +146,13 @@ export function ProjectDetailPage() {
       const serviceConfigured = relation.service && (relation.service.port !== 0 || relation.service.pending_port !== 0)
 
       if (serviceConfigured && relation.service) {
+        // ClusterIP が割り当て済みの場合はノード高さが増える（ServiceNode と同じ条件）
+        const svcH = relation.service.cluster_ip ? 118 : SVC_H
         // サービスノード: 縦中央を rowCenterY に合わせる
         newNodes.push({
           id: `svc-${relation.service.id}`,
           type: 'service',
-          position: { x: SERVICE_COL, y: rowCenterY - SVC_H / 2 },
+          position: { x: SERVICE_COL, y: rowCenterY - svcH / 2 },
           data: { service: relation.service },
         })
 
@@ -178,7 +180,7 @@ export function ProjectDetailPage() {
     })
 
     // ボリュームをグラフに追加する（マウント有無に関わらず全件表示する）
-    const VOL_H = 100  // Volume ノード高さ
+    const VOL_H = 114  // Volume ノード高さ
     currentVolumeList.forEach((volume, volumeIndex) => {
       // このボリュームをマウントしている Deployment のインデックスを収集する
       const mountedRelationIndices = relations

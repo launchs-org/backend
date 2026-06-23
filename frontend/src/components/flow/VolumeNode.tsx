@@ -13,7 +13,7 @@ export function VolumeNode({ data }: NodeProps) {
   return (
     <div
       className="bg-white rounded-xl shadow-md overflow-hidden border border-gray-100"
-      style={{ borderTopColor: '#F59E0B', borderTopWidth: 3, width: 220 }}
+      style={{ borderTopColor: '#F59E0B', borderTopWidth: 3, width: 220, height: 114 }}
     >
       <Handle type="target" position={Position.Left} style={{ opacity: 0, top: '50%' }} /> {/* Deployment からの接続を受け取る */}
 

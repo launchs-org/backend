@@ -41,6 +41,7 @@ type Service struct {
 	Ports             datatypes.JSON `gorm:"type:jsonb"                                      json:"ports"`           // 現在稼働中のポート一覧（jsonb）
 	PendingPorts      datatypes.JSON `gorm:"type:jsonb"                                      json:"pending_ports"`   // 未 apply のポート一覧
 	Status            ServiceStatus  `gorm:"type:varchar(32);not null;default:'pending'"     json:"status"`          // サービスのステータス
+	ClusterIP         string         `gorm:"type:varchar(64)"                                json:"cluster_ip"`      // k8s が割り当てた ClusterIP
 	K8sStatus         datatypes.JSON `gorm:"type:jsonb"                                      json:"k8s_status"`      // null = 未同期
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`

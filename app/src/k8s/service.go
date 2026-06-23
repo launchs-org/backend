@@ -101,6 +101,12 @@ func handleServiceEvent(ctx context.Context, event watch.Event, serviceRepo repo
 		return
 	}
 
+	if k8sService.Spec.ClusterIP != "" { // ClusterIP が割り当てられている場合のみ保存する
+		if err := serviceRepo.UpdateClusterIP(ctx, serviceID, k8sService.Spec.ClusterIP); err != nil { // cluster_ip を DB に保存する
+			logger.PrintErr("WatchServices: cluster_ip 更新に失敗しました: " + err.Error()) // エラーをログ出力する
+		}
+	}
+
 	logger.Println("WatchServices: status を更新しました: " + serviceID) // 更新ログを出力する
 }
 

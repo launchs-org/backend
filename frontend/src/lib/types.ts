@@ -91,6 +91,7 @@ export type K8sService = {
   ports: Record<string, unknown> | null
   pending_ports: Record<string, unknown> | null
   status: ServiceStatus
+  cluster_ip: string
   k8s_status: Record<string, unknown> | null
   created_at: string
   updated_at: string

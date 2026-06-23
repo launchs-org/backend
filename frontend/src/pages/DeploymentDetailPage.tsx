@@ -7,6 +7,7 @@ import { LogViewer } from '@/components/LogViewer'
 import { get, post, put, del, ApiError } from '@/lib/api'
 import type {
   Deployment,
+  Project,
   Build,
   K8sService,
   ApplyHistory,
@@ -399,7 +400,7 @@ export function DeploymentDetailPage() {
           {activeTab === 'logs' && <LogsTab deploymentId={deploymentId!} />}
           {activeTab === 'builds' && <BuildsTab deploymentId={deploymentId!} projectId={projectId!} deployment={deployment} />}
           {activeTab === 'settings' && <SettingsTab deployment={deployment} onSaved={fetchDeployment} />}
-          {activeTab === 'networking' && <NetworkingTab deploymentId={deploymentId!} onUpdated={fetchAllPending} />}
+          {activeTab === 'networking' && <NetworkingTab deploymentId={deploymentId!} projectId={projectId!} onUpdated={fetchAllPending} />}
           {activeTab === 'env-vars' && <EnvVarsTab deploymentId={deploymentId!} projectId={projectId!} onUpdated={fetchAllPending} />}
           {activeTab === 'volumes' && <VolumesTab deploymentId={deploymentId!} projectId={projectId!} onUpdated={fetchAllPending} />}
           {activeTab === 'history' && <HistoryTab deploymentId={deploymentId!} />}
@@ -1043,15 +1044,23 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
 
 // ── Networking タブ ───────────────────────────────────────────
 
-function NetworkingTab({ deploymentId, onUpdated }: { deploymentId: string; onUpdated: () => Promise<void> }) {
+function NetworkingTab({ deploymentId, projectId, onUpdated }: { deploymentId: string; projectId: string; onUpdated: () => Promise<void> }) {
   const [service, setService] = useState<K8sService | null>(null) // サービス情報を管理する
+  const [namespace, setNamespace] = useState<string>('') // プロジェクトの namespace を管理する
   const [svcForm, setSvcForm] = useState({ port: '', target_port: '' }) // サービス設定フォーム
   const [savingSvc, setSavingSvc] = useState(false) // サービス保存中フラグ
   const [deletingSvc, setDeletingSvc] = useState(false) // サービス削除中フラグ
+  const [copiedKey, setCopiedKey] = useState<string | null>(null) // コピー済みのキーを管理する
 
   const fetchNetworking = async () => {
     const svcResult = await get<K8sService>(`/deployments/${deploymentId}/service`).catch(() => null) // サービス情報を取得する
     setService(svcResult) // サービス情報を設定する
+  }
+
+  const handleCopy = (text: string, key: string) => {
+    void navigator.clipboard.writeText(text) // クリップボードにコピーする
+    setCopiedKey(key) // コピー済みキーを設定する
+    setTimeout(() => setCopiedKey(null), 1500) // 1.5秒後にリセットする
   }
 
   useEffect(() => {
@@ -1059,6 +1068,12 @@ function NetworkingTab({ deploymentId, onUpdated }: { deploymentId: string; onUp
     const intervalId = setInterval(() => { void fetchNetworking() }, POLL_INTERVAL_BUILDS)
     return () => clearInterval(intervalId) // クリーンアップ
   }, [deploymentId])
+
+  useEffect(() => {
+    get<Project>(`/projects/${projectId}`) // プロジェクト情報を取得して namespace を設定する
+      .then(proj => setNamespace(proj.namespace))
+      .catch(console.error)
+  }, [projectId])
 
   // status が pending でない（active）かつ port が設定済みの場合のみ「設定済み」とする
   const serviceConfigured = service && service.status !== 'pending'
@@ -1141,6 +1156,38 @@ function NetworkingTab({ deploymentId, onUpdated }: { deploymentId: string; onUp
                 <Row label="保留中のポート"><span className="font-mono text-amber-600">{service!.pending_port} → {service!.pending_target_port}</span></Row>
               )}
             </div>
+            {/* 接続情報カード：ClusterIP が割り当て済みの場合のみ表示する */}
+            {service!.cluster_ip && namespace && (
+              <div className="bg-gray-50 rounded-md border border-gray-200 p-3 space-y-2">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">接続情報</p>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs text-gray-400 mb-0.5">ClusterIP（クラスター内部 IP）</p>
+                      <p className="font-mono text-sm text-[#111827] truncate">{service!.cluster_ip}</p>
+                    </div>
+                    <button
+                      onClick={() => handleCopy(service!.cluster_ip, 'cluster_ip')}
+                      className="shrink-0 text-xs text-gray-400 hover:text-gray-700 border border-gray-200 rounded px-2 py-1 transition-colors"
+                    >
+                      {copiedKey === 'cluster_ip' ? 'コピー済み' : 'コピー'}
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="text-xs text-gray-400 mb-0.5">DNS 名（クラスター内部）</p>
+                      <p className="font-mono text-sm text-[#111827] truncate">{service!.id}-svc.{namespace}.svc.cluster.local{service!.port !== 0 ? `:${service!.port}` : ''}</p>
+                    </div>
+                    <button
+                      onClick={() => handleCopy(`${service!.id}-svc.${namespace}.svc.cluster.local${service!.port !== 0 ? `:${service!.port}` : ''}`, 'dns')}
+                      className="shrink-0 text-xs text-gray-400 hover:text-gray-700 border border-gray-200 rounded px-2 py-1 transition-colors"
+                    >
+                      {copiedKey === 'dns' ? 'コピー済み' : 'コピー'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="pt-3 border-t border-gray-100 space-y-3">
               <div className="grid grid-cols-2 gap-3">
                 <div>

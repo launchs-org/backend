@@ -208,7 +208,8 @@ type ServiceRepository interface {
 	FindByServiceID(ctx context.Context, serviceID string) (*models.Service, error)                              // serviceID に紐づく service を取得する
 	Update(ctx context.Context, service *models.Service) error                                                   // service を更新する
 	UpdateStatus(ctx context.Context, serviceID string, status models.ServiceStatus, k8sStatus datatypes.JSON) error // service の status と k8s_status を更新する
-	Delete(ctx context.Context, serviceID string) error                                                          // service を削除する
+	UpdateClusterIP(ctx context.Context, serviceID string, clusterIP string) error                                   // service の cluster_ip を更新する
+	Delete(ctx context.Context, serviceID string) error                                                              // service を削除する
 }
 
 // serviceRepositoryImpl は ServiceRepository の GORM 実装
@@ -261,6 +262,18 @@ func (repo *serviceRepositoryImpl) UpdateStatus(ctx context.Context, serviceID s
 		"k8s_status": k8sStatus,
 	})
 	if result.Error != nil { // エラーが発生した場合
+		return result.Error // エラーを返す
+	}
+	if result.RowsAffected == 0 { // 更新対象が存在しない場合
+		return gorm.ErrRecordNotFound // レコードなしエラーを返す
+	}
+	return nil // 正常終了
+}
+
+// UpdateClusterIP は serviceID に対応する service の cluster_ip を更新する
+func (repo *serviceRepositoryImpl) UpdateClusterIP(ctx context.Context, serviceID string, clusterIP string) error {
+	result := repo.db.WithContext(ctx).Model(&models.Service{}).Where("id = ?", serviceID).Update("cluster_ip", clusterIP) // cluster_ip を更新する
+	if result.Error != nil {                                                                                                 // エラーが発生した場合
 		return result.Error // エラーを返す
 	}
 	if result.RowsAffected == 0 { // 更新対象が存在しない場合

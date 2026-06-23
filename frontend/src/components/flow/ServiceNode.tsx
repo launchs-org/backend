@@ -12,11 +12,12 @@ export function ServiceNode({ data }: NodeProps) {
 
   const displayPort = service.port !== 0 ? service.port : service.pending_port // 表示するポート番号を決定する
   const displayTargetPort = service.target_port !== 0 ? service.target_port : service.pending_target_port // 表示するターゲットポートを決定する
+  const nodeHeight = service.cluster_ip ? 118 : 98 // ClusterIP がある場合はノード高さを増やす
 
   return (
     <div
       className="bg-white rounded-xl shadow-md w-44 overflow-hidden border border-gray-100"
-      style={{ borderTopColor: '#3B82F6', borderTopWidth: 3, height: 98 }}
+      style={{ borderTopColor: '#3B82F6', borderTopWidth: 3, height: nodeHeight }}
     >
       <Handle type="target" position={Position.Left} style={{ opacity: 0, top: '50%' }} />
       <Handle type="source" position={Position.Right} style={{ opacity: 0, top: '50%' }} />
@@ -38,6 +39,10 @@ export function ServiceNode({ data }: NodeProps) {
           :{displayPort} → :{displayTargetPort}
         </p>
         <p className="text-[10px] text-gray-400 mt-0.5">{service.type}</p>
+        {/* ClusterIP が割り当て済みの場合のみ表示する */}
+        {service.cluster_ip && (
+          <p className="text-[10px] font-mono text-blue-500 mt-1 truncate">{service.cluster_ip}</p>
+        )}
       </div>
     </div>
   )
