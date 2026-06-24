@@ -470,31 +470,28 @@ function InfoCard({
 // ── Logs タブ ─────────────────────────────────────────────────
 
 function LogsTab({ deploymentId }: { deploymentId: string }) {
+  const [activePodNames, setActivePodNames] = useState<string[]>([]) // k8s 上で現在稼働中の Pod 名一覧を管理する
   const [podEntries, setPodEntries] = useState<PodLogEntry[]>([]) // Pod ごとのログエントリ一覧を管理する
   const [selectedPodName, setSelectedPodName] = useState<string | null>(null) // 選択中の Pod 名を管理する
-  const lastTimestampMapRef = useRef<Record<string, string>>({}) // Pod ごとの最後のタイムスタンプを管理する
 
   // 初回ロードと差分ポーリングのベース関数
   const fetchAllPodLogs = useCallback(async (since?: string) => {
     const params: Record<string, string> = {}
     if (since) params.since = since // since パラメータを設定する
     const result = await get<PodLogsResponse>(`/deployments/${deploymentId}/logs`, params)
-    return result.pods ?? []
+    return result
   }, [deploymentId])
 
   // 初回ロード：全 Pod のログを取得して状態に反映する
   useEffect(() => {
     const loadInitial = async () => {
       try {
-        const pods = await fetchAllPodLogs()
-        setPodEntries(pods) // Pod 一覧を設定する
-        if (pods.length > 0 && selectedPodName === null) {
-          setSelectedPodName(pods[0].pod_name) // 初回は最初の Pod を選択する
-        }
-        for (const pod of pods) {
-          if (pod.last_timestamp) {
-            lastTimestampMapRef.current[pod.pod_name] = pod.last_timestamp // タイムスタンプを記録する
-          }
+        const result = await fetchAllPodLogs()
+        setActivePodNames(result.active_pod_names ?? []) // アクティブな Pod 名一覧を設定する
+        setPodEntries(result.pods ?? []) // Pod ログ一覧を設定する
+        const allPodNames = result.active_pod_names ?? []
+        if (allPodNames.length > 0 && selectedPodName === null) {
+          setSelectedPodName(allPodNames[0]) // 初回は最初の Pod を選択する
         }
       } catch (loadError) {
         console.error('Pod ログ取得エラー:', loadError)
@@ -506,36 +503,62 @@ function LogsTab({ deploymentId }: { deploymentId: string }) {
   // 選択中の Pod 用の fetchLogs（LogViewer に渡す）
   const fetchSelectedPodLogs = useCallback(async (since?: string) => {
     if (!selectedPodName) return { logs: '', lastTimestamp: null }
-    const pods = await fetchAllPodLogs(since)
+    const result = await fetchAllPodLogs(since)
+    const latestActivePodNames = result.active_pod_names ?? []
+    const pods = result.pods ?? []
+
+    // アクティブ Pod 一覧を同期する
+    setActivePodNames((prev) => {
+      const prevKey = prev.join(',')
+      const nextKey = latestActivePodNames.join(',')
+      return prevKey !== nextKey ? latestActivePodNames : prev // 差分があれば更新する
+    })
+    setPodEntries((prev) => {
+      const latestNames = new Set(pods.map((podEntry) => podEntry.pod_name))
+      const prevNames = new Set(prev.map((podEntry) => podEntry.pod_name))
+      const hasAdded = pods.some((podEntry) => !prevNames.has(podEntry.pod_name))
+      const hasRemoved = prev.some((podEntry) => !latestNames.has(podEntry.pod_name))
+      return (hasAdded || hasRemoved) ? pods : prev // 差分があれば最新リストで置き換える
+    })
+
+    // 選択中の Pod が消えた場合は先頭のアクティブ Pod に切り替える
+    if (!latestActivePodNames.includes(selectedPodName) && latestActivePodNames.length > 0) {
+      setSelectedPodName(latestActivePodNames[0]) // 先頭の Pod を選択する
+    }
+
     const pod = pods.find((podEntry) => podEntry.pod_name === selectedPodName) // 選択中の Pod のエントリを検索する
     if (!pod) return { logs: '', lastTimestamp: null }
-    // 新しい Pod が追加されていれば Pod 一覧を更新する
-    setPodEntries((prev) => {
-      const existingNames = new Set(prev.map((podEntry) => podEntry.pod_name))
-      const newPods = pods.filter((podEntry) => !existingNames.has(podEntry.pod_name))
-      return newPods.length > 0 ? [...prev, ...newPods] : prev // 新規 Pod を追加する
-    })
     return { logs: pod.logs, lastTimestamp: pod.last_timestamp }
   }, [selectedPodName, fetchAllPodLogs])
+
+  // タブに表示する Pod 名一覧（アクティブ Pod 優先、ログがある Pod も含める）
+  const tabPodNames = Array.from(new Set([
+    ...activePodNames,
+    ...podEntries.map((podEntry) => podEntry.pod_name),
+  ])) // アクティブ Pod とログがある Pod をマージして重複排除する
 
   return (
     <div style={{ height: 'calc(100vh - 220px)' }} className="flex flex-col">
       {/* Pod タブ */}
-      {podEntries.length > 1 && (
+      {tabPodNames.length > 0 && (
         <div className="flex gap-1 px-3 py-2 shrink-0 border-b border-[#30363D] bg-[#161B22] overflow-x-auto">
-          {podEntries.map((podEntry) => (
-            <button
-              key={podEntry.pod_name}
-              onClick={() => setSelectedPodName(podEntry.pod_name)}
-              className={`text-xs px-3 py-1 rounded-md font-mono whitespace-nowrap transition-colors ${
-                selectedPodName === podEntry.pod_name
-                  ? 'bg-[#00C2D1]/20 text-[#00C2D1] border border-[#00C2D1]/40'
-                  : 'text-[#8B949E] hover:text-[#E6EDF3] border border-transparent hover:border-[#30363D]'
-              }`}
-            >
-              {podEntry.pod_name}
-            </button>
-          ))}
+          {tabPodNames.map((podName) => {
+            const isActive = activePodNames.includes(podName) // k8s 上で稼働中かどうか
+            return (
+              <button
+                key={podName}
+                onClick={() => setSelectedPodName(podName)}
+                className={`text-xs px-3 py-1 rounded-md font-mono whitespace-nowrap transition-colors ${
+                  selectedPodName === podName
+                    ? 'bg-[#00C2D1]/20 text-[#00C2D1] border border-[#00C2D1]/40'
+                    : 'text-[#8B949E] hover:text-[#E6EDF3] border border-transparent hover:border-[#30363D]'
+                }`}
+              >
+                <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 ${isActive ? 'bg-green-400' : 'bg-gray-500'}`} />
+                {podName}
+              </button>
+            )
+          })}
         </div>
       )}
       {/* ログビューアー */}

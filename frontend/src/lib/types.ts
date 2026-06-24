@@ -144,6 +144,7 @@ export type PodLogEntry = {
 }
 
 export type PodLogsResponse = {
+  active_pod_names: string[]
   pods: PodLogEntry[]
 }
 

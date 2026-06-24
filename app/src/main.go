@@ -99,7 +99,7 @@ func main() {
 
 	// log ハンドラーを DI 組み立てする
 	podLogChunkRepo := repository.NewPodLogChunkRepository(repository.Database)                                       // pod ログチャンクリポジトリを生成する
-	logServiceImpl := service.NewLogService(deploymentRepo, projectRepo, podLogChunkRepo)                             // log サービスを生成する
+	logServiceImpl := service.NewLogService(deploymentRepo, projectRepo, podLogChunkRepo, k8sClient)                  // log サービスを生成する
 	logHandler := handler.NewLogHandler(logServiceImpl)                                                               // log ハンドラーを生成する
 
 	// env_var ハンドラーを DI 組み立てする

@@ -6,6 +6,9 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 // PodLogsEntry は1 Pod 分のログを表す
@@ -17,7 +20,8 @@ type PodLogsEntry struct {
 
 // GetPodLogsResult は GetPodLogs の返却値
 type GetPodLogsResult struct {
-	Pods []PodLogsEntry `json:"pods"` // Pod ごとのログ一覧
+	ActivePodNames []string       `json:"active_pod_names"` // k8s 上で現在稼働中の Pod 名一覧
+	Pods           []PodLogsEntry `json:"pods"`             // Pod ごとのログ一覧
 }
 
 // LogService は Pod ログ取得のビジネスロジックを定義するインターフェース
@@ -30,14 +34,16 @@ type logServiceImpl struct {
 	deploymentRepo  repository.DeploymentRepository  // deployment リポジトリ
 	projectRepo     repository.ProjectRepository     // project リポジトリ
 	podLogChunkRepo repository.PodLogChunkRepository // pod_log_chunk リポジトリ
+	k8sClient       kubernetes.Interface             // k8s クライアント（Pod 一覧取得に使う）
 }
 
 // NewLogService は LogService の実装を返す
-func NewLogService(deploymentRepo repository.DeploymentRepository, projectRepo repository.ProjectRepository, podLogChunkRepo repository.PodLogChunkRepository) LogService {
+func NewLogService(deploymentRepo repository.DeploymentRepository, projectRepo repository.ProjectRepository, podLogChunkRepo repository.PodLogChunkRepository, k8sClient kubernetes.Interface) LogService {
 	return &logServiceImpl{
 		deploymentRepo:  deploymentRepo,  // 依存を注入する
 		projectRepo:     projectRepo,     // 依存を注入する
 		podLogChunkRepo: podLogChunkRepo, // 依存を注入する
+		k8sClient:       k8sClient,       // 依存を注入する
 	}
 }
 
@@ -58,7 +64,18 @@ func (svc *logServiceImpl) GetPodLogs(ctx context.Context, userID string, deploy
 		return nil, ErrForbidden
 	}
 
-	// 3. ログチャンクを取得する（since 指定あり／なしで分岐する）
+	// 3. k8s から現在稼働中の Pod 一覧を取得する
+	k8sPodList, podListErr := svc.k8sClient.CoreV1().Pods(projectData.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app=" + deploymentData.Name, // app ラベルで対象 Deployment の Pod を絞り込む
+	}) // Pod 一覧を取得する
+	activePodNames := make([]string, 0) // アクティブな Pod 名一覧を初期化する
+	if podListErr == nil {              // 取得成功時のみ Pod 名を収集する
+		for podIndex := range k8sPodList.Items { // 各 Pod 名を収集する
+			activePodNames = append(activePodNames, k8sPodList.Items[podIndex].Name) // Pod 名を追加する
+		}
+	}
+
+	// 4. ログチャンクを取得する（since 指定あり／なしで分岐する）
 	var chunkList []models.PodLogChunk
 	if since != nil { // since パラメータが指定されている場合は差分を取得する
 		chunkList, err = svc.podLogChunkRepo.FindByDeploymentIDSince(ctx, deploymentID, *since) // since より後のチャンクを取得する
@@ -69,7 +86,7 @@ func (svc *logServiceImpl) GetPodLogs(ctx context.Context, userID string, deploy
 		return nil, err // 取得エラーを返す
 	}
 
-	// 4. チャンクを Pod 名でグループ化して結合する
+	// 5. チャンクを Pod 名でグループ化して結合する
 	podOrderList := make([]string, 0)                        // Pod 名の登場順を記録するスライスを生成する
 	podChunkMap := make(map[string][]models.PodLogChunk)     // Pod 名をキーにしたチャンクマップを生成する
 	for _, chunkData := range chunkList {                    // 各チャンクを Pod 名でグループ化する
@@ -87,7 +104,7 @@ func (svc *logServiceImpl) GetPodLogs(ctx context.Context, userID string, deploy
 			logBuilder.WriteString(chunkData.Content)          // チャンクの内容を追記する
 		}
 		entry := PodLogsEntry{ // Pod ログエントリを生成する
-			PodName: podName,         // Pod 名を設定する
+			PodName: podName,             // Pod 名を設定する
 			Logs:    logBuilder.String(), // 結合したログ文字列を設定する
 		}
 		if len(chunks) > 0 { // チャンクが1件以上ある場合は最後のチャンクの CreatedAt を設定する
@@ -98,7 +115,8 @@ func (svc *logServiceImpl) GetPodLogs(ctx context.Context, userID string, deploy
 	}
 
 	result := &GetPodLogsResult{ // 結果を生成する
-		Pods: podEntryList, // Pod ごとのログ一覧を設定する
+		ActivePodNames: activePodNames, // アクティブな Pod 名一覧を設定する
+		Pods:           podEntryList,   // Pod ごとのログ一覧を設定する
 	}
 
 	return result, nil // 結果を返す
