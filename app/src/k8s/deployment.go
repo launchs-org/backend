@@ -169,7 +169,7 @@ type podStreamState struct {
 func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository) {
 	// 実行中のログストリームを管理するマップ（deploymentID → podStreamState）
 	streamCancelMap := make(map[string]podStreamState) // ストリーム状態を管理するマップ
-	var streamCancelMu sync.Mutex                          // マップへの排他アクセスのためのミューテックス
+	var streamCancelMu sync.Mutex                      // マップへの排他アクセスのためのミューテックス
 
 	// 起動時リカバリ: running 状態の Deployment に対してログストリームを再開する
 	runningList, recoveryErr := deploymentRepo.FindAllRunning(ctx) // running 状態の deployment を全件取得する
@@ -193,6 +193,7 @@ func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deplo
 	}
 
 	go pollDeployments(ctx, k8sClient, deploymentRepo, podLogChunkRepo, projectRepo, streamCancelMap, &streamCancelMu) // 定期ポーリングを goroutine で起動する
+	go watchPodDeletions(ctx, k8sClient, podLogChunkRepo)                                                              // Pod 削除イベントを監視する goroutine を起動する
 
 	for {
 		if ctx.Err() != nil { // コンテキストがキャンセルされた場合は終了する
@@ -575,6 +576,54 @@ func marshalDeploymentStatus(status appsv1.DeploymentStatus) (datatypes.JSON, er
 		return nil, err // シリアライズエラーを返す
 	}
 	return datatypes.JSON(statusBytes), nil // datatypes.JSON に変換して返す
+}
+
+// watchPodDeletions は全 Namespace の launchs.org/deployment-id ラベルを持つ Pod の Deleted イベントを監視し
+// 削除された Pod のログチャンクを DB から削除する
+func watchPodDeletions(ctx context.Context, k8sClient kubernetes.Interface, podLogChunkRepo repository.PodLogChunkRepository) {
+	for {
+		if ctx.Err() != nil { // コンテキストがキャンセルされた場合は終了する
+			return
+		}
+
+		watcher, err := k8sClient.CoreV1().Pods("").Watch(ctx, metav1.ListOptions{
+			LabelSelector: "launchs.org/deployment-id", // launchs.org/deployment-id ラベルを持つ Pod のみ監視する
+		}) // Pod Watch を開始する
+		if err != nil {
+			logger.PrintErr("watchPodDeletions: Watch 開始に失敗しました: " + err.Error()) // エラーをログ出力する
+			select {
+			case <-ctx.Done(): // コンテキストキャンセル時は終了する
+				return
+			case <-time.After(5 * time.Second): // 5秒待機してリトライする
+				continue
+			}
+		}
+
+		for event := range watcher.ResultChan() { // イベントを受信するループ
+			if event.Type != watch.Deleted { // Deleted 以外は無視する
+				continue
+			}
+			pod, ok := event.Object.(*corev1.Pod) // イベントオブジェクトを Pod にキャストする
+			if !ok {                              // キャストに失敗した場合はスキップする
+				continue
+			}
+			deploymentID := pod.Labels["launchs.org/deployment-id"] // deployment-id ラベルを取得する
+			if deploymentID == "" {                                  // ラベルが存在しない場合はスキップする
+				continue
+			}
+			podName := pod.Name // 削除された Pod 名を取得する
+			logger.Println("watchPodDeletions: Pod 削除を検知しました（pod=" + podName + ", deploymentID=" + deploymentID + "）") // 検知ログを出力する
+
+			if err := podLogChunkRepo.DeleteByPodName(ctx, deploymentID, podName); err != nil { // 削除された Pod のチャンクを DB から削除する
+				logger.PrintErr("watchPodDeletions: Podログチャンク削除に失敗しました（pod=" + podName + "）: " + err.Error()) // エラーをログ出力する
+			}
+		}
+
+		if ctx.Err() != nil { // コンテキストキャンセルの場合は終了する
+			return
+		}
+		logger.Println("watchPodDeletions: Watch チャンネルが閉じられました。再接続します") // 再接続ログを出力する
+	}
 }
 
 // calcAppStatus は k8s Deployment の DeploymentAvailable 条件から AppStatus を計算する
