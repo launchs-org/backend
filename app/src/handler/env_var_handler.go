@@ -25,14 +25,10 @@ func NewEnvVarHandler(envVarService service.EnvVarService, envVarMountService se
 	}
 }
 
-// maskedValue は is_secret=true のときに返すマスク文字列
-const maskedValue = "***"
-
 // ListEnvVars は GET /api/v1/projects/:id/env-vars のハンドラー
 func (envVarHandler *EnvVarHandler) ListEnvVars(echoCtx echo.Context) error {
-	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
-	projectID := echoCtx.Param("id")                                  // パスパラメータから project ID を取得する
-
+	userID := echoCtx.Get("UserID").(string)                                                                                    // ミドルウェアがセットした UserID を取得する
+	projectID := echoCtx.Param("id")                                                                                            // パスパラメータから project ID を取得する
 	envVarList, err := envVarHandler.envVarService.ListEnvVars(echoCtx.Request().Context(), userID, projectID) // サービスを呼び出して一覧を取得する
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
@@ -52,31 +48,16 @@ func (envVarHandler *EnvVarHandler) ListEnvVars(echoCtx echo.Context) error {
 			"error": "内部サーバーエラー",
 		})
 	}
-
-	responseList := make([]map[string]interface{}, 0, len(envVarList)) // レスポンス一覧を生成する
-	for _, envVar := range envVarList {
-		value := envVar.Value // 値を取得する
-		if envVar.IsSecret {
-			value = maskedValue // シークレットの場合はマスクする
-		}
-		responseList = append(responseList, map[string]interface{}{
-			"id":         envVar.ID,        // ID を設定する
-			"project_id": envVar.ProjectID, // プロジェクト ID を設定する
-			"key":        envVar.Key,       // キーを設定する
-			"value":      value,            // マスク済みの値を設定する
-			"is_secret":  envVar.IsSecret,  // シークレットフラグを設定する
-		})
-	}
-	return echoCtx.JSON(http.StatusOK, responseList) // env_var 一覧を返す
+	return echoCtx.JSON(http.StatusOK, envVarList) // env_var 一覧を返す
 }
 
 // CreateEnvVar は POST /api/v1/projects/:id/env-vars のハンドラー
 func (envVarHandler *EnvVarHandler) CreateEnvVar(echoCtx echo.Context) error {
-	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
-	projectID := echoCtx.Param("id")                                  // パスパラメータから project ID を取得する
+	userID := echoCtx.Get("UserID").(string)   // ミドルウェアがセットした UserID を取得する
+	projectID := echoCtx.Param("id")           // パスパラメータから project ID を取得する
 
-	var requestBody service.CreateEnvVarRequest               // リクエストボディの構造体を定義する
-	if err := echoCtx.Bind(&requestBody); err != nil {        // リクエストをバインドする
+	var requestBody service.CreateEnvVarRequest          // リクエストボディの構造体を定義する
+	if err := echoCtx.Bind(&requestBody); err != nil {   // リクエストをバインドする
 		logger.PrintHandlerError("EnvVarHandler", "CreateEnvVar", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
@@ -108,27 +89,16 @@ func (envVarHandler *EnvVarHandler) CreateEnvVar(echoCtx echo.Context) error {
 			"error": "内部サーバーエラー",
 		})
 	}
-
-	value := envVarData.Value // 値を取得する
-	if envVarData.IsSecret {
-		value = maskedValue // シークレットの場合はマスクする
-	}
-	return echoCtx.JSON(http.StatusCreated, map[string]interface{}{
-		"id":         envVarData.ID,        // ID を設定する
-		"project_id": envVarData.ProjectID, // プロジェクト ID を設定する
-		"key":        envVarData.Key,       // キーを設定する
-		"value":      value,                // マスク済みの値を設定する
-		"is_secret":  envVarData.IsSecret,  // シークレットフラグを設定する
-	})
+	return echoCtx.JSON(http.StatusCreated, envVarData) // 作成結果を返す
 }
 
 // UpdateEnvVar は PUT /api/v1/env-vars/:id のハンドラー
 func (envVarHandler *EnvVarHandler) UpdateEnvVar(echoCtx echo.Context) error {
-	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
-	envVarID := echoCtx.Param("id")                                   // パスパラメータから env_var ID を取得する
+	userID := echoCtx.Get("UserID").(string)   // ミドルウェアがセットした UserID を取得する
+	envVarID := echoCtx.Param("id")            // パスパラメータから env_var ID を取得する
 
-	var requestBody service.UpdateEnvVarRequest               // リクエストボディの構造体を定義する
-	if err := echoCtx.Bind(&requestBody); err != nil {        // リクエストをバインドする
+	var requestBody service.UpdateEnvVarRequest          // リクエストボディの構造体を定義する
+	if err := echoCtx.Bind(&requestBody); err != nil {   // リクエストをバインドする
 		logger.PrintHandlerError("EnvVarHandler", "UpdateEnvVar", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
@@ -154,24 +124,13 @@ func (envVarHandler *EnvVarHandler) UpdateEnvVar(echoCtx echo.Context) error {
 			"error": "内部サーバーエラー",
 		})
 	}
-
-	value := envVarData.Value // 値を取得する
-	if envVarData.IsSecret {
-		value = maskedValue // シークレットの場合はマスクする
-	}
-	return echoCtx.JSON(http.StatusOK, map[string]interface{}{
-		"id":         envVarData.ID,        // ID を設定する
-		"project_id": envVarData.ProjectID, // プロジェクト ID を設定する
-		"key":        envVarData.Key,       // キーを設定する
-		"value":      value,                // マスク済みの値を設定する
-		"is_secret":  envVarData.IsSecret,  // シークレットフラグを設定する
-	})
+	return echoCtx.JSON(http.StatusOK, envVarData) // 更新結果を返す
 }
 
 // DeleteEnvVar は DELETE /api/v1/env-vars/:id のハンドラー
 func (envVarHandler *EnvVarHandler) DeleteEnvVar(echoCtx echo.Context) error {
-	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
-	envVarID := echoCtx.Param("id")                                   // パスパラメータから env_var ID を取得する
+	userID := echoCtx.Get("UserID").(string)   // ミドルウェアがセットした UserID を取得する
+	envVarID := echoCtx.Param("id")            // パスパラメータから env_var ID を取得する
 
 	err := envVarHandler.envVarService.DeleteEnvVar(echoCtx.Request().Context(), userID, envVarID) // サービスを呼び出して env_var を削除する
 	if err != nil {
@@ -197,8 +156,8 @@ func (envVarHandler *EnvVarHandler) DeleteEnvVar(echoCtx echo.Context) error {
 
 // ListEnvVarMounts は GET /api/v1/deployments/:id/env-var-mounts のハンドラー
 func (envVarHandler *EnvVarHandler) ListEnvVarMounts(echoCtx echo.Context) error {
-	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
-	deploymentID := echoCtx.Param("id")                               // パスパラメータから deployment ID を取得する
+	userID := echoCtx.Get("UserID").(string)   // ミドルウェアがセットした UserID を取得する
+	deploymentID := echoCtx.Param("id")        // パスパラメータから deployment ID を取得する
 
 	mountList, err := envVarHandler.envVarMountService.ListEnvVarMounts(echoCtx.Request().Context(), userID, deploymentID) // サービスを呼び出して一覧を取得する
 	if err != nil {
@@ -224,11 +183,11 @@ func (envVarHandler *EnvVarHandler) ListEnvVarMounts(echoCtx echo.Context) error
 
 // CreateEnvVarMount は POST /api/v1/deployments/:id/env-var-mounts のハンドラー
 func (envVarHandler *EnvVarHandler) CreateEnvVarMount(echoCtx echo.Context) error {
-	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
-	deploymentID := echoCtx.Param("id")                               // パスパラメータから deployment ID を取得する
+	userID := echoCtx.Get("UserID").(string)   // ミドルウェアがセットした UserID を取得する
+	deploymentID := echoCtx.Param("id")        // パスパラメータから deployment ID を取得する
 
-	var requestBody service.CreateEnvVarMountRequest          // リクエストボディの構造体を定義する
-	if err := echoCtx.Bind(&requestBody); err != nil {        // リクエストをバインドする
+	var requestBody service.CreateEnvVarMountRequest     // リクエストボディの構造体を定義する
+	if err := echoCtx.Bind(&requestBody); err != nil {   // リクエストをバインドする
 		logger.PrintHandlerError("EnvVarHandler", "CreateEnvVarMount", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
 			"error": "リクエストが不正です",
@@ -271,8 +230,8 @@ func (envVarHandler *EnvVarHandler) CreateEnvVarMount(echoCtx echo.Context) erro
 
 // DeleteEnvVarMount は DELETE /api/v1/env-var-mounts/:id のハンドラー
 func (envVarHandler *EnvVarHandler) DeleteEnvVarMount(echoCtx echo.Context) error {
-	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
-	mountID := echoCtx.Param("id")                                    // パスパラメータからマウント ID を取得する
+	userID := echoCtx.Get("UserID").(string)   // ミドルウェアがセットした UserID を取得する
+	mountID := echoCtx.Param("id")             // パスパラメータからマウント ID を取得する
 
 	err := envVarHandler.envVarMountService.DeleteEnvVarMount(echoCtx.Request().Context(), userID, mountID) // サービスを呼び出してマウント設定を削除する
 	if err != nil {

@@ -16,6 +16,7 @@ type VolumeMountRepository interface {
 	FindByDeploymentIDAndMountPath(ctx context.Context, deploymentID string, mountPath string) (*models.VolumeMount, error) // deploymentID と mountPath でマウント設定を取得する（重複チェック用）
 	UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount, status models.VolumeMountStatus) error // ステータスを更新する
 	Delete(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount) error                               // マウント設定を削除する
+	DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error                   // deploymentID に紐づくマウント設定を全件削除する
 }
 
 // volumeMountRepositoryImpl は VolumeMountRepository の GORM 実装
@@ -77,6 +78,15 @@ func (repo *volumeMountRepositoryImpl) UpdateStatus(ctx context.Context, tx *gor
 	}
 	mount.Status = status                        // ステータスをセットする
 	return db.WithContext(ctx).Save(mount).Error // db を使って更新する
+}
+
+// DeleteAllByDeploymentID は deploymentID に紐づくマウント設定を全件削除する
+func (repo *volumeMountRepositoryImpl) DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error {
+	db := repo.db // tx が nil の場合は repo.db を使う
+	if tx != nil {
+		db = tx
+	}
+	return db.WithContext(ctx).Where("deployment_id = ?", deploymentID).Delete(&models.VolumeMount{}).Error // deploymentID で一括削除する
 }
 
 // Delete はマウント設定レコードを削除する

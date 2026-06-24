@@ -288,6 +288,9 @@ func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID s
 		if err := svc.buildRepo.DeleteAllByDeploymentID(ctx, deploymentData.ID); err != nil { // ビルド履歴を削除する
 			return nil, err // 削除エラーを返す
 		}
+		if err := svc.volumeMountRepo.DeleteAllByDeploymentID(ctx, nil, deploymentData.ID); err != nil { // volume_mount レコードを削除する
+			return nil, err // 削除エラーを返す
+		}
 		if err := svc.deploymentRepo.Delete(ctx, deploymentData.ID); err != nil { // deployment レコードを削除する
 			return nil, err // 削除エラーを返す
 		}
@@ -310,6 +313,9 @@ func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID s
 			return nil, err // クリアエラーを返す
 		}
 		if err := svc.buildRepo.DeleteAllByDeploymentID(ctx, deploymentData.ID); err != nil { // ビルド履歴を削除する
+			return nil, err // 削除エラーを返す
+		}
+		if err := svc.volumeMountRepo.DeleteAllByDeploymentID(ctx, nil, deploymentData.ID); err != nil { // volume_mount レコードを削除する
 			return nil, err // 削除エラーを返す
 		}
 		if err := svc.deploymentRepo.Delete(ctx, deploymentData.ID); err != nil { // deployment レコードを削除する

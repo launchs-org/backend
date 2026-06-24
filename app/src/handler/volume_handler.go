@@ -126,6 +126,12 @@ func (volumeHandler *VolumeHandler) DeleteVolume(echoCtx echo.Context) error {
 				"error": "リソースが見つかりません",
 			})
 		}
+		if errors.Is(err, service.ErrVolumeMountedCannotDelete) { // マウント中の場合は 400 を返す
+			logger.PrintHandlerError("VolumeHandler", "DeleteVolume", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "ボリュームがマウントされています。先にアンマウントしてから削除してください",
+			})
+		}
 		logger.PrintHandlerError("VolumeHandler", "DeleteVolume", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
