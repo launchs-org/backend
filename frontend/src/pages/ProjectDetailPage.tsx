@@ -601,9 +601,9 @@ export function ProjectDetailPage() {
         </div>
       }
     >
-      <div>
+      <div className="h-full">
         {/* ReactFlow グラフ + サイドバー（空状態でもサイドバーを共有する） */}
-        <div className="flex overflow-hidden bg-white" style={{ height: 'calc(100vh - 48px)' }}>
+        <div className="flex overflow-hidden bg-white h-full">
             {/* 左アイコンレール */}
             <div className="w-14 shrink-0 flex flex-col items-center pt-3 gap-2 border-r border-gray-100 bg-gray-50 z-10">
               <button
@@ -762,7 +762,7 @@ export function ProjectDetailPage() {
                 />
 
                 {/* サイドバー */}
-                <div ref={sidebarElRef} className="shrink-0 flex flex-col border-l border-gray-200" style={{ width: sidebarWidth.current }}>
+                <div ref={sidebarElRef} className="shrink-0 flex flex-col border-l border-gray-200 overflow-hidden" style={{ width: sidebarWidth.current }}>
                   {/* Deployment 詳細・作成フォーム（iframe） */}
                   {(sidebarMode === 'deployment' || sidebarMode === 'deployment-new') && sidebarIframeSrc && (
                     <>
@@ -788,7 +788,7 @@ export function ProjectDetailPage() {
                           </button>
                         </div>
                       </div>
-                      <div className="flex-1 relative">
+                      <div className="flex-1 relative min-h-0 overflow-hidden">
                         {!iframeLoaded && (
                           <div className="absolute inset-0 flex items-center justify-center bg-white z-10">
                             <div className="w-6 h-6 border-2 border-[#00C2D1] border-t-transparent rounded-full animate-spin" />
