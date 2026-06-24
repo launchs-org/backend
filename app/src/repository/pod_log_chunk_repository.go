@@ -13,6 +13,8 @@ type PodLogChunkRepository interface {
 	Create(ctx context.Context, chunk *models.PodLogChunk) error                                                             // ログチャンクを作成する
 	FindByDeploymentID(ctx context.Context, deploymentID string) ([]models.PodLogChunk, error)                               // deploymentID に紐づくログチャンク一覧を取得する
 	FindByDeploymentIDSince(ctx context.Context, deploymentID string, since time.Time) ([]models.PodLogChunk, error)         // since より後のログチャンクを取得する（差分ポーリング用）
+	DeleteByDeploymentIDAndPodNameNotIn(ctx context.Context, deploymentID string, activePodNames []string) error             // 現在存在しない Pod のチャンクを削除する（スケールダウン時）
+	DeleteByPodName(ctx context.Context, deploymentID string, podName string) error                                          // 指定した Pod のチャンクを削除する（Pod 削除イベント時）
 }
 
 // podLogChunkRepositoryImpl は PodLogChunkRepository の GORM 実装
@@ -46,4 +48,19 @@ func (repo *podLogChunkRepositoryImpl) FindByDeploymentIDSince(ctx context.Conte
 		return nil, err // 取得エラーを返す
 	}
 	return chunkList, nil // ログチャンク一覧を返す
+}
+
+// DeleteByPodName は deploymentID と podName に一致するチャンクを削除する
+func (repo *podLogChunkRepositoryImpl) DeleteByPodName(ctx context.Context, deploymentID string, podName string) error {
+	return repo.db.WithContext(ctx).
+		Where("deployment_id = ? AND pod_name = ?", deploymentID, podName). // 対象 Pod を条件に指定する
+		Delete(&models.PodLogChunk{}).Error                                  // 削除を実行する
+}
+
+// DeleteByDeploymentIDAndPodNameNotIn は deploymentID に紐づくチャンクのうち activePodNames に含まれない Pod のチャンクを削除する
+// スケールダウン時に消えた Pod のログをDBから削除するために使う
+func (repo *podLogChunkRepositoryImpl) DeleteByDeploymentIDAndPodNameNotIn(ctx context.Context, deploymentID string, activePodNames []string) error {
+	return repo.db.WithContext(ctx). // DB 操作を実行する
+		Where("deployment_id = ? AND pod_name NOT IN ?", deploymentID, activePodNames). // 対象外の Pod を条件に指定する
+		Delete(&models.PodLogChunk{}).Error                                              // 削除を実行する
 }
