@@ -6,6 +6,7 @@ import type { Deployment } from '@/lib/types'
 export type DeploymentNodeData = {
   deployment: Deployment
   projectId: string
+  highlighted?: boolean // EnvVarクリック時にハイライトされるか
   onSelect?: (deploymentId: string) => void // サイドバー表示用コールバック
 }
 
@@ -34,7 +35,7 @@ const TYPE_COLOR = {
 } as const
 
 export function DeploymentNode({ data }: NodeProps) {
-  const { deployment, projectId: _projectId, onSelect } = data as DeploymentNodeData
+  const { deployment, projectId: _projectId, highlighted, onSelect } = data as DeploymentNodeData
   const Icon = TYPE_ICON[deployment.type] ?? Container // タイプに対応するアイコンを取得する
   const color = TYPE_COLOR[deployment.type] ?? TYPE_COLOR.image_url // タイプに対応するカラーを取得する
 
@@ -82,8 +83,15 @@ export function DeploymentNode({ data }: NodeProps) {
 
       {/* メインカード */}
       <div
-        className="bg-white rounded-xl shadow-md cursor-pointer hover:shadow-lg transition-all overflow-hidden border border-gray-100"
-        style={{ borderTopColor: hasPending ? '#D97706' : color.accent, borderTopWidth: 3, position: 'relative', width: 220 }}
+        className="bg-white rounded-xl shadow-md cursor-pointer hover:shadow-lg transition-all overflow-hidden"
+        style={{
+          borderTopColor: hasPending ? '#D97706' : color.accent,
+          borderTopWidth: 3,
+          position: 'relative',
+          width: 220,
+          border: highlighted ? '2px solid #8B5CF6' : '1px solid #F3F4F6',
+          boxShadow: highlighted ? '0 0 0 3px rgba(139,92,246,0.2)' : undefined,
+        }}
         onClick={() => onSelect?.(deployment.id)} // サイドバーにデプロイメント詳細を表示する
       >
 

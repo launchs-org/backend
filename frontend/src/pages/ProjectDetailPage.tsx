@@ -19,9 +19,10 @@ import { ServiceNode } from '@/components/flow/ServiceNode'
 import { IngressNode } from '@/components/flow/IngressNode'
 import { InternetNode } from '@/components/flow/InternetNode'
 import { VolumeNode } from '@/components/flow/VolumeNode'
+import { EnvVarNode } from '@/components/flow/EnvVarNode'
 import { get, post, del } from '@/lib/api'
 import { put } from '@/lib/api'
-import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar, VolumeMount } from '@/lib/types'
+import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar, VolumeMount, EnvVarMount } from '@/lib/types'
 import { SIDEBAR_INITIAL_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, FLOW_ROW_HEIGHT } from '@/lib/config'
 
 const NODE_TYPES = {
@@ -30,6 +31,7 @@ const NODE_TYPES = {
   ingress: IngressNode,
   internet: InternetNode,
   volume: VolumeNode,
+  envVar: EnvVarNode,
 } // カスタムノードタイプを定義する
 
 const EDGE_DEFAULTS = {
@@ -46,7 +48,8 @@ const EDGE_DEFAULTS = {
 type DeploymentWithRelations = {
   deployment: Deployment
   service: K8sService | null
-  volumeMounts: VolumeMount[] // このデプロイメントにマウントされているボリューム一覧
+  volumeMounts: VolumeMount[]    // このデプロイメントにマウントされているボリューム一覧
+  envVarMounts: EnvVarMount[]    // このデプロイメントにマウントされている環境変数一覧
 }
 
 type SidebarMode = 'deployment' | 'deployment-new' | 'ingress' | null // サイドバーの表示モードを定義する
@@ -72,6 +75,7 @@ export function ProjectDetailPage() {
   const [volumeList, setVolumeList] = useState<Volume[]>([]) // プロジェクトのボリューム一覧を管理する
   const [deletingVolumeId, setDeletingVolumeId] = useState<string | null>(null) // 削除中のボリュームID
   const [showEnvVarSidebar, setShowEnvVarSidebar] = useState(false) // 環境変数サイドバーの表示フラグ
+  const [selectedEnvVarId, setSelectedEnvVarId] = useState<string | null>(null) // クリックされた環境変数ID（ハイライト用）
   const [showDeploymentListSidebar, setShowDeploymentListSidebar] = useState(false) // デプロイメント一覧サイドバーの表示フラグ
   const [showIngressListSidebar, setShowIngressListSidebar] = useState(false) // IngressRoute一覧サイドバーの表示フラグ
   const [envVarList, setEnvVarList] = useState<EnvVar[]>([]) // プロジェクトの環境変数一覧を管理する
@@ -101,6 +105,8 @@ export function ProjectDetailPage() {
     currentIngressRouteList: IngressRoute[],
     currentPathRulesByIngressRouteId: Record<string, PathRule[]>,
     currentVolumeList: Volume[],
+    currentEnvVarList: EnvVar[],
+    currentSelectedEnvVarId: string | null,
   ) => {
     const newNodes: Node[] = []
     const newEdges: Edge[] = []
@@ -108,7 +114,8 @@ export function ProjectDetailPage() {
     const ROW_HEIGHT = FLOW_ROW_HEIGHT // 行の高さを定義する
     const COL_WIDTH = 360 // 列の幅を定義する
 
-    // レイアウト: Internet(x=0) → Ingress(x=COL) → Service(x=COL*2) → Deployment(x=COL*3) → Volume(x=COL*4)
+    // レイアウト: EnvVar(x=-COL) → Internet(x=0) → Ingress(x=COL) → Service(x=COL*2) → Deployment(x=COL*3) → Volume(x=COL*4)
+    const ENVVAR_COL = -COL_WIDTH // EnvVar ノードのX座標
     const INTERNET_COL = 0 // Internet ノードのX座標
     const INGRESS_COL = COL_WIDTH // IngressRoute ノードのX座標
     const SERVICE_COL = COL_WIDTH * 2 // Service ノードのX座標
@@ -127,6 +134,10 @@ export function ProjectDetailPage() {
       const depH = relation.deployment.k8s_status ? 148 : 132
 
       // デプロイメントノード: 縦中央を rowCenterY に合わせる
+      // このDeploymentが選択中のEnvVarにマウントされているかを判定する
+      const depHighlighted = currentSelectedEnvVarId !== null &&
+        relation.envVarMounts.some(evm => evm.env_var_id === currentSelectedEnvVarId && evm.status !== 'deleting')
+
       newNodes.push({
         id: `dep-${relation.deployment.id}`,
         type: 'deployment',
@@ -134,6 +145,7 @@ export function ProjectDetailPage() {
         data: {
           deployment: relation.deployment,
           projectId: pid,
+          highlighted: depHighlighted, // EnvVarハイライト時に強調する
           onSelect: (deploymentId: string) => {
             setSelectedDeploymentId(deploymentId)
             setSidebarMode('deployment')
@@ -257,9 +269,55 @@ export function ProjectDetailPage() {
       })
     }
 
+    // EnvVar ノードをグラフに追加する
+    const ENVVAR_H = 80 // EnvVarNode の高さ
+    currentEnvVarList.forEach((envVar, envVarIndex) => {
+      // このEnvVarがマウントされているDeploymentのインデックスを収集する
+      const mountedRelationIndices = relations
+        .map((relation, relationIndex) => ({ relation, relationIndex }))
+        .filter(({ relation }) =>
+          relation.envVarMounts.some(evm => evm.env_var_id === envVar.id && evm.status !== 'deleting')
+        )
+
+      // Y座標: マウント先がある場合はその縦中央平均、ない場合は順番に並べる
+      const envVarCenterY = mountedRelationIndices.length > 0
+        ? mountedRelationIndices.reduce((sum, { relationIndex }) => sum + relationIndex * ROW_HEIGHT + ROW_HEIGHT / 2, 0) / mountedRelationIndices.length
+        : envVarIndex * ROW_HEIGHT + ROW_HEIGHT / 2
+
+      const isHighlighted = currentSelectedEnvVarId === envVar.id // 選択中かどうかを判定する
+
+      newNodes.push({
+        id: `envvar-${envVar.id}`,
+        type: 'envVar',
+        position: { x: ENVVAR_COL, y: envVarCenterY - ENVVAR_H / 2 },
+        data: {
+          envVar,
+          highlighted: isHighlighted,
+          onClick: (envVarId: string) => setSelectedEnvVarId(prev => prev === envVarId ? null : envVarId), // トグル選択する
+        },
+      })
+
+      // マウント先の各 Deployment へ破線エッジを追加する
+      mountedRelationIndices.forEach(({ relation }) => {
+        const edgeHighlighted = isHighlighted // 選択中の場合はエッジをハイライトする
+        newEdges.push({
+          id: `edge-envvar-dep-${envVar.id}-${relation.deployment.id}`,
+          source: `envvar-${envVar.id}`,
+          target: `dep-${relation.deployment.id}`,
+          type: 'straight',
+          style: {
+            stroke: edgeHighlighted ? '#8B5CF6' : '#C4B5FD',
+            strokeWidth: edgeHighlighted ? 2 : 1,
+            strokeDasharray: '4 4',
+          },
+          animated: edgeHighlighted, // ハイライト時はアニメーションする
+        })
+      })
+    })
+
     setNodes(newNodes) // ノードを更新する
     setEdges(newEdges) // エッジを更新する
-  }, [setNodes, setEdges, openIngressSidebar])
+  }, [setNodes, setEdges, openIngressSidebar, setSelectedEnvVarId])
 
   // グラフ再描画の判定に使う前回データを保持する
   const prevGraphKey = useRef<string | null>(null)
@@ -275,14 +333,15 @@ export function ProjectDetailPage() {
 
       setProject(projectData)
 
-      // 各デプロイメントのサービスと VolumeMounts を並行取得する
+      // 各デプロイメントのサービス・VolumeMounts・EnvVarMounts を並行取得する
       const relations = await Promise.all(
         (deploymentList ?? []).map(async (deployment) => {
-          const [serviceResult, volumeMountResult] = await Promise.all([
+          const [serviceResult, volumeMountResult, envVarMountResult] = await Promise.all([
             get<K8sService>(`/deployments/${deployment.id}/service`).catch(() => null), // サービス情報を取得する
             get<VolumeMount[]>(`/deployments/${deployment.id}/volume-mounts`).catch(() => [] as VolumeMount[]), // VolumeMounts を取得する
+            get<EnvVarMount[]>(`/deployments/${deployment.id}/env-var-mounts`).catch(() => [] as EnvVarMount[]), // EnvVarMounts を取得する
           ])
-          return { deployment, service: serviceResult, volumeMounts: volumeMountResult ?? [] } as DeploymentWithRelations
+          return { deployment, service: serviceResult, volumeMounts: volumeMountResult ?? [], envVarMounts: envVarMountResult ?? [] } as DeploymentWithRelations
         })
       )
 
@@ -305,15 +364,13 @@ export function ProjectDetailPage() {
       const volumes = await get<Volume[]>(`/projects/${projectId}/volumes`).catch(() => []) // ボリューム一覧を取得する
       setVolumeList(volumes ?? []) // ボリューム一覧を設定する
 
-      // グラフに関わるデータのハッシュキーを生成し、前回から変化があった場合のみ再描画する
-      const nextGraphKey = JSON.stringify({ relations, ingressList, currentPathRulesByIngressRouteId, volumes })
-      if (nextGraphKey !== prevGraphKey.current) {
-        prevGraphKey.current = nextGraphKey // キーを更新する
-        buildGraph(relations, projectId, ingressList, currentPathRulesByIngressRouteId, volumes ?? []) // グラフを再描画する
-      }
+      // グラフキーは envVar 追加後に再描画するため、ここではスキップする
 
       const envVars = await get<EnvVar[]>(`/projects/${projectId}/env-vars`).catch(() => []) // 環境変数一覧を取得する
       setEnvVarList(envVars ?? []) // 環境変数一覧を設定する
+
+      // envVar を含めてグラフを再描画する（selectedEnvVarId は useEffect 側で監視）
+      buildGraph(relations, projectId, ingressList, currentPathRulesByIngressRouteId, volumes ?? [], envVars ?? [], selectedEnvVarId)
     } catch (fetchError) {
       console.error(fetchError)
     } finally {
@@ -330,6 +387,12 @@ export function ProjectDetailPage() {
 
     return () => clearInterval(intervalId) // クリーンアップ
   }, [fetchData])
+
+  // selectedEnvVarId が変わったらハイライト状態でグラフを再描画する
+  useEffect(() => {
+    if (deploymentRelations.length === 0) return
+    buildGraph(deploymentRelations, projectId!, ingressRouteList, pathRulesByIngressRouteId, volumeList, envVarList, selectedEnvVarId)
+  }, [selectedEnvVarId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // iframe から postMessage でデプロイメント作成完了を受信したらサイドバーを閉じてデータを再取得する
   useEffect(() => {

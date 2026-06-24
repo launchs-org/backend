@@ -1442,13 +1442,16 @@ function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
               const isMounted = mountList.some(mount => mount.env_var_id === ev.id) // マウント済みかどうかを確認する
               return (
                 <div key={ev.id} className="flex items-center gap-2 bg-gray-50 rounded-md px-3 py-2 border border-gray-100">
-                  <span className="font-mono text-sm font-medium text-[#111827] truncate">{ev.key}</span>
+                  <span className="font-mono text-sm font-medium text-[#111827] shrink-0">{ev.key}</span>
                   {ev.is_secret && (
                     <span className="text-[10px] bg-purple-50 text-purple-500 px-1.5 py-0.5 rounded shrink-0">secret</span>
                   )}
                   {isMounted && (
                     <span className="text-[10px] bg-blue-50 text-blue-500 px-1.5 py-0.5 rounded shrink-0">マウント済み</span>
                   )}
+                  <span className="font-mono text-xs text-gray-400 truncate ml-auto">
+                    {ev.value || '(空)'}
+                  </span>
                 </div>
               )
             })}
