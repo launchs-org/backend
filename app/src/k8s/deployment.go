@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -465,10 +466,56 @@ func collectSinglePodLogs(ctx context.Context, k8sClient kubernetes.Interface, n
 		}
 
 		for _, containerName := range containerNames { // 各コンテナのログをストリームする
-			if err := streamPodContainerLog(ctx, k8sClient, namespace, podName, containerName, logCh); err != nil { // コンテナのログをストリームする
-				if ctx.Err() == nil { // コンテキストキャンセル以外のエラーをログ出力する
+			restartCount := 0 // 再起動回数カウンタを初期化する
+			for {             // コンテナが再起動するたびにループする
+				if restartCount > 0 { // 2回目以降はセパレーター行を挿入する
+					separator := fmt.Sprintf("──── コンテナ再起動 #%d (%s) ────", restartCount, containerName) // 再起動セパレーター行を生成する
+					select {
+					case logCh <- separator: // セパレーターをチャンネルへ送信する
+					case <-ctx.Done():       // コンテキストキャンセル時は終了する
+						return
+					}
+				}
+
+				if err := streamPodContainerLog(ctx, k8sClient, namespace, podName, containerName, logCh); err != nil { // コンテナのログをストリームする
+					if ctx.Err() != nil { // コンテキストキャンセルの場合はループを抜ける
+						return
+					}
 					logger.PrintErr("WatchDeployments: コンテナログ取得に失敗しました（pod=" + podName + ", container=" + containerName + "）: " + err.Error()) // エラーをログ出力する
 				}
+
+				if ctx.Err() != nil { // コンテキストキャンセルの場合はループを抜ける
+					return
+				}
+
+				// ストリームが終了した = コンテナが再起動した可能性があるので少し待ってから再接続する
+				select {
+				case <-ctx.Done(): // コンテキストキャンセル時は終了する
+					return
+				case <-time.After(2 * time.Second): // 2秒待機してから再接続する
+				}
+
+				// 現在のコンテナの再起動回数を確認して実際に再起動したかどうかを判定する
+				podData, podErr := k8sClient.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{}) // Pod の詳細を再取得する
+				if podErr != nil {
+					if ctx.Err() == nil { // コンテキストキャンセル以外はログ出力する
+						logger.PrintErr("WatchDeployments: Pod 再取得に失敗しました（pod=" + podName + "）: " + podErr.Error()) // エラーをログ出力する
+					}
+					return
+				}
+
+				currentRestartCount := int32(0) // 現在の再起動回数を初期化する
+				for _, containerStatus := range podData.Status.ContainerStatuses { // コンテナステータスを確認する
+					if containerStatus.Name == containerName { // 対象コンテナを見つける
+						currentRestartCount = containerStatus.RestartCount // 再起動回数を取得する
+						break
+					}
+				}
+
+				if int(currentRestartCount) <= restartCount { // 再起動回数が増えていない場合はループを終了する
+					break
+				}
+				restartCount = int(currentRestartCount) // 再起動回数を更新する
 			}
 		}
 	}()
