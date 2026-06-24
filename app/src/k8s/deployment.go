@@ -61,7 +61,7 @@ func isNotFound(err error) bool {
 
 // pollDeployments は 10 秒ごとに全 Deployment を List して app_status を同期する
 // Watch 接続切断中のイベント取りこぼしを補完するためのポーリングループ
-func pollDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]context.CancelFunc, streamCancelMu *sync.Mutex) {
+func pollDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
 	ticker := time.NewTicker(10 * time.Second) // 10 秒ごとにポーリングするタイマーを生成する
 	defer ticker.Stop()                        // 終了時にタイマーを停止する
 
@@ -116,11 +116,20 @@ func pollDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploy
 				}
 
 				if newAppStatus == models.AppStatusRunning { // app_status が running の場合はログストリームを開始する
+					currentReadyReplicas := k8sDeployment.Status.ReadyReplicas // 現在の ReadyReplicas を取得する
 					streamCancelMu.Lock()                                       // マップへの排他アクセスを開始する
-					_, streamRunning := streamCancelMap[deploymentID]           // ストリームが既に実行中か確認する
+					existingState, streamRunning := streamCancelMap[deploymentID] // ストリームが既に実行中か確認する
+					replicasChanged := streamRunning && existingState.readyReplicas != currentReadyReplicas // レプリカ数が変化したか確認する
 					streamCancelMu.Unlock()                                     // マップへの排他アクセスを終了する
 
-					if !streamRunning { // ストリームが未起動の場合のみ開始する
+					if !streamRunning || replicasChanged { // ストリームが未起動またはレプリカ数変化時に開始する
+						if replicasChanged { // レプリカ数変化の場合は既存ストリームをキャンセルする
+							streamCancelMu.Lock()                                    // マップへの排他アクセスを開始する
+							existingState.cancel()                                   // 既存ストリームをキャンセルする
+							delete(streamCancelMap, deploymentID)                    // マップから削除する
+							streamCancelMu.Unlock()                                  // マップへの排他アクセスを終了する
+							logger.Println("pollDeployments: レプリカ数変化によりPodログストリームを再起動します: " + deploymentID) // 再起動ログを出力する
+						}
 						projectData, projectErr := projectRepo.FindByIDNoTx(ctx, currentDeployment.ProjectID) // project を取得して namespace を解決する
 						if projectErr != nil {
 							logger.PrintErr("pollDeployments: Project 取得に失敗しました（deploymentID=" + deploymentID + "）: " + projectErr.Error()) // エラーをログ出力する
@@ -128,15 +137,15 @@ func pollDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploy
 						}
 						streamCtx, streamCancel := context.WithCancel(ctx)      // ストリームのコンテキストを生成する
 						streamCancelMu.Lock()                                    // マップへの排他アクセスを開始する
-						streamCancelMap[deploymentID] = streamCancel             // キャンセル関数をマップに登録する
+						streamCancelMap[deploymentID] = podStreamState{cancel: streamCancel, readyReplicas: currentReadyReplicas} // 状態をマップに登録する
 						streamCancelMu.Unlock()                                  // マップへの排他アクセスを終了する
 						go streamAndSavePodLogs(streamCtx, k8sClient, podLogChunkRepo, deploymentID, projectData.Namespace, k8sDeployment.Name) // ログストリームを goroutine で開始する
 						logger.Println("pollDeployments: Podログストリームを開始しました: " + deploymentID)                                               // 開始ログを出力する
 					}
 				} else { // running 以外の場合は実行中のログストリームをキャンセルする
 					streamCancelMu.Lock()                                               // マップへの排他アクセスを開始する
-					if streamCancel, streamExists := streamCancelMap[deploymentID]; streamExists { // ストリームが実行中の場合
-						streamCancel()                        // ストリームをキャンセルする
+					if existingState, streamExists := streamCancelMap[deploymentID]; streamExists { // ストリームが実行中の場合
+						existingState.cancel()                // ストリームをキャンセルする
 						delete(streamCancelMap, deploymentID) // マップから削除する
 						logger.Println("pollDeployments: Podログストリームを停止しました: " + deploymentID) // 停止ログを出力する
 					}
@@ -149,10 +158,16 @@ func pollDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploy
 	}
 }
 
+// podStreamState はログストリームのキャンセル関数と起動時のレプリカ数を保持する
+type podStreamState struct {
+	cancel        context.CancelFunc // ストリームキャンセル関数
+	readyReplicas int32              // ストリーム起動時の ReadyReplicas 数
+}
+
 // WatchDeployments は全 Namespace の Deployment 変化を監視して DB を自動更新する
 func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository) {
-	// 実行中のログストリームを管理するマップ（deploymentID → cancelFunc）
-	streamCancelMap := make(map[string]context.CancelFunc) // ストリームキャンセル関数を管理するマップ
+	// 実行中のログストリームを管理するマップ（deploymentID → podStreamState）
+	streamCancelMap := make(map[string]podStreamState) // ストリーム状態を管理するマップ
 	var streamCancelMu sync.Mutex                          // マップへの排他アクセスのためのミューテックス
 
 	// 起動時リカバリ: running 状態の Deployment に対してログストリームを再開する
@@ -169,7 +184,7 @@ func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deplo
 			}
 			streamCtx, streamCancel := context.WithCancel(ctx)      // ストリームのコンテキストを生成する
 			streamCancelMu.Lock()                                    // マップへの排他アクセスを開始する
-			streamCancelMap[deploymentData.ID] = streamCancel        // キャンセル関数をマップに登録する
+			streamCancelMap[deploymentData.ID] = podStreamState{cancel: streamCancel, readyReplicas: 0} // 状態をマップに登録する（リカバリ時は ReadyReplicas 不明なので 0）
 			streamCancelMu.Unlock()                                  // マップへの排他アクセスを終了する
 			go streamAndSavePodLogs(streamCtx, k8sClient, podLogChunkRepo, deploymentData.ID, projectData.Namespace, deploymentData.Name) // ログストリームを goroutine で再開する
 			logger.Println("WatchDeployments: 起動時リカバリでログストリームを再開しました: " + deploymentData.ID)                                            // リカバリログを出力する
@@ -200,7 +215,7 @@ func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deplo
 }
 
 // watchLoop は Watch イベントチャネルを処理するループ
-func watchLoop(ctx context.Context, watcher watch.Interface, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]context.CancelFunc, streamCancelMu *sync.Mutex) {
+func watchLoop(ctx context.Context, watcher watch.Interface, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
 	defer watcher.Stop() // 終了時に Watch を停止する
 
 	for {
@@ -217,7 +232,7 @@ func watchLoop(ctx context.Context, watcher watch.Interface, k8sClient kubernete
 }
 
 // handleDeploymentEvent は Deployment の Watch イベントを処理する
-func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]context.CancelFunc, streamCancelMu *sync.Mutex) {
+func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
 	k8sDeployment, ok := event.Object.(*appsv1.Deployment) // イベントオブジェクトを Deployment にキャストする
 	if !ok {                                                 // キャストに失敗した場合はスキップする
 		return
@@ -232,8 +247,8 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kub
 	case watch.Deleted: // Deleted イベントの場合は DB の status を確認して処理を分岐する
 		// 実行中のログストリームをキャンセルする
 		streamCancelMu.Lock()                              // マップへの排他アクセスを開始する
-		if streamCancel, streamExists := streamCancelMap[deploymentID]; streamExists { // ストリームが実行中の場合
-			streamCancel()                     // ストリームをキャンセルする
+		if existingState, streamExists := streamCancelMap[deploymentID]; streamExists { // ストリームが実行中の場合
+			existingState.cancel()                // ストリームをキャンセルする
 			delete(streamCancelMap, deploymentID) // マップから削除する
 		}
 		streamCancelMu.Unlock() // マップへの排他アクセスを終了する
@@ -314,11 +329,20 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kub
 		logger.Println("WatchDeployments: app_status と k8s_status を更新しました: " + deploymentID) // 更新ログを出力する
 
 		if appStatus == models.AppStatusRunning { // app_status が running の場合はログストリームを開始または継続する
+			currentReadyReplicas := k8sDeployment.Status.ReadyReplicas // 現在の ReadyReplicas を取得する
 			streamCancelMu.Lock()                                       // マップへの排他アクセスを開始する
-			_, streamRunning := streamCancelMap[deploymentID]           // ストリームが既に実行中か確認する
+			existingState, streamRunning := streamCancelMap[deploymentID] // ストリームが既に実行中か確認する
+			replicasChanged := streamRunning && existingState.readyReplicas != currentReadyReplicas // レプリカ数が変化したか確認する
 			streamCancelMu.Unlock()                                     // マップへの排他アクセスを終了する
 
-			if !streamRunning { // ストリームが未起動の場合のみ開始する
+			if !streamRunning || replicasChanged { // ストリームが未起動またはレプリカ数変化時に開始する
+				if replicasChanged { // レプリカ数変化の場合は既存ストリームをキャンセルする
+					streamCancelMu.Lock()                                    // マップへの排他アクセスを開始する
+					existingState.cancel()                                   // 既存ストリームをキャンセルする
+					delete(streamCancelMap, deploymentID)                    // マップから削除する
+					streamCancelMu.Unlock()                                  // マップへの排他アクセスを終了する
+					logger.Println("WatchDeployments: レプリカ数変化によりPodログストリームを再起動します: " + deploymentID) // 再起動ログを出力する
+				}
 				deploymentData, deploymentErr := deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得して projectID を解決する
 				if deploymentErr != nil {
 					logger.PrintErr("WatchDeployments: Deployment 取得に失敗しました（deploymentID=" + deploymentID + "）: " + deploymentErr.Error()) // エラーをログ出力する
@@ -331,15 +355,15 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kub
 				}
 				streamCtx, streamCancel := context.WithCancel(ctx)      // ストリームのコンテキストを生成する
 				streamCancelMu.Lock()                                    // マップへの排他アクセスを開始する
-				streamCancelMap[deploymentID] = streamCancel             // キャンセル関数をマップに登録する
+				streamCancelMap[deploymentID] = podStreamState{cancel: streamCancel, readyReplicas: currentReadyReplicas} // 状態をマップに登録する
 				streamCancelMu.Unlock()                                  // マップへの排他アクセスを終了する
 				go streamAndSavePodLogs(streamCtx, k8sClient, podLogChunkRepo, deploymentID, projectData.Namespace, k8sDeployment.Name) // ログストリームを goroutine で開始する
 				logger.Println("WatchDeployments: Podログストリームを開始しました: " + deploymentID)                                               // 開始ログを出力する
 			}
 		} else { // running 以外の場合は実行中のログストリームをキャンセルする
 			streamCancelMu.Lock()                                               // マップへの排他アクセスを開始する
-			if streamCancel, streamExists := streamCancelMap[deploymentID]; streamExists { // ストリームが実行中の場合
-				streamCancel()                        // ストリームをキャンセルする
+			if existingState, streamExists := streamCancelMap[deploymentID]; streamExists { // ストリームが実行中の場合
+				existingState.cancel()                // ストリームをキャンセルする
 				delete(streamCancelMap, deploymentID) // マップから削除する
 				logger.Println("WatchDeployments: Podログストリームを停止しました: " + deploymentID) // 停止ログを出力する
 			}
@@ -356,6 +380,19 @@ func streamAndSavePodLogs(ctx context.Context, k8sClient kubernetes.Interface, p
 			logger.PrintErr("WatchDeployments: Pod 取得に失敗しました（deploymentName=" + deploymentName + "）: " + err.Error()) // エラーをログ出力する
 		}
 		return
+	}
+
+	// 現在存在する Pod 名一覧を収集する
+	activePodNames := make([]string, 0, len(podList)) // アクティブな Pod 名一覧を生成する
+	for podIndex := range podList {                    // 各 Pod 名を収集する
+		activePodNames = append(activePodNames, podList[podIndex].Name) // Pod 名を追加する
+	}
+
+	// スケールダウンで消えた Pod のチャンクを DB から削除する
+	if len(activePodNames) > 0 { // Pod が1件以上ある場合のみ削除する（全削除を防ぐ）
+		if deleteErr := podLogChunkRepo.DeleteByDeploymentIDAndPodNameNotIn(ctx, deploymentID, activePodNames); deleteErr != nil { // 不要チャンクを削除する
+			logger.PrintErr("WatchDeployments: 不要 Pod ログチャンク削除に失敗しました（deploymentID=" + deploymentID + "）: " + deleteErr.Error()) // エラーをログ出力する
+		}
 	}
 
 	for podIndex := range podList { // 各 Pod ごとにログ収集 goroutine を起動する
