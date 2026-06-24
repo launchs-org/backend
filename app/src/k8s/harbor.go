@@ -133,9 +133,84 @@ func (client *HarborClient) CreateHarborRobotAccount(ctx context.Context, projec
 			{
 				Kind:      "project",     // プロジェクトリソース種別を設定する
 				Namespace: projectName,   // 対象プロジェクトを設定する
-				Access: []harborRobotAccess{
-					{Resource: "repository", Action: "push"}, // push 権限を付与する
-					{Resource: "repository", Action: "pull"}, // pull 権限を付与する
+				Access: []harborRobotAccess{ // プロジェクトの全権限を付与する
+					// create
+					{Resource: "artifact",            Action: "create"},
+					{Resource: "artifact-label",      Action: "create"},
+					{Resource: "export-cve",          Action: "create"},
+					{Resource: "immutable-tag",       Action: "create"},
+					{Resource: "label",               Action: "create"},
+					{Resource: "member",              Action: "create"},
+					{Resource: "metadata",            Action: "create"},
+					{Resource: "notification-policy", Action: "create"},
+					{Resource: "preheat-policy",      Action: "create"},
+					{Resource: "robot",               Action: "create"},
+					{Resource: "sbom",                Action: "create"},
+					{Resource: "scan",                Action: "create"},
+					{Resource: "scanner",             Action: "create"},
+					{Resource: "tag",                 Action: "create"},
+					{Resource: "tag-retention",       Action: "create"},
+					// delete
+					{Resource: "artifact",            Action: "delete"},
+					{Resource: "artifact-label",      Action: "delete"},
+					{Resource: "immutable-tag",       Action: "delete"},
+					{Resource: "label",               Action: "delete"},
+					{Resource: "member",              Action: "delete"},
+					{Resource: "metadata",            Action: "delete"},
+					{Resource: "notification-policy", Action: "delete"},
+					{Resource: "preheat-policy",      Action: "delete"},
+					{Resource: "project",             Action: "delete"},
+					{Resource: "repository",          Action: "delete"},
+					{Resource: "robot",               Action: "delete"},
+					{Resource: "tag",                 Action: "delete"},
+					{Resource: "tag-retention",       Action: "delete"},
+					// list
+					{Resource: "accessory",           Action: "list"},
+					{Resource: "artifact",            Action: "list"},
+					{Resource: "immutable-tag",       Action: "list"},
+					{Resource: "label",               Action: "list"},
+					{Resource: "log",                 Action: "list"},
+					{Resource: "member",              Action: "list"},
+					{Resource: "metadata",            Action: "list"},
+					{Resource: "notification-policy", Action: "list"},
+					{Resource: "preheat-policy",      Action: "list"},
+					{Resource: "repository",          Action: "list"},
+					{Resource: "robot",               Action: "list"},
+					{Resource: "tag",                 Action: "list"},
+					{Resource: "tag-retention",       Action: "list"},
+					// pull / push
+					{Resource: "repository",          Action: "pull"},
+					{Resource: "repository",          Action: "push"},
+					// read
+					{Resource: "artifact",            Action: "read"},
+					{Resource: "artifact-addition",   Action: "read"},
+					{Resource: "export-cve",          Action: "read"},
+					{Resource: "label",               Action: "read"},
+					{Resource: "member",              Action: "read"},
+					{Resource: "metadata",            Action: "read"},
+					{Resource: "notification-policy", Action: "read"},
+					{Resource: "preheat-policy",      Action: "read"},
+					{Resource: "project",             Action: "read"},
+					{Resource: "quota",               Action: "read"},
+					{Resource: "repository",          Action: "read"},
+					{Resource: "robot",               Action: "read"},
+					{Resource: "sbom",                Action: "read"},
+					{Resource: "scan",                Action: "read"},
+					{Resource: "scanner",             Action: "read"},
+					{Resource: "tag-retention",       Action: "read"},
+					// stop
+					{Resource: "sbom",                Action: "stop"},
+					{Resource: "scan",                Action: "stop"},
+					// update
+					{Resource: "immutable-tag",       Action: "update"},
+					{Resource: "label",               Action: "update"},
+					{Resource: "member",              Action: "update"},
+					{Resource: "metadata",            Action: "update"},
+					{Resource: "notification-policy", Action: "update"},
+					{Resource: "preheat-policy",      Action: "update"},
+					{Resource: "project",             Action: "update"},
+					{Resource: "repository",          Action: "update"},
+					{Resource: "tag-retention",       Action: "update"},
 				},
 			},
 		},
@@ -175,9 +250,81 @@ func (client *HarborClient) CreateHarborRobotAccount(ctx context.Context, projec
 	}, nil
 }
 
+// harborRepository は Harbor リポジトリ一覧取得レスポンスの要素
+type harborRepository struct {
+	Name string `json:"name"` // リポジトリ名（"projectName/imageName" 形式）
+}
+
+// listHarborRepositories は Harbor project 内のリポジトリ一覧を取得する
+func (client *HarborClient) listHarborRepositories(ctx context.Context, projectName string, credential HarborRobotCredential) ([]harborRepository, error) {
+	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories?page_size=100", client.endpoint, projectName) // リポジトリ一覧 API の URL を組み立てる
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)                              // GET リクエストを生成する
+	if err != nil {
+		return nil, fmt.Errorf("harbor リポジトリ一覧リクエストの生成に失敗しました: %w", err)
+	}
+	request.SetBasicAuth(credential.Name, credential.Secret) // robot 認証情報で Basic 認証を設定する
+
+	response, err := client.httpClient.Do(request) // リクエストを送信する
+	if err != nil {
+		return nil, fmt.Errorf("harbor リポジトリ一覧リクエストの送信に失敗しました: %w", err)
+	}
+	defer response.Body.Close() // レスポンスボディを閉じる
+
+	if response.StatusCode != http.StatusOK { // 200 以外はエラーとする
+		responseBody, _ := io.ReadAll(response.Body) // エラーボディを読み込む
+		return nil, fmt.Errorf("harbor リポジトリ一覧の取得に失敗しました: status=%d body=%s", response.StatusCode, string(responseBody))
+	}
+
+	var repositoryList []harborRepository                      // レスポンスをパースする
+	if err := json.NewDecoder(response.Body).Decode(&repositoryList); err != nil { // JSON デコードする
+		return nil, fmt.Errorf("harbor リポジトリ一覧のデコードに失敗しました: %w", err)
+	}
+	return repositoryList, nil
+}
+
+// deleteHarborRepository は Harbor project 内の 1 つのリポジトリを削除する
+func (client *HarborClient) deleteHarborRepository(ctx context.Context, projectName string, repositoryName string, credential HarborRobotCredential) error {
+	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s", client.endpoint, projectName, repositoryName) // リポジトリ削除 API の URL を組み立てる
+	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)                                 // DELETE リクエストを生成する
+	if err != nil {
+		return fmt.Errorf("harbor リポジトリ削除リクエストの生成に失敗しました: %w", err)
+	}
+	request.SetBasicAuth(credential.Name, credential.Secret) // robot 認証情報で Basic 認証を設定する
+
+	response, err := client.httpClient.Do(request) // リクエストを送信する
+	if err != nil {
+		return fmt.Errorf("harbor リポジトリ削除リクエストの送信に失敗しました: %w", err)
+	}
+	defer response.Body.Close() // レスポンスボディを閉じる
+
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNoContent { // 削除成功以外はエラーとする
+		responseBody, _ := io.ReadAll(response.Body) // エラーボディを読み込む
+		return fmt.Errorf("harbor リポジトリ削除が失敗しました: status=%d body=%s", response.StatusCode, string(responseBody))
+	}
+	return nil
+}
+
 // DeleteHarborProject は Harbor から project を削除する（robot account は自動無効化される）
 // project ごとに作成した robot account の認証情報を使って削除する
+// Harbor は project 内にリポジトリが残っていると 412 を返すため、先にリポジトリを全削除する
 func (client *HarborClient) DeleteHarborProject(ctx context.Context, projectName string, credential HarborRobotCredential) error {
+	// プロジェクト内のリポジトリを全取得して先に削除する（残っていると 412 になるため）
+	repositoryList, err := client.listHarborRepositories(ctx, projectName, credential) // リポジトリ一覧を取得する
+	if err != nil {
+		return fmt.Errorf("harbor リポジトリ一覧の取得に失敗しました: %w", err)
+	}
+
+	for _, repositoryData := range repositoryList { // 各リポジトリを削除する
+		// Harbor のリポジトリ名は "projectName/imageName" 形式で返るため imageName 部分のみを取り出す
+		repoShortName := repositoryData.Name                                                                 // フルネームを保持する
+		if len(projectName)+1 < len(repositoryData.Name) {                                                   // "projectName/" プレフィックスを除去する
+			repoShortName = repositoryData.Name[len(projectName)+1:] // スラッシュの後ろだけ取り出す
+		}
+		if err := client.deleteHarborRepository(ctx, projectName, repoShortName, credential); err != nil { // リポジトリを削除する
+			return fmt.Errorf("harbor リポジトリ '%s' の削除に失敗しました: %w", repoShortName, err)
+		}
+	}
+
 	url := fmt.Sprintf("%s/api/v2.0/projects/%s", client.endpoint, projectName)  // Harbor API の URL を組み立てる
 	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil) // DELETE リクエストを生成する
 	if err != nil {
@@ -192,7 +339,8 @@ func (client *HarborClient) DeleteHarborProject(ctx context.Context, projectName
 	defer response.Body.Close() // レスポンスボディを閉じる
 
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNoContent { // 削除成功以外はエラーとする
-		return fmt.Errorf("harbor project 削除が失敗しました: status=%d", response.StatusCode)
+		responseBody, _ := io.ReadAll(response.Body) // エラーボディを読み込む
+		return fmt.Errorf("harbor project 削除が失敗しました: status=%d body=%s", response.StatusCode, string(responseBody))
 	}
 	return nil
 }
