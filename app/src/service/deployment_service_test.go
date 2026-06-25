@@ -149,6 +149,10 @@ func (mock *mockServiceRepository) CreateWithTx(ctx context.Context, tx *gorm.DB
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *mockServiceRepository) UpdateClusterIP(ctx context.Context, serviceID string, clusterIP string) error {
+	return nil // テストでは使用しない
+}
+
 // mockProjectRepository は ProjectRepository のテスト用モック実装（所有権チェック用）
 type mockProjectRepository struct {
 	findByIDNoTxFunc func(ctx context.Context, projectID string) (*models.Project, error)

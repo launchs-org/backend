@@ -11,6 +11,8 @@ import (
 	"gorm.io/gorm"
 )
 
+const maskedValue = "***" // シークレット値をマスクする際に使用する文字列
+
 // EnvVarHandler は環境変数 CRUD の HTTP ハンドラーを提供する
 type EnvVarHandler struct {
 	envVarService      service.EnvVarService      // env_var サービスのインターフェース
@@ -47,6 +49,11 @@ func (envVarHandler *EnvVarHandler) ListEnvVars(echoCtx echo.Context) error {
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
+	}
+	for envVarIndex := range envVarList { // シークレット値をマスクする
+		if envVarList[envVarIndex].IsSecret {
+			envVarList[envVarIndex].Value = maskedValue // シークレット値を隠す
+		}
 	}
 	return echoCtx.JSON(http.StatusOK, envVarList) // env_var 一覧を返す
 }
@@ -88,6 +95,9 @@ func (envVarHandler *EnvVarHandler) CreateEnvVar(echoCtx echo.Context) error {
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
+	}
+	if envVarData.IsSecret { // シークレット値をマスクする
+		envVarData.Value = maskedValue // シークレット値を隠す
 	}
 	return echoCtx.JSON(http.StatusCreated, envVarData) // 作成結果を返す
 }

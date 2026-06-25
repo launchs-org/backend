@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 // mockPodLogChunkRepository は PodLogChunkRepository のテスト用モック実装
@@ -33,6 +34,14 @@ func (mock *mockPodLogChunkRepository) FindByDeploymentIDSince(ctx context.Conte
 	return nil, nil // デフォルトは nil を返す
 }
 
+func (mock *mockPodLogChunkRepository) DeleteByDeploymentIDAndPodNameNotIn(ctx context.Context, deploymentID string, activePodNames []string) error {
+	return nil // テストでは使用しない
+}
+
+func (mock *mockPodLogChunkRepository) DeleteByPodName(ctx context.Context, deploymentID string, podName string) error {
+	return nil // テストでは使用しない
+}
+
 // TestGetPodLogs_チャンクなし は Pod ログチャンクが0件の場合に空文字列と nil timestamp が返ることを確認する
 func TestGetPodLogs_チャンクなし(t *testing.T) {
 	deploymentRepo := &mockDeploymentRepository{
@@ -51,7 +60,7 @@ func TestGetPodLogs_チャンクなし(t *testing.T) {
 		},
 	}
 
-	logSvc := NewLogService(deploymentRepo, projectRepo, podLogChunkRepo) // サービスを生成する
+	logSvc := NewLogService(deploymentRepo, projectRepo, podLogChunkRepo, fake.NewSimpleClientset()) // サービスを生成する
 	result, err := logSvc.GetPodLogs(context.Background(), "test-user-id", "deployment-1", nil)
 	if err != nil { // エラーが発生した場合は失敗する
 		t.Fatalf("GetPodLogs() がエラーを返しました: %v", err)
@@ -84,7 +93,7 @@ func TestGetPodLogs_チャンクあり(t *testing.T) {
 		},
 	}
 
-	logSvc := NewLogService(deploymentRepo, projectRepo, podLogChunkRepo) // サービスを生成する
+	logSvc := NewLogService(deploymentRepo, projectRepo, podLogChunkRepo, fake.NewSimpleClientset()) // サービスを生成する
 	result, err := logSvc.GetPodLogs(context.Background(), "test-user-id", "deployment-1", nil)
 	if err != nil { // エラーが発生した場合は失敗する
 		t.Fatalf("GetPodLogs() がエラーを返しました: %v", err)
@@ -121,7 +130,7 @@ func TestGetPodLogs_他ユーザーのDeployment(t *testing.T) {
 	}
 	podLogChunkRepo := &mockPodLogChunkRepository{}
 
-	logSvc := NewLogService(deploymentRepo, projectRepo, podLogChunkRepo)                               // サービスを生成する
+	logSvc := NewLogService(deploymentRepo, projectRepo, podLogChunkRepo, fake.NewSimpleClientset())                               // サービスを生成する
 	_, err := logSvc.GetPodLogs(context.Background(), "test-user-id", "deployment-1", nil)
 	if err == nil { // エラーが発生しない場合は失敗する
 		t.Fatal("ErrForbidden を期待しますがエラーが返りませんでした")
@@ -141,7 +150,7 @@ func TestGetPodLogs_存在しないDeployment(t *testing.T) {
 	projectRepo := &mockProjectRepository{}
 	podLogChunkRepo := &mockPodLogChunkRepository{}
 
-	logSvc := NewLogService(deploymentRepo, projectRepo, podLogChunkRepo)                               // サービスを生成する
+	logSvc := NewLogService(deploymentRepo, projectRepo, podLogChunkRepo, fake.NewSimpleClientset())                               // サービスを生成する
 	_, err := logSvc.GetPodLogs(context.Background(), "test-user-id", "deployment-1", nil)
 	if err == nil { // エラーが発生しない場合は失敗する
 		t.Fatal("エラーを期待しますが nil が返りました")
@@ -170,7 +179,7 @@ func TestGetPodLogs_since指定でSinceメソッドが使われる(t *testing.T)
 		},
 	}
 
-	logSvc := NewLogService(deploymentRepo, projectRepo, podLogChunkRepo) // サービスを生成する
+	logSvc := NewLogService(deploymentRepo, projectRepo, podLogChunkRepo, fake.NewSimpleClientset()) // サービスを生成する
 	_, err := logSvc.GetPodLogs(context.Background(), "test-user-id", "deployment-1", &sinceTime)
 	if err != nil { // エラーが発生した場合は失敗する
 		t.Fatalf("GetPodLogs() がエラーを返しました: %v", err)
@@ -202,7 +211,7 @@ func TestGetPodLogs_複数Pod(t *testing.T) {
 		},
 	}
 
-	logSvc := NewLogService(deploymentRepo, projectRepo, podLogChunkRepo) // サービスを生成する
+	logSvc := NewLogService(deploymentRepo, projectRepo, podLogChunkRepo, fake.NewSimpleClientset()) // サービスを生成する
 	result, err := logSvc.GetPodLogs(context.Background(), "test-user-id", "deployment-1", nil)
 	if err != nil { // エラーが発生した場合は失敗する
 		t.Fatalf("GetPodLogs() がエラーを返しました: %v", err)

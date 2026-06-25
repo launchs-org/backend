@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"app/logger"
+	"app/models"
 	"app/repository"
 	"context"
 	"regexp"
@@ -152,6 +153,11 @@ func handleNamespaceEvent(ctx context.Context, event watch.Event, projectRepo re
 	projectData, err := projectRepo.FindByNamespace(ctx, namespaceName) // Namespace 名に対応する Project を取得する
 	if err != nil {
 		logger.PrintErr("WatchNamespaces: Project の取得に失敗しました (namespace=" + namespaceName + "): " + err.Error()) // エラーをログ出力する
+		return
+	}
+
+	if projectData.Status != models.ProjectStatusDeleting { // status が deleting でない場合は意図しない削除とみなす
+		logger.PrintErr("WatchNamespaces: Project の status が deleting ではないため削除をスキップします (namespace=" + namespaceName + ", status=" + string(projectData.Status) + ")") // 警告ログを出力する
 		return
 	}
 

@@ -144,29 +144,67 @@ func (mock *mockProjectRepositoryForNamespace) DeleteNoTx(ctx context.Context, p
 	return nil // デフォルトは正常終了する
 }
 
-// TestHandleNamespaceEvent_Deletedイベントで対応するProjectが削除される は Deleted イベントで DB の Project レコードが削除されることを確認する
+// TestHandleNamespaceEvent_Deletedイベントで対応するProjectが削除される は status が deleting の Project に Deleted イベントが来た場合に DB レコードが削除されることを確認する
 func TestHandleNamespaceEvent_Deletedイベントで対応するProjectが削除される(t *testing.T) {
-	projectRepo := &mockProjectRepositoryForNamespace{} // モック repository を生成する
-	ctx := context.Background()                         // テスト用コンテキストを生成する
+	projectRepo := &mockProjectRepositoryForNamespace{ // モック repository を生成する
+		findByNamespaceFunc: func(ctx context.Context, namespace string) (*models.Project, error) {
+			return &models.Project{ID: "test-project-id", Namespace: namespace, Status: models.ProjectStatusDeleting}, nil // status=deleting の Project を返す
+		},
+	}
+	ctx := context.Background() // テスト用コンテキストを生成する
 
 	namespaceObj := &corev1.Namespace{ // テスト用 Namespace オブジェクトを生成する
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-namespace",                       // Namespace 名を設定する
+			Name: "test-namespace",            // Namespace 名を設定する
 			Labels: map[string]string{
-				"launchs.org/managed": "true",            // 管理ラベルを設定する
+				"launchs.org/managed": "true", // 管理ラベルを設定する
 			},
 		},
 	}
 
 	event := watch.Event{ // Deleted イベントを生成する
-		Type:   watch.Deleted,   // イベントタイプを Deleted に設定する
-		Object: namespaceObj,    // Namespace オブジェクトを設定する
+		Type:   watch.Deleted, // イベントタイプを Deleted に設定する
+		Object: namespaceObj,  // Namespace オブジェクトを設定する
 	}
 
 	handleNamespaceEvent(ctx, event, projectRepo) // イベントを処理する
 
 	if !projectRepo.deleteNoTxCalled { // DeleteNoTx が呼ばれていることを確認する
-		t.Fatal("Deleted イベントで DeleteNoTx が呼ばれていません")
+		t.Fatal("status=deleting の Project に Deleted イベントが来た場合に DeleteNoTx が呼ばれていません")
+	}
+}
+
+// TestHandleNamespaceEvent_status_が_deleting_以外の場合はProjectが削除されない は status が deleting 以外の Project に Deleted イベントが来ても DB レコードが削除されないことを確認する
+func TestHandleNamespaceEvent_status_が_deleting_以外の場合はProjectが削除されない(t *testing.T) {
+	nonDeletingStatuses := []models.ProjectStatus{ // deleting 以外のステータス一覧
+		models.ProjectStatusProvisioning, // provisioning ステータス
+		models.ProjectStatusActive,       // active ステータス
+	}
+
+	for _, projectStatus := range nonDeletingStatuses { // 各ステータスでテストする
+		projectRepo := &mockProjectRepositoryForNamespace{ // モック repository を生成する
+			findByNamespaceFunc: func(ctx context.Context, namespace string) (*models.Project, error) {
+				return &models.Project{ID: "test-project-id", Namespace: namespace, Status: projectStatus}, nil // 対象ステータスの Project を返す
+			},
+		}
+		ctx := context.Background() // テスト用コンテキストを生成する
+
+		namespaceObj := &corev1.Namespace{ // テスト用 Namespace オブジェクトを生成する
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "test-namespace", // Namespace 名を設定する
+			},
+		}
+
+		event := watch.Event{ // Deleted イベントを生成する
+			Type:   watch.Deleted, // イベントタイプを Deleted に設定する
+			Object: namespaceObj,  // Namespace オブジェクトを設定する
+		}
+
+		handleNamespaceEvent(ctx, event, projectRepo) // イベントを処理する
+
+		if projectRepo.deleteNoTxCalled { // DeleteNoTx が呼ばれていないことを確認する
+			t.Fatalf("status=%v の Project に Deleted イベントが来た場合に DeleteNoTx が誤って呼ばれました", projectStatus)
+		}
 	}
 }
 

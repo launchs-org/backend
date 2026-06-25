@@ -221,6 +221,9 @@ func (mock *mockVolumeMountRepoForDeployment) FindByDeploymentIDAndMountPath(ctx
 func (mock *mockVolumeMountRepoForDeployment) UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount, status models.VolumeMountStatus) error {
 	return nil // 使用しない
 }
+func (mock *mockVolumeMountRepoForDeployment) DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error {
+	return nil // 使用しない
+}
 func (mock *mockVolumeMountRepoForDeployment) Delete(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount) error {
 	return nil // 使用しない
 }
@@ -287,6 +290,12 @@ func (mock *mockPodLogChunkRepoForDeployment) FindByDeploymentID(ctx context.Con
 func (mock *mockPodLogChunkRepoForDeployment) FindByDeploymentIDSince(ctx context.Context, deploymentID string, since time.Time) ([]models.PodLogChunk, error) {
 	return nil, nil // 使用しない
 }
+func (mock *mockPodLogChunkRepoForDeployment) DeleteByDeploymentIDAndPodNameNotIn(ctx context.Context, deploymentID string, activePodNames []string) error {
+	return nil // 使用しない
+}
+func (mock *mockPodLogChunkRepoForDeployment) DeleteByPodName(ctx context.Context, deploymentID string, podName string) error {
+	return nil // 使用しない
+}
 
 // mockProjectRepoForDeployment は ProjectRepository のテスト用モック
 type mockProjectRepoForDeployment struct{}
@@ -338,7 +347,7 @@ func newTestHandleDeploymentEventArgs() (
 	buildRepo *mockBuildRepoForDeployment,
 	podLogChunkRepo *mockPodLogChunkRepoForDeployment,
 	projectRepo *mockProjectRepoForDeployment,
-	streamCancelMap map[string]context.CancelFunc,
+	streamCancelMap map[string]podStreamState,
 	streamCancelMu *sync.Mutex,
 ) {
 	fakeK8sClient = fake.NewSimpleClientset()               // fake k8s クライアントを生成する
@@ -349,7 +358,7 @@ func newTestHandleDeploymentEventArgs() (
 	buildRepo = &mockBuildRepoForDeployment{}               // build リポジトリのモックを生成する
 	podLogChunkRepo = &mockPodLogChunkRepoForDeployment{}   // pod_log_chunk リポジトリのモックを生成する
 	projectRepo = &mockProjectRepoForDeployment{}           // project リポジトリのモックを生成する
-	streamCancelMap = make(map[string]context.CancelFunc)   // ストリームキャンセルマップを生成する
+	streamCancelMap = make(map[string]podStreamState)       // ストリーム状態マップを生成する
 	streamCancelMu = &sync.Mutex{}                          // ミューテックスを生成する
 	return
 }
