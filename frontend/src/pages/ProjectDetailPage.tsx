@@ -114,8 +114,7 @@ export function ProjectDetailPage() {
     const ROW_HEIGHT = FLOW_ROW_HEIGHT // 行の高さを定義する
     const COL_WIDTH = 360 // 列の幅を定義する
 
-    // レイアウト: EnvVar(x=-COL) → Internet(x=0) → Ingress(x=COL) → Service(x=COL*2) → Deployment(x=COL*3) → Volume(x=COL*4)
-    const ENVVAR_COL = -COL_WIDTH // EnvVar ノードのX座標
+    // レイアウト: Internet(x=0) → Ingress(x=COL) → Service(x=COL*2) → Deployment(x=COL*3) → Volume(x=COL*4) / EnvVar(Volume列の下)
     const INTERNET_COL = 0 // Internet ノードのX座標
     const INGRESS_COL = COL_WIDTH // IngressRoute ノードのX座標
     const SERVICE_COL = COL_WIDTH * 2 // Service ノードのX座標
@@ -193,17 +192,18 @@ export function ProjectDetailPage() {
 
     // ボリュームをグラフに追加する（マウント有無に関わらず全件表示する）
     const VOL_H = 114  // Volume ノード高さ
+    const VOL_GAP = 80 // Volume カード間の最小余白
+
+    const firstDepTop = ROW_HEIGHT / 2 - 148 / 2 + 16 // 先頭Deploymentカードの上端より少し下から開始する
+
     currentVolumeList.forEach((volume, volumeIndex) => {
       // このボリュームをマウントしている Deployment のインデックスを収集する
       const mountedRelationIndices = relations
         .map((relation, relationIndex) => ({ relation, relationIndex }))
         .filter(({ relation }) => relation.volumeMounts.some(vm => vm.volume_id === volume.id && vm.status !== 'deleting')) // deleting 状態は接続しない
 
-      // Volume ノードのY座標: マウント先がある場合はその縦中央平均に合わせる、ない場合は ROW_HEIGHT 間隔で縦に並べる
-      const volCenterY = mountedRelationIndices.length > 0
-        ? mountedRelationIndices.reduce((sum, { relationIndex }) => sum + relationIndex * ROW_HEIGHT + ROW_HEIGHT / 2, 0) / mountedRelationIndices.length
-        : volumeIndex * ROW_HEIGHT + ROW_HEIGHT / 2 // マウントなしは縦に並べる
-      const volY = volCenterY - VOL_H / 2
+      // Volume ノードのY座標: マウント状態に関係なくインデックス順の固定位置に並べる
+      const volY = firstDepTop + volumeIndex * (VOL_H + VOL_GAP)
 
       newNodes.push({
         id: `vol-${volume.id}`,
@@ -269,51 +269,7 @@ export function ProjectDetailPage() {
       })
     }
 
-    // EnvVar ノードをグラフに追加する
-    const ENVVAR_H = 80 // EnvVarNode の高さ
-    currentEnvVarList.forEach((envVar, envVarIndex) => {
-      // このEnvVarがマウントされているDeploymentのインデックスを収集する
-      const mountedRelationIndices = relations
-        .map((relation, relationIndex) => ({ relation, relationIndex }))
-        .filter(({ relation }) =>
-          relation.envVarMounts.some(evm => evm.env_var_id === envVar.id && evm.status !== 'deleting')
-        )
-
-      // Y座標: マウント先がある場合はその縦中央平均、ない場合は順番に並べる
-      const envVarCenterY = mountedRelationIndices.length > 0
-        ? mountedRelationIndices.reduce((sum, { relationIndex }) => sum + relationIndex * ROW_HEIGHT + ROW_HEIGHT / 2, 0) / mountedRelationIndices.length
-        : envVarIndex * ROW_HEIGHT + ROW_HEIGHT / 2
-
-      const isHighlighted = currentSelectedEnvVarId === envVar.id // 選択中かどうかを判定する
-
-      newNodes.push({
-        id: `envvar-${envVar.id}`,
-        type: 'envVar',
-        position: { x: ENVVAR_COL, y: envVarCenterY - ENVVAR_H / 2 },
-        data: {
-          envVar,
-          highlighted: isHighlighted,
-          onClick: (envVarId: string) => setSelectedEnvVarId(prev => prev === envVarId ? null : envVarId), // トグル選択する
-        },
-      })
-
-      // マウント先の各 Deployment へ破線エッジを追加する
-      mountedRelationIndices.forEach(({ relation }) => {
-        const edgeHighlighted = isHighlighted // 選択中の場合はエッジをハイライトする
-        newEdges.push({
-          id: `edge-envvar-dep-${envVar.id}-${relation.deployment.id}`,
-          source: `envvar-${envVar.id}`,
-          target: `dep-${relation.deployment.id}`,
-          type: 'straight',
-          style: {
-            stroke: edgeHighlighted ? '#8B5CF6' : '#C4B5FD',
-            strokeWidth: edgeHighlighted ? 2 : 1,
-            strokeDasharray: '4 4',
-          },
-          animated: edgeHighlighted, // ハイライト時はアニメーションする
-        })
-      })
-    })
+    // EnvVar はグラフに表示しない（サイドバーでのみ管理する）
 
     setNodes(newNodes) // ノードを更新する
     setEdges(newEdges) // エッジを更新する
