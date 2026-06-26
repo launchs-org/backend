@@ -142,3 +142,30 @@ func (handler *ProjectHandler) DeleteProject(echoCtx echo.Context) error {
 	}
 	return echoCtx.NoContent(http.StatusNoContent) // 削除成功時は 204 を返す
 }
+
+// GetProjectQuota は GET /api/v1/projects/:id/quota のハンドラー
+func (handler *ProjectHandler) GetProjectQuota(echoCtx echo.Context) error {
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
+	projectID := echoCtx.Param("id")        // パスパラメータから project ID を取得する
+
+	quotaData, err := handler.projectService.GetProjectQuota(echoCtx.Request().Context(), userID, projectID) // サービスを呼び出してクォータを取得する
+	if err != nil {
+		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("ProjectHandler", "GetProjectQuota", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusForbidden, map[string]string{
+				"error": "アクセス権限がありません",
+			})
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが見つからない場合は 404 を返す
+			logger.PrintHandlerError("ProjectHandler", "GetProjectQuota", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusNotFound, map[string]string{
+				"error": "リソースが見つかりません",
+			})
+		}
+		logger.PrintHandlerError("ProjectHandler", "GetProjectQuota", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "内部サーバーエラー",
+		})
+	}
+	return echoCtx.JSON(http.StatusOK, quotaData) // クォータ情報を返す
+}

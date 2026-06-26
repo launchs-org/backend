@@ -15,11 +15,12 @@ import (
 
 // mockBuildService は BuildService のテスト用モック実装
 type mockBuildService struct {
-	triggerBuildFunc func(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error)
-	cancelBuildFunc  func(ctx context.Context, userID string, buildID string) error
-	getBuildLogsFunc func(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error)
-	getBuildFunc     func(ctx context.Context, userID string, buildID string) (*models.DeploymentBuild, error)
-	listBuildsFunc   func(ctx context.Context, userID string, deploymentID string) ([]models.DeploymentBuild, error)
+	triggerBuildFunc        func(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error)
+	cancelBuildFunc         func(ctx context.Context, userID string, buildID string) error
+	getBuildLogsFunc        func(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error)
+	getBuildFunc            func(ctx context.Context, userID string, buildID string) (*models.DeploymentBuild, error)
+	listBuildsFunc          func(ctx context.Context, userID string, deploymentID string) ([]models.DeploymentBuild, error)
+	listBuildsByProjectFunc func(ctx context.Context, userID string, projectID string) ([]models.DeploymentBuild, error)
 }
 
 func (mock *mockBuildService) TriggerBuild(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error) {
@@ -46,6 +47,17 @@ func (mock *mockBuildService) ListBuilds(ctx context.Context, userID string, dep
 		return mock.listBuildsFunc(ctx, userID, deploymentID) // モック関数を呼び出す
 	}
 	return []models.DeploymentBuild{}, nil // デフォルトは空リストを返す
+}
+
+func (mock *mockBuildService) ListBuildsByProject(ctx context.Context, userID string, projectID string) ([]models.DeploymentBuild, error) {
+	if mock.listBuildsByProjectFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.listBuildsByProjectFunc(ctx, userID, projectID)
+	}
+	return []models.DeploymentBuild{}, nil // デフォルトは空リストを返す
+}
+
+func (mock *mockBuildService) DeleteBuild(ctx context.Context, userID string, projectID string, buildID string) error {
+	return nil // テストでは使用しない
 }
 
 // newCancelBuildHandlerTestContext は CancelBuild ハンドラーテスト用の Echo コンテキストを生成するヘルパー関数
@@ -76,7 +88,7 @@ func newBuildHandlerTestContext(deploymentID string) (echo.Context, *httptest.Re
 func TestTriggerBuild_正常系(t *testing.T) {
 	expectedBuild := &models.DeploymentBuild{
 		ID:           "build-id-1",    // 期待するビルド ID を設定する
-		DeploymentID: "deployment-1",  // 期待するデプロイメント ID を設定する
+		DeploymentID: func() *string { deploymentIDValue := "deployment-1"; return &deploymentIDValue }(), // 期待するデプロイメント ID を設定する
 		Status:       models.BuildStatusPending, // 期待するステータスを設定する
 	}
 
@@ -314,5 +326,106 @@ func TestGetBuildLogs_sinceパラメータ不正(t *testing.T) {
 
 	if recorder.Code != http.StatusBadRequest { // ステータスコードを確認する
 		t.Errorf("期待するステータスコード %d、実際のコード %d", http.StatusBadRequest, recorder.Code)
+	}
+}
+
+// newListBuildsByProjectHandlerTestContext は ListBuildsByProject ハンドラーテスト用の Echo コンテキストを生成するヘルパー関数
+func newListBuildsByProjectHandlerTestContext(projectID string) (echo.Context, *httptest.ResponseRecorder) {
+	echoInstance := echo.New()                                                // Echo インスタンスを生成する
+	request := httptest.NewRequest(http.MethodGet, "/", nil)                  // テスト用 GET リクエストを生成する
+	recorder := httptest.NewRecorder()                                        // レスポンスレコーダーを生成する
+	echoCtx := echoInstance.NewContext(request, recorder)                     // Echo コンテキストを生成する
+	echoCtx.Set("UserID", "test-user-id")                                     // テスト用 UserID を設定する
+	echoCtx.SetParamNames("id")                                               // パスパラメータ名を設定する
+	echoCtx.SetParamValues(projectID)                                         // パスパラメータ値を設定する
+	return echoCtx, recorder
+}
+
+// TestListBuildsByProject_正常系 はプロジェクト単位のビルド一覧が正常に取得できることを確認する
+func TestListBuildsByProject_正常系(t *testing.T) {
+	deploymentIDValue := "deployment-1" // ポインタ用変数を宣言する
+	expectedBuilds := []models.DeploymentBuild{
+		{
+			ID:           "build-1",         // ビルド ID を設定する
+			ProjectID:    "project-1",        // プロジェクト ID を設定する
+			DeploymentID: &deploymentIDValue, // デプロイメント ID を設定する
+			Status:       models.BuildStatusSucceeded, // 成功ステータスを設定する
+		},
+	}
+
+	mockSvc := &mockBuildService{
+		listBuildsByProjectFunc: func(ctx context.Context, userID string, projectID string) ([]models.DeploymentBuild, error) {
+			return expectedBuilds, nil // テスト用ビルド一覧を返す
+		},
+	}
+
+	buildHandler := NewBuildHandler(mockSvc)                                         // ハンドラーを生成する
+	echoCtx, recorder := newListBuildsByProjectHandlerTestContext("project-1")
+
+	if err := buildHandler.ListBuildsByProject(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("ListBuildsByProject() がエラーを返しました: %v", err)
+	}
+
+	if recorder.Code != http.StatusOK { // ステータスコードを確認する
+		t.Errorf("期待するステータスコード %d、実際のコード %d", http.StatusOK, recorder.Code)
+	}
+
+	var responseBuilds []models.DeploymentBuild                                        // レスポンスボディをデコードする
+	if err := json.NewDecoder(recorder.Body).Decode(&responseBuilds); err != nil {
+		t.Fatalf("レスポンスボディのデコードに失敗しました: %v", err)
+	}
+	if len(responseBuilds) != 1 { // ビルド件数を確認する
+		t.Errorf("期待するビルド件数 1、実際の件数 %d", len(responseBuilds))
+	}
+	if responseBuilds[0].ID != "build-1" { // ビルド ID を確認する
+		t.Errorf("期待するビルド ID %s、実際の ID %s", "build-1", responseBuilds[0].ID)
+	}
+}
+
+// TestListBuildsByProject_空リスト はビルドが存在しない場合に空リストを返すことを確認する
+func TestListBuildsByProject_空リスト(t *testing.T) {
+	mockSvc := &mockBuildService{
+		listBuildsByProjectFunc: func(ctx context.Context, userID string, projectID string) ([]models.DeploymentBuild, error) {
+			return []models.DeploymentBuild{}, nil // 空リストを返す
+		},
+	}
+
+	buildHandler := NewBuildHandler(mockSvc)                                         // ハンドラーを生成する
+	echoCtx, recorder := newListBuildsByProjectHandlerTestContext("project-1")
+
+	if err := buildHandler.ListBuildsByProject(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("ListBuildsByProject() がエラーを返しました: %v", err)
+	}
+
+	if recorder.Code != http.StatusOK { // ステータスコードを確認する
+		t.Errorf("期待するステータスコード %d、実際のコード %d", http.StatusOK, recorder.Code)
+	}
+
+	var responseBuilds []models.DeploymentBuild                                        // レスポンスボディをデコードする
+	if err := json.NewDecoder(recorder.Body).Decode(&responseBuilds); err != nil {
+		t.Fatalf("レスポンスボディのデコードに失敗しました: %v", err)
+	}
+	if len(responseBuilds) != 0 { // 空リストであることを確認する
+		t.Errorf("期待するビルド件数 0、実際の件数 %d", len(responseBuilds))
+	}
+}
+
+// TestListBuildsByProject_403_他ユーザー は他ユーザーのプロジェクトのビルド一覧取得で 403 が返ることを確認する
+func TestListBuildsByProject_403_他ユーザー(t *testing.T) {
+	mockSvc := &mockBuildService{
+		listBuildsByProjectFunc: func(ctx context.Context, userID string, projectID string) ([]models.DeploymentBuild, error) {
+			return nil, service.ErrForbidden // 所有権エラーを返す
+		},
+	}
+
+	buildHandler := NewBuildHandler(mockSvc)                                         // ハンドラーを生成する
+	echoCtx, recorder := newListBuildsByProjectHandlerTestContext("project-1")
+
+	if err := buildHandler.ListBuildsByProject(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("ListBuildsByProject() がエラーを返しました: %v", err)
+	}
+
+	if recorder.Code != http.StatusForbidden { // ステータスコードを確認する
+		t.Errorf("期待するステータスコード %d、実際のコード %d", http.StatusForbidden, recorder.Code)
 	}
 }

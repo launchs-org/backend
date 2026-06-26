@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"app/k8s"
 	"app/models"
 	"app/service"
 	"context"
@@ -16,11 +17,12 @@ import (
 
 // mockProjectService は ProjectService のテスト用モック実装
 type mockProjectService struct {
-	createProjectFunc func(ctx context.Context, userID string, req service.CreateProjectRequest) (*models.Project, error)
-	listProjectsFunc  func(ctx context.Context, userID string) ([]*models.Project, error)
-	getProjectFunc    func(ctx context.Context, projectID string) (*models.Project, error)
-	updateProjectFunc func(ctx context.Context, projectID string, req service.UpdateProjectRequest) (*models.Project, error)
-	deleteProjectFunc func(ctx context.Context, projectID string) error
+	createProjectFunc   func(ctx context.Context, userID string, req service.CreateProjectRequest) (*models.Project, error)
+	listProjectsFunc    func(ctx context.Context, userID string) ([]*models.Project, error)
+	getProjectFunc      func(ctx context.Context, projectID string) (*models.Project, error)
+	updateProjectFunc   func(ctx context.Context, projectID string, req service.UpdateProjectRequest) (*models.Project, error)
+	deleteProjectFunc   func(ctx context.Context, projectID string) error
+	getProjectQuotaFunc func(ctx context.Context, userID string, projectID string) (*k8s.HarborProjectQuota, error)
 }
 
 func (mock *mockProjectService) CreateProject(ctx context.Context, userID string, req service.CreateProjectRequest) (*models.Project, error) {
@@ -41,6 +43,13 @@ func (mock *mockProjectService) UpdateProject(ctx context.Context, projectID str
 
 func (mock *mockProjectService) DeleteProject(ctx context.Context, projectID string) error {
 	return mock.deleteProjectFunc(ctx, projectID) // モック関数を呼び出す
+}
+
+func (mock *mockProjectService) GetProjectQuota(ctx context.Context, userID string, projectID string) (*k8s.HarborProjectQuota, error) {
+	if mock.getProjectQuotaFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.getProjectQuotaFunc(ctx, userID, projectID)
+	}
+	return nil, nil // デフォルトは nil を返す
 }
 
 // setupProjectEchoContext はテスト用の Echo コンテキストを生成するヘルパー関数
@@ -287,5 +296,81 @@ func TestCreateProject_プロジェクト数がQuota超過の場合は403にな�
 	}
 	if responseRecorder.Code != http.StatusForbidden { // 403 が返ることを確認する
 		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusForbidden, responseRecorder.Code)
+	}
+}
+
+// TestGetProjectQuota_正常系 は Harbor クォータが正常に取得できることを確認する
+func TestGetProjectQuota_正常系(t *testing.T) {
+	expectedQuota := &k8s.HarborProjectQuota{
+		UsedBytes:  1073741824,  // 1GB 使用中
+		LimitBytes: 10737418240, // 10GB 上限
+	}
+
+	mockService := &mockProjectService{
+		getProjectQuotaFunc: func(ctx context.Context, userID string, projectID string) (*k8s.HarborProjectQuota, error) {
+			return expectedQuota, nil // テスト用クォータを返す
+		},
+	}
+
+	projectHandler := NewProjectHandler(mockService)                                                                                     // ハンドラーを生成する
+	echoCtx, responseRecorder := setupProjectEchoContext(http.MethodGet, "/api/v1/projects/project-1/quota", "", "user-1", map[string]string{"id": "project-1"}) // テスト用コンテキストを生成する
+
+	if err := projectHandler.GetProjectQuota(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("GetProjectQuota() がエラーを返しました: %v", err)
+	}
+
+	if responseRecorder.Code != http.StatusOK { // ステータスコードを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusOK, responseRecorder.Code)
+	}
+
+	var responseQuota k8s.HarborProjectQuota                                                           // レスポンスボディをデコードする
+	if err := json.NewDecoder(responseRecorder.Body).Decode(&responseQuota); err != nil {
+		t.Fatalf("レスポンスボディのデコードに失敗しました: %v", err)
+	}
+	if responseQuota.UsedBytes != expectedQuota.UsedBytes { // 使用量を確認する
+		t.Errorf("期待する使用量 %d、実際の使用量 %d", expectedQuota.UsedBytes, responseQuota.UsedBytes)
+	}
+	if responseQuota.LimitBytes != expectedQuota.LimitBytes { // 上限を確認する
+		t.Errorf("期待する上限 %d、実際の上限 %d", expectedQuota.LimitBytes, responseQuota.LimitBytes)
+	}
+}
+
+// TestGetProjectQuota_403_他ユーザー は他ユーザーのプロジェクトのクォータ取得で 403 が返ることを確認する
+func TestGetProjectQuota_403_他ユーザー(t *testing.T) {
+	mockService := &mockProjectService{
+		getProjectQuotaFunc: func(ctx context.Context, userID string, projectID string) (*k8s.HarborProjectQuota, error) {
+			return nil, service.ErrForbidden // 所有権エラーを返す
+		},
+	}
+
+	projectHandler := NewProjectHandler(mockService)                                                                                     // ハンドラーを生成する
+	echoCtx, responseRecorder := setupProjectEchoContext(http.MethodGet, "/api/v1/projects/project-1/quota", "", "other-user", map[string]string{"id": "project-1"}) // テスト用コンテキストを生成する
+
+	if err := projectHandler.GetProjectQuota(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("GetProjectQuota() がエラーを返しました: %v", err)
+	}
+
+	if responseRecorder.Code != http.StatusForbidden { // ステータスコードを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusForbidden, responseRecorder.Code)
+	}
+}
+
+// TestGetProjectQuota_404_プロジェクトが存在しない は存在しないプロジェクトのクォータ取得で 404 が返ることを確認する
+func TestGetProjectQuota_404_プロジェクトが存在しない(t *testing.T) {
+	mockService := &mockProjectService{
+		getProjectQuotaFunc: func(ctx context.Context, userID string, projectID string) (*k8s.HarborProjectQuota, error) {
+			return nil, gorm.ErrRecordNotFound // レコードなしエラーを返す
+		},
+	}
+
+	projectHandler := NewProjectHandler(mockService)                                                                                           // ハンドラーを生成する
+	echoCtx, responseRecorder := setupProjectEchoContext(http.MethodGet, "/api/v1/projects/nonexistent/quota", "", "user-1", map[string]string{"id": "nonexistent"}) // テスト用コンテキストを生成する
+
+	if err := projectHandler.GetProjectQuota(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("GetProjectQuota() がエラーを返しました: %v", err)
+	}
+
+	if responseRecorder.Code != http.StatusNotFound { // ステータスコードを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusNotFound, responseRecorder.Code)
 	}
 }

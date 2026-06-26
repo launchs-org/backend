@@ -40,11 +40,14 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.PUT("/users/quota", opts.UserQuotaHandler.UpdateQuota) // quota 更新エンドポイント
 
 	// project エンドポイントを登録する
-	apiGroup.GET("/projects", opts.ProjectHandler.ListProjects)          // project 一覧取得エンドポイント
-	apiGroup.POST("/projects", opts.ProjectHandler.CreateProject)        // project 作成エンドポイント
-	apiGroup.GET("/projects/:id", opts.ProjectHandler.GetProject)        // project 詳細取得エンドポイント
-	apiGroup.PUT("/projects/:id", opts.ProjectHandler.UpdateProject)     // project 更新エンドポイント
-	apiGroup.DELETE("/projects/:id", opts.ProjectHandler.DeleteProject)  // project 削除エンドポイント
+	apiGroup.GET("/projects", opts.ProjectHandler.ListProjects)                   // project 一覧取得エンドポイント
+	apiGroup.POST("/projects", opts.ProjectHandler.CreateProject)                 // project 作成エンドポイント
+	apiGroup.GET("/projects/:id", opts.ProjectHandler.GetProject)                 // project 詳細取得エンドポイント
+	apiGroup.PUT("/projects/:id", opts.ProjectHandler.UpdateProject)              // project 更新エンドポイント
+	apiGroup.DELETE("/projects/:id", opts.ProjectHandler.DeleteProject)           // project 削除エンドポイント
+	apiGroup.GET("/projects/:id/quota", opts.ProjectHandler.GetProjectQuota)      // project クォータ取得エンドポイント
+	apiGroup.GET("/projects/:id/builds", opts.BuildHandler.ListBuildsByProject)              // project 単位ビルド一覧取得エンドポイント
+	apiGroup.DELETE("/projects/:id/builds/:buildId", opts.BuildHandler.DeleteBuild)        // project 単位ビルド削除エンドポイント
 
 	// deployment エンドポイントを登録する
 	apiGroup.GET("/projects/:id/deployments", opts.DeploymentHandler.ListDeployments)    // deployment 一覧取得エンドポイント

@@ -89,6 +89,33 @@ func (buildHandler *BuildHandler) ListBuilds(echoCtx echo.Context) error {
 	return echoCtx.JSON(http.StatusOK, buildList) // ビルド一覧を返す
 }
 
+// ListBuildsByProject は GET /api/v1/projects/:id/builds のハンドラー
+func (buildHandler *BuildHandler) ListBuildsByProject(echoCtx echo.Context) error {
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
+	projectID := echoCtx.Param("id")        // パスパラメータから project ID を取得する
+
+	buildList, err := buildHandler.buildService.ListBuildsByProject(echoCtx.Request().Context(), userID, projectID) // サービスを呼び出してビルド一覧を取得する
+	if err != nil {
+		if errors.Is(err, service.ErrForbidden) { // 権限エラーの場合は 403 を返す
+			logger.PrintHandlerError("BuildHandler", "ListBuildsByProject", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusForbidden, map[string]string{
+				"error": "アクセス権限がありません",
+			})
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが見つからない場合は 404 を返す
+			logger.PrintHandlerError("BuildHandler", "ListBuildsByProject", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusNotFound, map[string]string{
+				"error": "リソースが見つかりません",
+			})
+		}
+		logger.PrintHandlerError("BuildHandler", "ListBuildsByProject", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "内部サーバーエラー",
+		})
+	}
+	return echoCtx.JSON(http.StatusOK, buildList) // ビルド一覧を返す
+}
+
 // GetBuild は GET /api/v1/builds/:id のハンドラー
 func (buildHandler *BuildHandler) GetBuild(echoCtx echo.Context) error {
 	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
@@ -199,4 +226,37 @@ func (buildHandler *BuildHandler) GetBuildLogs(echoCtx echo.Context) error {
 		response.LastTimestamp = &formatted                       // 最終チャンク時刻をセットする
 	}
 	return echoCtx.JSON(http.StatusOK, response) // ログ文字列と最終時刻を返す
+}
+
+// DeleteBuild は DELETE /api/v1/projects/:id/builds/:buildId のハンドラー
+func (buildHandler *BuildHandler) DeleteBuild(echoCtx echo.Context) error {
+	userID := echoCtx.Get("UserID").(string)   // ミドルウェアがセットした UserID を取得する
+	projectID := echoCtx.Param("id")           // パスパラメータから project ID を取得する
+	buildID := echoCtx.Param("buildId")        // パスパラメータからビルド ID を取得する
+
+	if err := buildHandler.buildService.DeleteBuild(echoCtx.Request().Context(), userID, projectID, buildID); err != nil { // サービスを呼び出してビルドを削除する
+		if errors.Is(err, service.ErrForbidden) { // 所有権エラーの場合は 403 を返す
+			logger.PrintHandlerError("BuildHandler", "DeleteBuild", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusForbidden, map[string]string{
+				"error": "アクセス権限がありません",
+			})
+		}
+		if errors.Is(err, service.ErrBuildConflict) { // ビルド中は削除不可のため 409 を返す
+			logger.PrintHandlerError("BuildHandler", "DeleteBuild", echoCtx.Request().URL.Path, http.StatusConflict, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusConflict, map[string]string{
+				"error": "ビルド中のため削除できません",
+			})
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが見つからない場合は 404 を返す
+			logger.PrintHandlerError("BuildHandler", "DeleteBuild", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusNotFound, map[string]string{
+				"error": "リソースが見つかりません",
+			})
+		}
+		logger.PrintHandlerError("BuildHandler", "DeleteBuild", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "内部サーバーエラー",
+		})
+	}
+	return echoCtx.NoContent(http.StatusNoContent) // 削除成功時は 204 を返す
 }

@@ -69,9 +69,10 @@ func main() {
 	harborCredentialRepo := repository.NewHarborCredentialRepository(repository.Database) // harbor credential リポジトリを生成する
 	deploymentRepo := repository.NewDeploymentRepository(repository.Database)       // deployment リポジトリを生成する
 	ingressRouteRepo := repository.NewIngressRouteRepository(repository.Database)   // ingress_route リポジトリを生成する
+	buildRepo := repository.NewDeploymentBuildRepository(repository.Database)       // build リポジトリを生成する
 
 	// project ハンドラーを DI 組み立てする
-	projectServiceImpl := service.NewProjectService(repository.Database, projectRepo, harborCredentialRepo, deploymentRepo, ingressRouteRepo, userQuotaRepo, k8sClient, dynamicClient, harborClient) // project サービスを生成する
+	projectServiceImpl := service.NewProjectService(repository.Database, projectRepo, harborCredentialRepo, deploymentRepo, buildRepo, ingressRouteRepo, userQuotaRepo, k8sClient, dynamicClient, harborClient, cfg.GetHarborStorageLimitBytes()) // project サービスを生成する
 	projectHandler := handler.NewProjectHandler(projectServiceImpl)                 // project ハンドラーを生成する
 
 	// deployment ハンドラーを DI 組み立てする
@@ -81,7 +82,6 @@ func main() {
 	applyHistoryRepo := repository.NewApplyHistoryRepository(repository.Database)                                          // apply_history リポジトリを生成する
 	volumeRepo := repository.NewVolumeRepository(repository.Database)                                                      // volume リポジトリを生成する
 	volumeMountRepo := repository.NewVolumeMountRepository(repository.Database)                                            // volume_mount リポジトリを生成する
-	buildRepo := repository.NewDeploymentBuildRepository(repository.Database)                                              // build リポジトリを生成する
 	baseDomain := os.Getenv("BASE_DOMAIN")                                                                                                                                                          // ベースドメインを環境変数から取得する
 	pathRuleRepo := repository.NewPathRuleRepository(repository.Database)                                                                                                                             // path_rule リポジトリを生成する
 	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, userQuotaRepo, k8sClient) // deployment サービスを生成する
@@ -94,7 +94,7 @@ func main() {
 
 	// build ハンドラーを DI 組み立てする
 	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)                                                                           // build ログチャンクリポジトリを生成する
-	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient, "harbor.main-harbor") // build サービスを生成する（ビルドジョブはクラスタ内 DNS 名でアクセスする）
+	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient, harborClient, "harbor.main-harbor") // build サービスを生成する（ビルドジョブはクラスタ内 DNS 名でアクセスする）
 	buildHandler := handler.NewBuildHandler(buildServiceImpl)                                                                                            // build ハンドラーを生成する
 
 	// log ハンドラーを DI 組み立てする
@@ -127,8 +127,8 @@ func main() {
 		go k8s.WatchIngressRoutes(ctx, dynamicClient, ingressRouteRepo)                 // Traefik IngressRoute の状態変化を監視して DB を自動更新する
 		go k8s.WatchPVCs(ctx, k8sClient, volumeRepo)                                    // PVC の Bound 状態を監視して DB を自動更新する
 		go k8s.WatchNamespaces(ctx, k8sClient, projectRepo)                             // Namespace の削除イベントを監視して DB の Project レコードを削除する
-		go k8s.WatchBuildJobs(ctx, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, "harbor.main-harbor") // Build Job の完了・失敗を監視して DB を自動更新する
-		k8s.WatchDeployments(ctx, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, podLogChunkRepo, projectRepo) // k8s Deployment の状態変化を監視して DB を自動更新する
+		go k8s.WatchBuildJobs(ctx, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, harborClient, "harbor.main-harbor") // Build Job の完了・失敗を監視して DB を自動更新する
+		k8s.WatchDeployments(ctx, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, podLogChunkRepo, projectRepo) // k8s Deployment の状態変化を監視して DB を自動更新する
 	})
 
 	// ルーターを生成してサーバーを起動する
