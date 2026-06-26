@@ -74,6 +74,10 @@ func (mock *mockDeploymentRepository) UpdatePendingGithubCommitSHA(ctx context.C
 	return nil // デフォルトは nil を返す
 }
 
+func (mock *mockDeploymentRepository) UpdatePendingGithubBuildFields(ctx context.Context, deploymentID string, repoURL string, branch string, commitSHA string, directory string) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 func (mock *mockDeploymentRepository) UpdateDeleteProgress(ctx context.Context, deploymentID string, progress string) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
 }

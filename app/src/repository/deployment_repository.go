@@ -23,6 +23,7 @@ type DeploymentRepository interface {
 	UpdateDeleteProgress(ctx context.Context, deploymentID string, progress string) error                         // delete_progress を更新する（削除中のステップ名を保持する）
 	UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error                        // ビルド成功時に pending_image_url を更新する
 	UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error               // GitHub push 時に pending_github_commit_sha を更新する
+	UpdatePendingGithubBuildFields(ctx context.Context, deploymentID string, repoURL string, branch string, commitSHA string, directory string) error // ビルド成功時に pending_github_* フィールドをまとめて更新する
 	UpdateDeploymentStatus(ctx context.Context, deploymentID string, status models.DeploymentStatus) error       // deployment の status を更新する
 	UpdateCurrentBuildID(ctx context.Context, deploymentID string, buildID string) error                          // current_build_id を更新する
 	ClearCurrentBuildID(ctx context.Context, deploymentID string) error                                           // current_build_id を NULL にクリアする
@@ -144,6 +145,23 @@ func (repo *deploymentRepositoryImpl) UpdatePendingImageURL(ctx context.Context,
 func (repo *deploymentRepositoryImpl) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error {
 	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Update("pending_github_commit_sha", commitSHA) // pending_github_commit_sha を更新する
 	if result.Error != nil {                                                                                                                       // エラーが発生した場合
+		return result.Error // エラーを返す
+	}
+	if result.RowsAffected == 0 { // 更新対象が存在しない場合
+		return gorm.ErrRecordNotFound // レコードなしエラーを返す
+	}
+	return nil // 正常終了
+}
+
+// UpdatePendingGithubBuildFields はビルド成功時に pending_github_* フィールドをまとめて更新する
+func (repo *deploymentRepositoryImpl) UpdatePendingGithubBuildFields(ctx context.Context, deploymentID string, repoURL string, branch string, commitSHA string, directory string) error {
+	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Updates(map[string]interface{}{ // pending_github_* フィールドを一括更新する
+		"pending_github_repo_url":       repoURL,   // pending_github_repo_url を更新する
+		"pending_github_branch":         branch,    // pending_github_branch を更新する
+		"pending_github_commit_sha":     commitSHA, // pending_github_commit_sha を更新する
+		"pending_github_repo_directory": directory, // pending_github_repo_directory を更新する
+	})
+	if result.Error != nil { // エラーが発生した場合
 		return result.Error // エラーを返す
 	}
 	if result.RowsAffected == 0 { // 更新対象が存在しない場合

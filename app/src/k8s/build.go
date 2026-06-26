@@ -168,6 +168,15 @@ func handleBuildJobEvent(
 			logger.PrintErr("WatchBuildJobs: pending_image_url 更新に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + err.Error()) // エラーをログ出力する
 			return
 		}
+		builtDeploymentData, findErr := deploymentRepo.FindByID(ctx, buildData.DeploymentID) // pending_github_* 更新用に deployment を取得する
+		if findErr != nil {
+			logger.PrintErr("WatchBuildJobs: deployment 取得に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + findErr.Error()) // エラーをログ出力する
+			return
+		}
+		if err := deploymentRepo.UpdatePendingGithubBuildFields(ctx, buildData.DeploymentID, builtDeploymentData.GithubRepoURL, buildData.Branch, buildData.CommitSHA, buildData.Directory); err != nil { // pending_github_* フィールドを現在のビルド情報で更新する（apply 後に空にならないようにするため）
+			logger.PrintErr("WatchBuildJobs: pending_github_* 更新に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + err.Error()) // エラーをログ出力する
+			return
+		}
 		if err := deploymentRepo.UpdateDeploymentStatus(ctx, buildData.DeploymentID, models.DeploymentStatusPending); err != nil { // not_init → pending に遷移する（ビルド成功で apply 可能になる）
 			logger.PrintErr("WatchBuildJobs: DeploymentStatus 更新に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + err.Error()) // エラーをログ出力する
 			return

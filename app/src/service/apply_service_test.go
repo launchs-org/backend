@@ -383,6 +383,10 @@ func (mock *applyHistoryMockDeploymentRepository) UpdatePendingGithubCommitSHA(c
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
+func (mock *applyHistoryMockDeploymentRepository) UpdatePendingGithubBuildFields(ctx context.Context, deploymentID string, repoURL string, branch string, commitSHA string, directory string) error {
+	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
 func (mock *applyHistoryMockDeploymentRepository) UpdateDeleteProgress(ctx context.Context, deploymentID string, progress string) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
@@ -1037,6 +1041,10 @@ func (mock *duplicateKeyMockEnvVarRepository) Update(ctx context.Context, tx *go
 
 func (mock *duplicateKeyMockEnvVarRepository) Delete(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error {
 	return nil // 使用しない
+}
+
+func (mock *duplicateKeyMockEnvVarRepository) ExistsByProjectIDAndKey(ctx context.Context, projectID string, key string, excludeID string) (bool, error) {
+	return false, nil // 使用しない
 }
 
 // TestApplyService_Apply_重複キーが存在する場合applyがエラーになる は重複キーが存在する場合に apply がエラーになることを確認する
