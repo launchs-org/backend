@@ -56,6 +56,10 @@ func (mock *mockEnvVarRepository) Delete(ctx context.Context, tx *gorm.DB, envVa
 	return nil // デフォルトは nil を返す
 }
 
+func (mock *mockEnvVarRepository) ExistsByProjectIDAndKey(ctx context.Context, projectID string, key string, excludeID string) (bool, error) {
+	return false, nil // デフォルトは重複なしを返す
+}
+
 // TestListEnvVars_正常に一覧が取得される は ListEnvVars が env_var 一覧を返すことを確認する
 func TestListEnvVars_正常に一覧が取得される_service(t *testing.T) {
 	expectedList := []*models.EnvVar{

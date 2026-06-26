@@ -22,6 +22,9 @@ var ErrBuildConflict = errors.New("build already in progress")
 // ErrBuildNotCancellable はビルドがキャンセル不可能な状態の場合のエラー
 var ErrBuildNotCancellable = errors.New("build is not cancellable")
 
+// ErrDockerfileNotSupported は dockerfile ビルドタイプが現在サポートされていない場合のエラー
+var ErrDockerfileNotSupported = errors.New("dockerfile タイプは現在サポートされていません")
+
 // BuildService はビルドトリガーのビジネスロジックを定義するインターフェース
 type BuildService interface {
 	TriggerBuild(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error)         // ビルドをトリガーする
@@ -71,6 +74,11 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得する
 	if err != nil {
 		return nil, err // 取得エラーを返す
+	}
+
+	// 1.5. dockerfile タイプはサポートされていないため拒否する
+	if deploymentData.Type == models.DeploymentTypeDockerfile { // dockerfile タイプは ISSUE-051 未完のため拒否する
+		return nil, ErrDockerfileNotSupported // サポート外エラーを返す
 	}
 
 	// 2. 所有権チェック（Deployment の ProjectID から Project を取得して UserID を比較する）

@@ -22,12 +22,6 @@ const DEPLOYMENT_TYPES: { type: DeploymentType; label: string; description: stri
     Icon: Container,
   },
   {
-    type: 'dockerfile',
-    label: 'Dockerfile',
-    description: 'GitHub リポジトリの Dockerfile を使ってイメージをビルドしてデプロイします。',
-    Icon: GitBranch,
-  },
-  {
     type: 'railpack',
     label: 'Railpack',
     description: 'GitHub リポジトリを自動解析してビルドします。設定不要で多くのフレームワークに対応します。',

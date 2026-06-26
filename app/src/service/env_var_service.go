@@ -4,8 +4,12 @@ import (
 	"app/models"
 	"app/repository"
 	"context"
+	"errors"
 	"gorm.io/gorm"
 )
+
+// ErrDuplicateEnvVarKey は同一プロジェクト内でキーが重複している場合のエラー
+var ErrDuplicateEnvVarKey = errors.New("同じキーの環境変数がすでに存在します")
 
 // EnvVarService は環境変数 CRUD のビジネスロジックを定義するインターフェース
 type EnvVarService interface {
@@ -75,8 +79,16 @@ func (svc *envVarServiceImpl) CreateEnvVar(ctx context.Context, userID string, p
 		return nil, err // エラーを返す
 	}
 
+	exists, err := svc.envVarRepo.ExistsByProjectIDAndKey(ctx, projectID, req.Key, "") // 同一プロジェクト内でキーが重複しているか確認する
+	if err != nil {
+		return nil, err // チェックエラーを返す
+	}
+	if exists { // 重複が存在する場合はエラーを返す
+		return nil, ErrDuplicateEnvVarKey // 重複エラーを返す
+	}
+
 	var createdEnvVar *models.EnvVar                                               // 結果格納用変数を宣言する
-	err := svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {           // トランザクションを開始する
+	err = svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {            // トランザクションを開始する
 		envVarData := &models.EnvVar{
 			ProjectID: projectID,   // プロジェクト ID を設定する
 			Key:       req.Key,     // キーを設定する
@@ -111,6 +123,13 @@ func (svc *envVarServiceImpl) UpdateEnvVar(ctx context.Context, userID string, e
 		}
 
 		if req.Key != nil {
+			keyExists, keyCheckErr := svc.envVarRepo.ExistsByProjectIDAndKey(ctx, envVarData.ProjectID, *req.Key, envVarData.ID) // 更新後のキーが重複しないか確認する（自己除外あり）
+			if keyCheckErr != nil {
+				return keyCheckErr // チェックエラーでロールバックする
+			}
+			if keyExists { // 重複が存在する場合はエラーを返す
+				return ErrDuplicateEnvVarKey // 重複エラーでロールバックする
+			}
 			envVarData.Key = *req.Key // キーを更新する
 		}
 		if req.Value != nil {

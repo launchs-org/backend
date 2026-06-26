@@ -9,12 +9,13 @@ import (
 
 // EnvVarRepository は env_vars テーブルへのアクセスを定義するインターフェース
 type EnvVarRepository interface {
-	Create(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error                          // env_var を作成する
-	FindByIDForUpdate(ctx context.Context, tx *gorm.DB, envVarID string) (*models.EnvVar, error)   // env_var を ID で取得する（FOR UPDATE ロック）
-	FindByID(ctx context.Context, envVarID string) (*models.EnvVar, error)                         // env_var を ID で取得する（トランザクション外用）
-	FindAllByProjectID(ctx context.Context, projectID string) ([]*models.EnvVar, error)            // projectID に紐づく env_var 一覧を取得する
-	Update(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error                          // env_var を更新する
-	Delete(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error                          // env_var を削除する
+	Create(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error                                                       // env_var を作成する
+	FindByIDForUpdate(ctx context.Context, tx *gorm.DB, envVarID string) (*models.EnvVar, error)                                // env_var を ID で取得する（FOR UPDATE ロック）
+	FindByID(ctx context.Context, envVarID string) (*models.EnvVar, error)                                                      // env_var を ID で取得する（トランザクション外用）
+	FindAllByProjectID(ctx context.Context, projectID string) ([]*models.EnvVar, error)                                         // projectID に紐づく env_var 一覧を取得する
+	ExistsByProjectIDAndKey(ctx context.Context, projectID string, key string, excludeID string) (bool, error)                  // 同一プロジェクト内でキーが重複しているか確認する（excludeID は自己除外に使用）
+	Update(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error                                                       // env_var を更新する
+	Delete(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error                                                       // env_var を削除する
 }
 
 // envVarRepositoryImpl は EnvVarRepository の GORM 実装
@@ -57,6 +58,19 @@ func (repo *envVarRepositoryImpl) FindByIDForUpdate(ctx context.Context, tx *gor
 		return nil, err // 取得エラーを返す
 	}
 	return &envVarData, nil // env_var を返す
+}
+
+// ExistsByProjectIDAndKey は同一プロジェクト内で key が重複しているか確認する（excludeID に自分自身の ID を渡すと自己除外できる）
+func (repo *envVarRepositoryImpl) ExistsByProjectIDAndKey(ctx context.Context, projectID string, key string, excludeID string) (bool, error) {
+	var count int64                                                                                                                                          // 件数格納用変数を定義する
+	query := repo.db.WithContext(ctx).Model(&models.EnvVar{}).Where("project_id = ? AND key = ?", projectID, key) // プロジェクトとキーで絞り込む
+	if excludeID != "" {                                                                                                                                     // excludeID が指定されている場合は自己除外する
+		query = query.Where("id != ?", excludeID) // 自分自身を除外する
+	}
+	if err := query.Count(&count).Error; err != nil { // 件数を取得する
+		return false, err // 取得エラーを返す
+	}
+	return count > 0, nil // 1件以上あれば重複と判定する
 }
 
 // Update は env_var レコードを更新する

@@ -42,6 +42,12 @@ func (buildHandler *BuildHandler) TriggerBuild(echoCtx echo.Context) error {
 				"error": "ビルドが既に進行中です",
 			})
 		}
+		if errors.Is(err, service.ErrDockerfileNotSupported) { // dockerfile タイプは未サポートのため 400 を返す
+			logger.PrintHandlerError("BuildHandler", "TriggerBuild", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "dockerfile タイプは現在サポートされていません",
+			})
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが見つからない場合は 404 を返す
 			logger.PrintHandlerError("BuildHandler", "TriggerBuild", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{

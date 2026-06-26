@@ -187,7 +187,7 @@ func TestTriggerBuild_403_他ユーザー(t *testing.T) {
 	deploymentData := &models.Deployment{
 		ID:        "deployment-1",  // デプロイメント ID を設定する
 		ProjectID: "project-1",    // プロジェクト ID を設定する
-		Type:      models.DeploymentTypeDockerfile,
+		Type:      models.DeploymentTypeRailpack,
 	}
 
 	projectData := &models.Project{
@@ -234,7 +234,7 @@ func TestTriggerBuild_409_ビルド中(t *testing.T) {
 	deploymentData := &models.Deployment{
 		ID:        "deployment-1",  // デプロイメント ID を設定する
 		ProjectID: "project-1",    // プロジェクト ID を設定する
-		Type:      models.DeploymentTypeDockerfile,
+		Type:      models.DeploymentTypeRailpack,
 	}
 
 	projectData := &models.Project{

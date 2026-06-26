@@ -85,6 +85,12 @@ func (envVarHandler *EnvVarHandler) CreateEnvVar(echoCtx echo.Context) error {
 				"error": "アクセスが拒否されました",
 			})
 		}
+		if errors.Is(err, service.ErrDuplicateEnvVarKey) { // キー重複の場合は 409 を返す
+			logger.PrintHandlerError("EnvVarHandler", "CreateEnvVar", echoCtx.Request().URL.Path, http.StatusConflict, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusConflict, map[string]string{
+				"error": "同じキーの環境変数がすでに存在します",
+			})
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
 			logger.PrintHandlerError("EnvVarHandler", "CreateEnvVar", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
@@ -121,6 +127,12 @@ func (envVarHandler *EnvVarHandler) UpdateEnvVar(echoCtx echo.Context) error {
 			logger.PrintHandlerError("EnvVarHandler", "UpdateEnvVar", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
+			})
+		}
+		if errors.Is(err, service.ErrDuplicateEnvVarKey) { // キー重複の場合は 409 を返す
+			logger.PrintHandlerError("EnvVarHandler", "UpdateEnvVar", echoCtx.Request().URL.Path, http.StatusConflict, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusConflict, map[string]string{
+				"error": "同じキーの環境変数がすでに存在します",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す

@@ -70,6 +70,8 @@ export function ProjectDetailPage() {
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>(null) // サイドバーの表示モードを管理する
   const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null) // 選択中のデプロイメントIDを管理する
   const [iframeLoaded, setIframeLoaded] = useState(false) // iframe読み込み完了フラグ
+  const [iframeError, setIframeError] = useState(false) // iframe読み込みエラーフラグ
+  const iframeLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null) // ローディングタイムアウトの ref
   const [showAddMenu, setShowAddMenu] = useState(false) // 追加メニューの表示フラグ
   const [showVolumeSidebar, setShowVolumeSidebar] = useState(false) // ボリュームサイドバーの表示フラグ
   const [volumeList, setVolumeList] = useState<Volume[]>([]) // プロジェクトのボリューム一覧を管理する
@@ -91,6 +93,7 @@ export function ProjectDetailPage() {
     setSidebarMode('deployment-new') // デプロイメント作成サイドバーを開く
     setSelectedDeploymentId(null) // デプロイメント選択をリセットする
     setIframeLoaded(false) // iframe読み込みフラグをリセットする
+    setIframeError(false) // iframeエラーフラグをリセットする
   }, [])
 
   const openIngressSidebar = useCallback((ingressRouteId: string) => {
@@ -149,6 +152,7 @@ export function ProjectDetailPage() {
             setSelectedDeploymentId(deploymentId)
             setSidebarMode('deployment')
             setIframeLoaded(false)
+            setIframeError(false) // iframeエラーフラグをリセットする
           }, // ノードクリック時にデプロイメントサイドバーを開く
         },
       })
@@ -617,6 +621,7 @@ export function ProjectDetailPage() {
                     setSelectedDeploymentId(deploymentId) // 選択したデプロイメントIDを設定する
                     setSidebarMode('deployment') // デプロイメントサイドバーを開く
                     setIframeLoaded(false) // iframe読み込みフラグをリセットする
+                    setIframeError(false) // iframeエラーフラグをリセットする
                   }}
                   selectedDeploymentId={selectedDeploymentId}
                   onClose={() => setShowDeploymentListSidebar(false)}
@@ -745,9 +750,24 @@ export function ProjectDetailPage() {
                         </div>
                       </div>
                       <div className="flex-1 relative min-h-0 overflow-hidden">
-                        {!iframeLoaded && (
+                        {!iframeLoaded && !iframeError && (
                           <div className="absolute inset-0 flex items-center justify-center bg-white z-10">
                             <div className="w-6 h-6 border-2 border-[#00C2D1] border-t-transparent rounded-full animate-spin" />
+                          </div>
+                        )}
+                        {iframeError && (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white z-10 gap-3">
+                            <p className="text-sm text-gray-500">読み込みに失敗しました</p>
+                            <button
+                              onClick={() => {
+                                if (iframeLoadTimeoutRef.current) clearTimeout(iframeLoadTimeoutRef.current) // 既存タイムアウトをクリアする
+                                setIframeError(false) // エラーフラグをリセットする
+                                setIframeLoaded(false) // ローディング状態に戻す
+                              }}
+                              className="text-xs px-3 py-1.5 bg-[#00C2D1] text-white rounded hover:bg-[#00A8B5] transition-colors"
+                            >
+                              再読み込み
+                            </button>
                           </div>
                         )}
                         {/* リサイズ中は iframe 上にオーバーレイを被せてマウスイベントの横取りを防ぐ */}
@@ -755,11 +775,22 @@ export function ProjectDetailPage() {
                           <div className="absolute inset-0 z-20" />
                         )}
                         <iframe
-                          key={sidebarMode === 'deployment-new' ? 'deployment-new' : selectedDeploymentId}
+                          key={iframeError ? `${sidebarMode === 'deployment-new' ? 'deployment-new' : selectedDeploymentId}-retry-${Date.now()}` : (sidebarMode === 'deployment-new' ? 'deployment-new' : selectedDeploymentId)}
                           src={sidebarIframeSrc}
                           className="w-full h-full border-none"
                           title={sidebarMode === 'deployment-new' ? '新規デプロイメント' : 'デプロイメント詳細'}
-                          onLoad={() => setIframeLoaded(true)}
+                          onLoad={() => {
+                            if (iframeLoadTimeoutRef.current) clearTimeout(iframeLoadTimeoutRef.current) // タイムアウトをクリアする
+                            setIframeLoaded(true) // ロード完了フラグをセットする
+                          }}
+                          ref={(iframeEl) => {
+                            if (iframeEl && !iframeLoaded && !iframeError) {
+                              if (iframeLoadTimeoutRef.current) clearTimeout(iframeLoadTimeoutRef.current) // 既存タイムアウトをクリアする
+                              iframeLoadTimeoutRef.current = setTimeout(() => {
+                                setIframeError(true) // 10秒以内にロードされなければエラー扱いにする
+                              }, 10000)
+                            }
+                          }}
                         />
                       </div>
                     </>
@@ -1156,6 +1187,17 @@ function EnvVarSidebar({
   const [editValue, setEditValue] = useState('') // 編集中の値
   const [savingId, setSavingId] = useState<string | null>(null) // 保存中の環境変数ID
   const [showValues, setShowValues] = useState<Set<string>>(new Set()) // 値を表示中のID一覧
+  const [copiedId, setCopiedId] = useState<string | null>(null) // コピー完了フィードバック用ID
+
+  const handleCopy = async (envVar: EnvVar) => {
+    if (!envVar.value) { // 値が空（バックエンドがマスクして空を返す場合）はアラートを表示する
+      alert('値が取得できません（シークレット値はバックエンドによってマスクされています）')
+      return
+    }
+    await navigator.clipboard.writeText(envVar.value) // クリップボードに書き込む
+    setCopiedId(envVar.id) // コピー完了フィードバックを表示する
+    setTimeout(() => setCopiedId(null), 1500) // 1.5秒後にフィードバックをリセットする
+  }
 
   const handleAdd = async () => {
     if (!newKey) return
@@ -1296,13 +1338,22 @@ function EnvVarSidebar({
                   </div>
                   <div className="flex items-center gap-0.5 shrink-0">
                     {editingId !== envVar.id && (
-                      <button
-                        onClick={() => handleStartEdit(envVar)}
-                        className="p-1 rounded text-gray-300 hover:text-gray-500 hover:bg-gray-200 transition-colors"
-                        title="編集"
-                      >
-                        <Check className="w-3 h-3" />
-                      </button>
+                      <>
+                        <button
+                          onClick={() => void handleCopy(envVar)}
+                          className="p-1 rounded text-gray-300 hover:text-gray-500 hover:bg-gray-200 transition-colors"
+                          title="値をコピー"
+                        >
+                          {copiedId === envVar.id ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                        </button>
+                        <button
+                          onClick={() => handleStartEdit(envVar)}
+                          className="p-1 rounded text-gray-300 hover:text-gray-500 hover:bg-gray-200 transition-colors"
+                          title="編集"
+                        >
+                          <Check className="w-3 h-3" />
+                        </button>
+                      </>
                     )}
                     <button
                       onClick={() => void onDelete(envVar.id)}

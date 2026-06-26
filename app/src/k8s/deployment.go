@@ -247,6 +247,10 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kub
 
 	switch event.Type {
 	case watch.Deleted: // Deleted イベントの場合は DB の status を確認して処理を分岐する
+		if k8sDeployment.DeletionTimestamp != nil { // DeletionTimestamp が残っている場合はまだ Terminating 中なのでスキップする
+			return
+		}
+
 		// 実行中のログストリームをキャンセルする
 		streamCancelMu.Lock()                              // マップへの排他アクセスを開始する
 		if existingState, streamExists := streamCancelMap[deploymentID]; streamExists { // ストリームが実行中の場合
