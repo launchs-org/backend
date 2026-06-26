@@ -58,8 +58,23 @@ type HarborRobotCredential struct {
 
 // harborProjectRequest は Harbor project 作成リクエストのボディ
 type harborProjectRequest struct {
-	ProjectName string `json:"project_name"` // プロジェクト名
-	Public      bool   `json:"public"`       // 公開設定（false = プライベート）
+	ProjectName  string `json:"project_name"`  // プロジェクト名
+	Public       bool   `json:"public"`        // 公開設定（false = プライベート）
+	StorageLimit int64  `json:"storage_limit"` // ストレージ上限（バイト単位、-1 = 無制限）
+}
+
+// HarborProjectQuota は Harbor project のクォータ使用量
+type HarborProjectQuota struct {
+	UsedBytes  int64 `json:"used_bytes"`  // 使用済みバイト数
+	LimitBytes int64 `json:"limit_bytes"` // 上限バイト数（-1 = 無制限）
+}
+
+// harborProjectSummary は Harbor project サマリーレスポンスのうちクォータ情報部分
+type harborProjectSummary struct {
+	Quota struct {
+		Used struct{ Storage int64 } `json:"used"` // 使用済みストレージ量
+		Hard struct{ Storage int64 } `json:"hard"` // 上限ストレージ量
+	} `json:"quota"` // クォータ情報
 }
 
 // harborRobotRequest は Harbor robot account 作成リクエストのボディ
@@ -91,10 +106,11 @@ type harborRobotResponse struct {
 }
 
 // CreateHarborProject は Harbor に project を作成する
-func (client *HarborClient) CreateHarborProject(ctx context.Context, projectName string) error {
+func (client *HarborClient) CreateHarborProject(ctx context.Context, projectName string, storageLimitBytes int64) error {
 	requestBody := harborProjectRequest{
-		ProjectName: projectName, // プロジェクト名を設定する
-		Public:      true,       // 公開設定（false = プライベート）
+		ProjectName:  projectName,        // プロジェクト名を設定する
+		Public:       true,               // 公開設定
+		StorageLimit: storageLimitBytes,  // ストレージ上限を設定する
 	}
 	bodyBytes, err := json.Marshal(requestBody) // リクエストボディを JSON にシリアライズする
 	if err != nil {
@@ -343,4 +359,94 @@ func (client *HarborClient) DeleteHarborProject(ctx context.Context, projectName
 		return fmt.Errorf("harbor project 削除が失敗しました: status=%d body=%s", response.StatusCode, string(responseBody))
 	}
 	return nil
+}
+
+// GetProjectQuota は Harbor project のストレージクォータ使用量を取得する
+func (client *HarborClient) GetProjectQuota(ctx context.Context, projectName string, credential HarborRobotCredential) (*HarborProjectQuota, error) {
+	summaryURL := fmt.Sprintf("%s/api/v2.0/projects/%s/summary", client.endpoint, projectName) // サマリー API の URL を組み立てる（quota 情報を含む）
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, summaryURL, nil)            // GET リクエストを生成する
+	if err != nil {
+		return nil, fmt.Errorf("harbor project サマリーリクエストの生成に失敗しました: %w", err)
+	}
+	request.SetBasicAuth(credential.Name, credential.Secret) // robot 認証情報で Basic 認証を設定する
+
+	response, err := client.httpClient.Do(request) // リクエストを送信する
+	if err != nil {
+		return nil, fmt.Errorf("harbor project サマリーリクエストの送信に失敗しました: %w", err)
+	}
+	defer response.Body.Close() // レスポンスボディを閉じる
+
+	if response.StatusCode != http.StatusOK { // 200 以外はエラーとする
+		responseBody, _ := io.ReadAll(response.Body) // エラーボディを読み込む
+		return nil, fmt.Errorf("harbor project サマリーの取得に失敗しました: status=%d body=%s", response.StatusCode, string(responseBody))
+	}
+
+	var projectSummary harborProjectSummary                                         // レスポンスをパースする
+	if err := json.NewDecoder(response.Body).Decode(&projectSummary); err != nil { // JSON デコードする
+		return nil, fmt.Errorf("harbor project サマリーレスポンスのデコードに失敗しました: %w", err)
+	}
+
+	return &HarborProjectQuota{
+		UsedBytes:  projectSummary.Quota.Used.Storage, // 使用済みバイト数を返す
+		LimitBytes: projectSummary.Quota.Hard.Storage, // 上限バイト数を返す
+	}, nil
+}
+
+// harborArtifact は Harbor アーティファクト一覧レスポンスの要素（サイズ取得用）
+type harborArtifact struct {
+	Size int64 `json:"size"` // アーティファクトのバイトサイズ
+}
+
+// GetArtifactSize は Harbor 上のイメージリポジトリに含まれるアーティファクトの合計サイズをバイト単位で返す
+func (client *HarborClient) GetArtifactSize(ctx context.Context, projectName string, repositoryName string, credential HarborRobotCredential) (int64, error) {
+	artifactURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page_size=100", client.endpoint, projectName, repositoryName) // アーティファクト一覧 API の URL を組み立てる
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, artifactURL, nil)                                                            // GET リクエストを生成する
+	if err != nil {
+		return 0, fmt.Errorf("harbor アーティファクト一覧リクエストの生成に失敗しました: %w", err)
+	}
+	request.SetBasicAuth(credential.Name, credential.Secret) // robot 認証情報で Basic 認証を設定する
+
+	response, err := client.httpClient.Do(request) // リクエストを送信する
+	if err != nil {
+		return 0, fmt.Errorf("harbor アーティファクト一覧リクエストの送信に失敗しました: %w", err)
+	}
+	defer response.Body.Close() // レスポンスボディを閉じる
+
+	if response.StatusCode != http.StatusOK { // 200 以外はエラーとする
+		return 0, nil // サイズ取得失敗は非致命的なため 0 を返す
+	}
+
+	var artifactList []harborArtifact                                                      // レスポンスをパースする
+	if err := json.NewDecoder(response.Body).Decode(&artifactList); err != nil {           // JSON デコードする
+		return 0, nil // デコード失敗は非致命的なため 0 を返す
+	}
+
+	var totalSize int64                                         // 合計サイズを格納する変数を宣言する
+	for _, artifactData := range artifactList {                 // 各アーティファクトのサイズを合計する
+		totalSize += artifactData.Size // サイズを加算する
+	}
+	return totalSize, nil // 合計サイズを返す
+}
+
+// DeleteHarborImage は Harbor 上のイメージリポジトリ（1 ビルドに対応するリポジトリ）を削除する
+// repositoryName には deploymentID を指定する（Harbor API の URL エンコーディング要件に注意）
+func (client *HarborClient) DeleteHarborImage(ctx context.Context, projectName string, repositoryName string, credential HarborRobotCredential) error {
+	deleteURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s", client.endpoint, projectName, repositoryName) // リポジトリ削除 API の URL を組み立てる
+	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, deleteURL, nil)                                // DELETE リクエストを生成する
+	if err != nil {
+		return fmt.Errorf("harbor イメージ削除リクエストの生成に失敗しました: %w", err)
+	}
+	request.SetBasicAuth(credential.Name, credential.Secret) // robot 認証情報で Basic 認証を設定する
+
+	response, err := client.httpClient.Do(request) // リクエストを送信する
+	if err != nil {
+		return fmt.Errorf("harbor イメージ削除リクエストの送信に失敗しました: %w", err)
+	}
+	defer response.Body.Close() // レスポンスボディを閉じる
+
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusNotFound { // 削除成功・既に存在しない以外はエラーとする
+		responseBody, _ := io.ReadAll(response.Body) // エラーボディを読み込む
+		return fmt.Errorf("harbor イメージ削除が失敗しました: status=%d body=%s", response.StatusCode, string(responseBody))
+	}
+	return nil // 正常終了（404 も含む：既に削除済みは成功扱い）
 }

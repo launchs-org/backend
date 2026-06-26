@@ -1,6 +1,9 @@
 package config
 
-import "os"
+import (
+	"os"
+	"strconv"
+)
 
 // Config はアプリケーション設定を取得するインターフェース
 type Config interface {
@@ -13,7 +16,8 @@ type Config interface {
 	GetHarborEndpoint() string   // Harbor エンドポイントを返す
 	GetHarborRobotName() string  // Harbor 管理用 robot アカウント名を返す
 	GetHarborRobotSecret() string  // Harbor 管理用 robot アカウントのシークレットを返す
-	GetStorageClassName() string   // PVC に使用する StorageClass 名を返す
+	GetStorageClassName() string        // PVC に使用する StorageClass 名を返す
+	GetHarborStorageLimitBytes() int64  // Harbor プロジェクトのストレージ上限をバイト単位で返す
 }
 
 // EnvConfig は環境変数から設定を読み込む Config の実装
@@ -62,6 +66,15 @@ func (envConfig *EnvConfig) GetHarborRobotSecret() string {
 
 func (envConfig *EnvConfig) GetStorageClassName() string {
 	return getEnv("STORAGE_CLASS_NAME", "longhorn") // PVC に使用する StorageClass 名を環境変数から取得する
+}
+
+func (envConfig *EnvConfig) GetHarborStorageLimitBytes() int64 {
+	rawValue := getEnv("HARBOR_STORAGE_LIMIT_BYTES", "10737418240") // Harbor ストレージ上限を環境変数から取得する（デフォルト 10GB）
+	parsedValue, parseErr := strconv.ParseInt(rawValue, 10, 64)     // 文字列を int64 に変換する
+	if parseErr != nil {
+		return 10737418240 // パース失敗時はデフォルト値（10GB）を返す
+	}
+	return parsedValue // 変換した値を返す
 }
 
 // getEnv は環境変数を取得し、未設定の場合はデフォルト値を返す
