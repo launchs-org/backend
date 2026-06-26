@@ -59,11 +59,14 @@ export type BuildStatus = 'pending' | 'building' | 'succeeded' | 'failed' | 'can
 
 export type Build = {
   id: string
-  deployment_id: string
+  project_id: string
+  deployment_id: string | null
   build_type: 'dockerfile' | 'railpack'
   status: BuildStatus
   k8s_job_name: string
   built_image_url: string
+  image_size_bytes: number
+  github_repo_url: string
   commit_sha: string
   commit_message: string
   branch: string
@@ -74,6 +77,13 @@ export type Build = {
   started_at: string | null
   finished_at: string | null
   created_at: string
+}
+
+// ── ProjectQuota ──────────────────────────────────────────────
+
+export type ProjectQuota = {
+  used_bytes: number
+  limit_bytes: number
 }
 
 // ── Service ───────────────────────────────────────────────────

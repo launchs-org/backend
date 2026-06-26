@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { Container, GitBranch, Package, LayoutTemplate, Plus, Trash2, Dice6 } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { get, post, QuotaExceededApiError } from '@/lib/api'
@@ -68,6 +68,7 @@ async function fetchGitHubDirs(repo: string, branch: string): Promise<string[]> 
 export function DeploymentNewPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
+  const location = useLocation() // URL クエリパラメータを取得するために使用する
 
   const [step, setStep] = useState<Step>('type') // 現在のステップを管理する
   const [selectedType, setSelectedType] = useState<DeploymentType | null>(null) // 選択したタイプを管理する
@@ -161,6 +162,17 @@ export function DeploymentNewPage() {
       setGhLoading(null)
     }
   }
+
+  // URLクエリパラメータ image_url が指定されていた場合に自動入力する
+  useEffect(() => {
+    const searchParams = new URLSearchParams(location.search) // クエリパラメータを取得する
+    const imageUrlParam = searchParams.get('image_url') // image_url パラメータを取得する
+    if (imageUrlParam) {
+      setSelectedType('image_url') // タイプを image_url に自動選択する
+      setStep('form') // フォームステップへ自動遷移する
+      setFormData(prev => ({ ...prev, image_url: imageUrlParam })) // image_url を自動入力する
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // テンプレート一覧を取得する（templateステップ表示時）
   useEffect(() => {

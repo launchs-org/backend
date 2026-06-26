@@ -11,7 +11,7 @@ import {
   type Edge,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Plus, Trash2, X, Globe, Copy, Check, ExternalLink, Play, HardDrive, KeyRound, Layers, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, X, Globe, Copy, Check, ExternalLink, Play, HardDrive, KeyRound, Layers, ChevronRight, Package } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DeploymentNode } from '@/components/flow/DeploymentNode'
@@ -22,7 +22,7 @@ import { VolumeNode } from '@/components/flow/VolumeNode'
 import { EnvVarNode } from '@/components/flow/EnvVarNode'
 import { get, post, del } from '@/lib/api'
 import { put } from '@/lib/api'
-import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar, VolumeMount, EnvVarMount } from '@/lib/types'
+import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar, VolumeMount, EnvVarMount, Build, ProjectQuota } from '@/lib/types'
 import { SIDEBAR_INITIAL_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, FLOW_ROW_HEIGHT } from '@/lib/config'
 
 const NODE_TYPES = {
@@ -80,6 +80,9 @@ export function ProjectDetailPage() {
   const [selectedEnvVarId, setSelectedEnvVarId] = useState<string | null>(null) // クリックされた環境変数ID（ハイライト用）
   const [showDeploymentListSidebar, setShowDeploymentListSidebar] = useState(false) // デプロイメント一覧サイドバーの表示フラグ
   const [showIngressListSidebar, setShowIngressListSidebar] = useState(false) // IngressRoute一覧サイドバーの表示フラグ
+  const [showBuildSidebar, setShowBuildSidebar] = useState(false) // ビルド一覧サイドバーの表示フラグ
+  const [buildList, setBuildList] = useState<Build[]>([]) // プロジェクトのビルド一覧を管理する
+  const [projectQuota, setProjectQuota] = useState<ProjectQuota | null>(null) // Harborストレージクォータを管理する
   const [envVarList, setEnvVarList] = useState<EnvVar[]>([]) // プロジェクトの環境変数一覧を管理する
   const [deletingEnvVarId, setDeletingEnvVarId] = useState<string | null>(null) // 削除中の環境変数ID
   const sidebarWidth = useRef(SIDEBAR_INITIAL_WIDTH) // サイドバー幅（px）: re-render を避けるため ref で管理する
@@ -329,6 +332,14 @@ export function ProjectDetailPage() {
       const envVars = await get<EnvVar[]>(`/projects/${projectId}/env-vars`).catch(() => []) // 環境変数一覧を取得する
       setEnvVarList(envVars ?? []) // 環境変数一覧を設定する
 
+      // ビルド一覧とクォータを並行取得する
+      const [builds, quota] = await Promise.all([
+        get<Build[]>(`/projects/${projectId}/builds`).catch(() => []), // ビルド一覧を取得する
+        get<ProjectQuota>(`/projects/${projectId}/quota`).catch(() => null), // Harbor クォータを取得する
+      ])
+      setBuildList(builds ?? []) // ビルド一覧を設定する
+      setProjectQuota(quota) // クォータを設定する
+
       // envVar を含めてグラフを再描画する（selectedEnvVarId は useEffect 側で監視）
       buildGraph(relations, projectId, ingressList, currentPathRulesByIngressRouteId, volumes ?? [], envVars ?? [], selectedEnvVarId)
     } catch (fetchError) {
@@ -567,7 +578,7 @@ export function ProjectDetailPage() {
             {/* 左アイコンレール */}
             <div className="w-14 shrink-0 flex flex-col items-center pt-3 gap-2 border-r border-gray-100 bg-gray-50 z-10">
               <button
-                onClick={() => { setShowDeploymentListSidebar(prev => !prev); setShowIngressListSidebar(false); setShowVolumeSidebar(false); setShowEnvVarSidebar(false) }}
+                onClick={() => { setShowDeploymentListSidebar(prev => !prev); setShowIngressListSidebar(false); setShowVolumeSidebar(false); setShowEnvVarSidebar(false); setShowBuildSidebar(false) }}
                 title="デプロイメント"
                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                   showDeploymentListSidebar
@@ -578,7 +589,7 @@ export function ProjectDetailPage() {
                 <Layers className="w-5 h-5" />
               </button>
               <button
-                onClick={() => { setShowIngressListSidebar(prev => !prev); setShowDeploymentListSidebar(false); setShowVolumeSidebar(false); setShowEnvVarSidebar(false) }}
+                onClick={() => { setShowIngressListSidebar(prev => !prev); setShowDeploymentListSidebar(false); setShowVolumeSidebar(false); setShowEnvVarSidebar(false); setShowBuildSidebar(false) }}
                 title="IngressRoute"
                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                   showIngressListSidebar
@@ -589,7 +600,7 @@ export function ProjectDetailPage() {
                 <Globe className="w-5 h-5" />
               </button>
               <button
-                onClick={() => { setShowVolumeSidebar(prev => !prev); setShowEnvVarSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false) }}
+                onClick={() => { setShowVolumeSidebar(prev => !prev); setShowEnvVarSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false); setShowBuildSidebar(false) }}
                 title="ボリューム"
                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                   showVolumeSidebar
@@ -600,7 +611,7 @@ export function ProjectDetailPage() {
                 <HardDrive className="w-5 h-5" />
               </button>
               <button
-                onClick={() => { setShowEnvVarSidebar(prev => !prev); setShowVolumeSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false) }}
+                onClick={() => { setShowEnvVarSidebar(prev => !prev); setShowVolumeSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false); setShowBuildSidebar(false) }}
                 title="環境変数"
                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                   showEnvVarSidebar
@@ -609,6 +620,17 @@ export function ProjectDetailPage() {
                 }`}
               >
                 <KeyRound className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => { setShowBuildSidebar(prev => !prev); setShowEnvVarSidebar(false); setShowVolumeSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false) }}
+                title="ビルド"
+                className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
+                  showBuildSidebar
+                    ? 'bg-emerald-500 text-white shadow-md'
+                    : 'bg-emerald-50 text-emerald-500 hover:bg-emerald-100'
+                }`}
+              >
+                <Package className="w-5 h-5" />
               </button>
             </div>
 
@@ -668,6 +690,19 @@ export function ProjectDetailPage() {
                   onDelete={handleDeleteEnvVar}
                   onRefresh={fetchData}
                   onClose={() => setShowEnvVarSidebar(false)}
+                />
+              </div>
+            )}
+
+            {/* ビルドサイドバー（左から開く） */}
+            {showBuildSidebar && (
+              <div className="w-96 shrink-0 flex flex-col border-r border-gray-200 bg-white z-10">
+                <BuildSidebar
+                  projectId={projectId!}
+                  buildList={buildList}
+                  projectQuota={projectQuota}
+                  onClose={() => setShowBuildSidebar(false)}
+                  onBuildDeleted={(buildId) => setBuildList(prev => prev.filter(b => b.id !== buildId))}
                 />
               </div>
             )}
@@ -1692,6 +1727,201 @@ function IngressListSidebar({
           <Plus className="w-3.5 h-3.5" />
           {creatingIngress ? '作成中...' : '新規IngressRoute'}
         </button>
+      </div>
+    </div>
+  )
+}
+
+// ── BuildSidebar ──────────────────────────────────────────────
+
+function BuildSidebar({
+  projectId,
+  buildList,
+  projectQuota,
+  onClose,
+  onBuildDeleted,
+}: {
+  projectId: string
+  buildList: Build[]
+  projectQuota: ProjectQuota | null
+  onClose: () => void
+  onBuildDeleted: (buildId: string) => void
+}) {
+  const navigate = useNavigate() // ページ遷移に使用する
+  const [deletingBuildId, setDeletingBuildId] = useState<string | null>(null) // 削除中のビルド ID を管理する
+
+  const buildStatusColor: Record<string, string> = { // ビルドステータスに対応する色を定義する
+    pending: 'bg-gray-100 text-gray-500',
+    building: 'bg-blue-100 text-blue-600',
+    succeeded: 'bg-emerald-100 text-emerald-700',
+    failed: 'bg-red-100 text-red-600',
+    cancelled: 'bg-gray-100 text-gray-400',
+  }
+
+  const buildStatusLabel: Record<string, string> = { // ビルドステータスの日本語ラベルを定義する
+    pending: '待機中',
+    building: 'ビルド中',
+    succeeded: '成功',
+    failed: '失敗',
+    cancelled: 'キャンセル',
+  }
+
+  const handleDeployFromBuild = (build: Build) => {
+    const params = new URLSearchParams({ image_url: build.built_image_url }) // クエリパラメータを生成する
+    navigate(`/projects/${projectId}/deployments/new?${params.toString()}`) // デプロイメント作成画面へ遷移する
+  }
+
+  const handleDeleteBuild = async (build: Build) => {
+    if (!window.confirm(`このビルドを削除しますか？\n\nHarbor 上のイメージも削除されます。`)) return // 削除確認ダイアログを表示する
+    setDeletingBuildId(build.id) // 削除中フラグを立てる
+    try {
+      await del(`/projects/${projectId}/builds/${build.id}`) // DELETE API を呼び出す
+      onBuildDeleted(build.id) // 親コンポーネントに削除を通知する
+    } catch {
+      alert('削除に失敗しました') // エラーを表示する
+    } finally {
+      setDeletingBuildId(null) // 削除中フラグを解除する
+    }
+  }
+
+  const formatBytes = (bytes: number): string => { // バイト数を人が読みやすい形式に変換する
+    if (bytes <= 0) return ''
+    if (bytes < 1_048_576) return `${(bytes / 1_024).toFixed(1)} KB`
+    if (bytes < 1_073_741_824) return `${(bytes / 1_048_576).toFixed(1)} MB`
+    return `${(bytes / 1_073_741_824).toFixed(2)} GB`
+  }
+
+  const usedGb = projectQuota ? (projectQuota.used_bytes / 1_073_741_824).toFixed(2) : null // 使用量をGBに変換する
+  const limitGb = projectQuota ? (projectQuota.limit_bytes / 1_073_741_824).toFixed(1) : null // 上限をGBに変換する
+  const usagePercent = projectQuota && projectQuota.limit_bytes > 0
+    ? Math.min(100, Math.round((projectQuota.used_bytes / projectQuota.limit_bytes) * 100))
+    : 0 // 使用率を計算する（最大100%）
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* ヘッダー */}
+      <div className="h-10 flex items-center justify-between px-3 border-b border-gray-100 bg-gray-50 shrink-0">
+        <div className="flex items-center gap-2">
+          <Package className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+          <span className="text-xs font-medium text-[#111827]">ビルド</span>
+          <span className="text-xs text-gray-400">{buildList.length}</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* コンテンツ */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+        {/* Harbor ストレージクォータ */}
+        {projectQuota && (
+          <div className="bg-gray-50 border border-gray-100 rounded-md p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-gray-600">Harborストレージ使用量</span>
+              <span className="text-xs text-gray-500">{usedGb} GB / {limitGb} GB</span>
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div
+                className={`h-2 rounded-full transition-all ${usagePercent >= 90 ? 'bg-red-500' : usagePercent >= 70 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                style={{ width: `${usagePercent}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-gray-400">{usagePercent}% 使用中</p>
+          </div>
+        )}
+
+        {/* ビルド一覧 */}
+        {buildList.length === 0 ? (
+          <p className="text-xs text-gray-400 py-2">ビルドがありません</p>
+        ) : (
+          <div className="space-y-2">
+            {buildList.map(build => (
+              <div key={build.id} className="bg-gray-50 rounded-md border border-gray-100 p-3 space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${buildStatusColor[build.status] ?? 'bg-gray-100 text-gray-500'}`}>
+                      {buildStatusLabel[build.status] ?? build.status}
+                    </span>
+                    {build.image_size_bytes > 0 && (
+                      <span className="text-[10px] text-gray-400 shrink-0">{formatBytes(build.image_size_bytes)}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-[10px] text-gray-400">
+                      {build.finished_at
+                        ? new Date(build.finished_at).toLocaleString('ja-JP')
+                        : build.started_at
+                          ? new Date(build.started_at).toLocaleString('ja-JP')
+                          : new Date(build.created_at).toLocaleString('ja-JP')}
+                    </span>
+                    <button
+                      onClick={() => handleDeleteBuild(build)}
+                      disabled={deletingBuildId === build.id || build.status === 'pending' || build.status === 'building'}
+                      className="p-1 rounded hover:bg-red-100 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      title="ビルドを削除"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+                {build.commit_message && (
+                  <p className="text-xs text-[#111827] truncate" title={build.commit_message}>{build.commit_message}</p>
+                )}
+                {build.branch && (
+                  <p className="text-[10px] text-gray-500 font-mono truncate">
+                    {build.github_repo_url ? (
+                      <a
+                        href={`${build.github_repo_url}/tree/${build.branch}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:underline text-blue-500"
+                        title={build.github_repo_url}
+                      >
+                        {build.branch}
+                      </a>
+                    ) : build.branch}
+                    {build.commit_sha && (
+                      <>
+                        {' @ '}
+                        {build.github_repo_url ? (
+                          <a
+                            href={`${build.github_repo_url}/commit/${build.commit_sha}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:underline text-blue-500"
+                          >
+                            {build.commit_sha.slice(0, 7)}
+                          </a>
+                        ) : build.commit_sha.slice(0, 7)}
+                      </>
+                    )}
+                  </p>
+                )}
+                {build.directory && (
+                  <p className="text-[10px] text-gray-400 font-mono truncate" title={`ディレクトリ: ${build.directory}`}>📁 {build.directory}</p>
+                )}
+                {build.author && (
+                  <p className="text-[10px] text-gray-400 truncate">👤 {build.author}</p>
+                )}
+                {build.built_image_url && (
+                  <p className="text-[10px] text-gray-400 font-mono truncate" title={build.built_image_url}>{build.built_image_url}</p>
+                )}
+                {build.status === 'succeeded' && build.built_image_url && (
+                  <button
+                    onClick={() => handleDeployFromBuild(build)}
+                    className="w-full flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs py-1.5 rounded transition-colors"
+                  >
+                    <Play className="w-3 h-3" />
+                    このイメージでデプロイ
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )
