@@ -50,15 +50,27 @@ func (mock *mockBuildRepo) UpdateStatus(ctx context.Context, buildID string, sta
 func (mock *mockBuildRepo) UpdateK8sJobName(ctx context.Context, buildID string, jobName string) error {
 	return nil // テストでは使用しない
 }
-func (mock *mockBuildRepo) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, finishedAt time.Time) error {
+func (mock *mockBuildRepo) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, imageSizeBytes int64, finishedAt time.Time) error {
 	if mock.updateBuildResultFn != nil {
 		return mock.updateBuildResultFn(ctx, buildID, status, builtImageURL, finishedAt) // モック関数を呼び出す
 	}
 	return nil // デフォルトは正常終了を返す
 }
 
+func (mock *mockBuildRepo) Delete(ctx context.Context, build *models.DeploymentBuild) error {
+	return nil // テストでは使用しない
+}
+
 func (mock *mockBuildRepo) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
+}
+
+func (mock *mockBuildRepo) FindAllByProjectID(ctx context.Context, projectID string) ([]models.DeploymentBuild, error) {
+	return nil, nil // テストでは使用しない
+}
+
+func (mock *mockBuildRepo) DeleteAllByProjectID(ctx context.Context, db *gorm.DB, projectID string) error {
+	return nil // テストでは使用しない
 }
 
 // mockLogChunkRepo は BuildLogChunkRepository のテスト用モック
@@ -268,7 +280,7 @@ func TestHandleBuildJobEvent_ActiveJob_StatusBecomesBuilding(t *testing.T) {
 
 	buildData := &models.DeploymentBuild{
 		ID:           buildID,                     // ビルドIDを設定する
-		DeploymentID: "deployment-id-001",         // デプロイメントIDを設定する
+		DeploymentID: func() *string { v := "deployment-id-001"; return &v }(),         // デプロイメントIDを設定する
 		Status:       models.BuildStatusPending,   // 初期ステータスを pending に設定する
 		BuildType:    models.BuildTypeRailpack,    // ビルドタイプを設定する
 	}
@@ -294,7 +306,7 @@ func TestHandleBuildJobEvent_ActiveJob_StatusBecomesBuilding(t *testing.T) {
 		Object: activeJob,         // Job オブジェクトを設定する
 	}
 
-	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, "") // イベントを処理する
+	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, nil, "") // イベントを処理する
 
 	if updatedStatus != models.BuildStatusBuilding { // ステータスが building になっていることを確認する
 		t.Errorf("Job Active 後のステータスは building であるべきですが、%s でした", updatedStatus)
@@ -310,7 +322,7 @@ func TestHandleBuildJobEvent_SucceededJob_StatusBecomesSucceeded(t *testing.T) {
 
 	buildData := &models.DeploymentBuild{
 		ID:           buildID,                     // ビルドIDを設定する
-		DeploymentID: "deployment-id-002",         // デプロイメントIDを設定する
+		DeploymentID: func() *string { v := "deployment-id-002"; return &v }(),         // デプロイメントIDを設定する
 		Status:       models.BuildStatusBuilding,  // building 状態を設定する
 		BuildType:    models.BuildTypeRailpack,    // ビルドタイプを設定する
 	}
@@ -338,7 +350,7 @@ func TestHandleBuildJobEvent_SucceededJob_StatusBecomesSucceeded(t *testing.T) {
 		Object: succeededJob,      // Job オブジェクトを設定する
 	}
 
-	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, "") // イベントを処理する
+	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, nil, "") // イベントを処理する
 
 	if resultStatus != models.BuildStatusSucceeded { // ステータスが succeeded になっていることを確認する
 		t.Errorf("Job Succeeded 後のステータスは succeeded であるべきですが、%s でした", resultStatus)
@@ -359,7 +371,7 @@ func TestHandleBuildJobEvent_SucceededJob_PendingImageURLUpdated(t *testing.T) {
 
 	buildData := &models.DeploymentBuild{
 		ID:           buildID,                     // ビルドIDを設定する
-		DeploymentID: "deployment-id-003",         // デプロイメントIDを設定する
+		DeploymentID: func() *string { v := "deployment-id-003"; return &v }(),         // デプロイメントIDを設定する
 		Status:       models.BuildStatusBuilding,  // building 状態を設定する
 		BuildType:    models.BuildTypeRailpack,    // ビルドタイプを設定する
 	}
@@ -385,7 +397,7 @@ func TestHandleBuildJobEvent_SucceededJob_PendingImageURLUpdated(t *testing.T) {
 		Object: succeededJob,      // Job オブジェクトを設定する
 	}
 
-	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, "") // イベントを処理する
+	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, nil, "") // イベントを処理する
 
 	expectedImageURL := "/project-id-003/deployment-id-003:" + buildID // 期待するイメージURLを組み立てる（registryHost="" のため先頭スラッシュ）
 	if updatedPendingImageURL != expectedImageURL {                      // pending_image_url が正しく更新されていることを確認する
@@ -402,7 +414,7 @@ func TestHandleBuildJobEvent_FailedJob_StatusBecomesFailed(t *testing.T) {
 
 	buildData := &models.DeploymentBuild{
 		ID:           buildID,                     // ビルドIDを設定する
-		DeploymentID: "deployment-id-004",         // デプロイメントIDを設定する
+		DeploymentID: func() *string { v := "deployment-id-004"; return &v }(),         // デプロイメントIDを設定する
 		Status:       models.BuildStatusBuilding,  // building 状態を設定する
 		BuildType:    models.BuildTypeRailpack,    // ビルドタイプを設定する
 	}
@@ -428,7 +440,7 @@ func TestHandleBuildJobEvent_FailedJob_StatusBecomesFailed(t *testing.T) {
 		Object: failedJob,         // Job オブジェクトを設定する
 	}
 
-	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, "") // イベントを処理する
+	handleBuildJobEvent(ctx, event, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, nil, "") // イベントを処理する
 
 	if resultStatus != models.BuildStatusFailed { // ステータスが failed になっていることを確認する
 		t.Errorf("Job Failed 後のステータスは failed であるべきですが、%s でした", resultStatus)
@@ -444,7 +456,7 @@ func TestWatchBuildJobs_RecoversInProgressBuilds(t *testing.T) {
 
 	buildData := models.DeploymentBuild{
 		ID:           buildID,                     // ビルドIDを設定する
-		DeploymentID: "deployment-id-005",         // デプロイメントIDを設定する
+		DeploymentID: func() *string { v := "deployment-id-005"; return &v }(),         // デプロイメントIDを設定する
 		Status:       models.BuildStatusBuilding,  // building 状態を設定する
 		BuildType:    models.BuildTypeDockerfile,  // Dockerfile ビルドは未実装のためスキップされる
 	}
@@ -480,7 +492,7 @@ func TestWatchBuildJobs_RecoversInProgressBuilds(t *testing.T) {
 		return true, fakeWatcher, nil // フェイク Watcher を返す
 	})
 
-	go WatchBuildJobs(ctx, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, "") // Watcher をバックグラウンドで起動する
+	go WatchBuildJobs(ctx, fakeClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, nil, "") // Watcher をバックグラウンドで起動する
 
 	// リカバリが実行されるまで少し待機する
 	waitDeadline := time.After(2 * time.Second) // 2秒のタイムアウトを設定する

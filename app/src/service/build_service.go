@@ -31,7 +31,9 @@ type BuildService interface {
 	CancelBuild(ctx context.Context, userID string, buildID string) error                                          // ビルドをキャンセルする
 	GetBuild(ctx context.Context, userID string, buildID string) (*models.DeploymentBuild, error)                  // ビルド情報を取得する
 	GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error) // ビルドログを取得する（ログ文字列・最終チャンク時刻・エラー）
-	ListBuilds(ctx context.Context, userID string, deploymentID string) ([]models.DeploymentBuild, error)          // ビルド一覧を取得する
+	ListBuilds(ctx context.Context, userID string, deploymentID string) ([]models.DeploymentBuild, error)          // ビルド一覧を取得する（deployment 単位）
+	ListBuildsByProject(ctx context.Context, userID string, projectID string) ([]models.DeploymentBuild, error)    // ビルド一覧を取得する（project 単位）
+	DeleteBuild(ctx context.Context, userID string, projectID string, buildID string) error                        // ビルドを削除する（Harbor イメージも削除する）
 }
 
 // TriggerBuildRequest は TriggerBuild のリクエスト構造体（現時点では deploymentID のみ）
@@ -44,6 +46,7 @@ type buildServiceImpl struct {
 	harborCredentialRepo repository.HarborCredentialRepository // harbor credential リポジトリ
 	logChunkRepo         repository.BuildLogChunkRepository    // ログチャンクリポジトリ
 	k8sClient            kubernetes.Interface                  // k8s クライアント
+	harborClient         *k8s.HarborClient                    // Harbor API クライアント（イメージ削除用）
 	registryHost         string                                // ビルドジョブが使う Harbor ホスト名（スキームなし、クラスタ内 DNS 名）
 }
 
@@ -55,6 +58,7 @@ func NewBuildService(
 	harborCredentialRepo repository.HarborCredentialRepository,
 	logChunkRepo repository.BuildLogChunkRepository,
 	k8sClient kubernetes.Interface,
+	harborClient *k8s.HarborClient,
 	registryHost string,
 ) BuildService {
 	return &buildServiceImpl{
@@ -64,6 +68,7 @@ func NewBuildService(
 		harborCredentialRepo: harborCredentialRepo, // harbor credential リポジトリを注入する
 		logChunkRepo:         logChunkRepo,         // ログチャンクリポジトリを注入する
 		k8sClient:            k8sClient,            // k8s クライアントを注入する
+		harborClient:         harborClient,         // Harbor クライアントを注入する
 		registryHost:         registryHost,         // クラスタ内 DNS 名を注入する
 	}
 }
@@ -114,14 +119,17 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 	}
 
 	// 6. DeploymentBuild レコードを pending で作成する
+	deploymentIDValue := deploymentID                        // pointer 用にローカル変数にコピーする
 	buildData := &models.DeploymentBuild{
-		DeploymentID:   deploymentID,                        // deployment ID を設定する
-		BuildType:      buildType,                           // ビルドタイプを設定する
-		Status:         models.BuildStatusPending,           // 初期ステータスを pending に設定する
+		ProjectID:      deploymentData.ProjectID,              // project ID を設定する（Deployment 削除後もビルドを保持するため）
+		DeploymentID:   &deploymentIDValue,                    // deployment ID を設定する（nullable pointer）
+		BuildType:      buildType,                             // ビルドタイプを設定する
+		Status:         models.BuildStatusPending,             // 初期ステータスを pending に設定する
+		GithubRepoURL:  deploymentData.PendingGithubRepoURL,  // GitHub リポジトリ URL をスナップショットする
 		CommitSHA:      deploymentData.PendingGithubCommitSHA, // コミット SHA を設定する
-		Branch:         deploymentData.PendingGithubBranch,  // ブランチを設定する
+		Branch:         deploymentData.PendingGithubBranch,    // ブランチを設定する
 		Directory:      deploymentData.PendingGithubRepoDirectory, // ビルドディレクトリを設定する
-		DockerfilePath: deploymentData.PendingDockerfilePath, // Dockerfile パスを設定する
+		DockerfilePath: deploymentData.PendingDockerfilePath,  // Dockerfile パスを設定する
 	}
 	if err := svc.buildRepo.Create(ctx, buildData); err != nil { // build レコードを作成する
 		return nil, err // 作成エラーを返す
@@ -167,7 +175,7 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 	if err != nil {
 		// Job 起動失敗時はビルドレコードを failed に更新してから返す（pending のまま残すと再ビルドが永久に弾かれるため）
 		finishedAt := time.Now()
-		_ = svc.buildRepo.UpdateBuildResult(ctx, buildData.ID, models.BuildStatusFailed, "", finishedAt) // ロールバック：failed に更新する
+		_ = svc.buildRepo.UpdateBuildResult(ctx, buildData.ID, models.BuildStatusFailed, "", 0, finishedAt) // ロールバック：failed に更新する
 		return nil, err                                                                                   // Job 作成エラーを返す
 	}
 
@@ -187,7 +195,18 @@ func (svc *buildServiceImpl) GetBuild(ctx context.Context, userID string, buildI
 		return nil, err // 取得エラーを返す
 	}
 
-	deploymentData, err := svc.deploymentRepo.FindByID(ctx, buildData.DeploymentID) // 所有権チェック用にデプロイメントを取得する
+	if buildData.DeploymentID == nil { // DeploymentID が nil の場合（Deployment 削除済み）は project 経由で確認する
+		projectData, projectErr := svc.projectRepo.FindByIDNoTx(ctx, buildData.ProjectID) // project を取得する
+		if projectErr != nil {
+			return nil, projectErr // 取得エラーを返す
+		}
+		if projectData.UserID != userID { // 所有権を確認する
+			return nil, ErrForbidden // 権限なしエラーを返す
+		}
+		return buildData, nil // ビルドレコードを返す
+	}
+
+	deploymentData, err := svc.deploymentRepo.FindByID(ctx, *buildData.DeploymentID) // 所有権チェック用にデプロイメントを取得する
 	if err != nil {
 		return nil, err // 取得エラーを返す
 	}
@@ -212,16 +231,12 @@ func (svc *buildServiceImpl) CancelBuild(ctx context.Context, userID string, bui
 		return err // 取得エラーを返す
 	}
 
-	// 2. 所有権チェック（Build → Deployment → Project → UserID を辿る）
-	deploymentData, err := svc.deploymentRepo.FindByID(ctx, buildData.DeploymentID) // deployment を取得する
+	// 2. 所有権チェック（Build → Project → UserID を辿る）
+	cancelProjectData, err := svc.projectRepo.FindByIDNoTx(ctx, buildData.ProjectID) // project を取得する
 	if err != nil {
 		return err // 取得エラーを返す
 	}
-	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // project を取得する
-	if err != nil {
-		return err // 取得エラーを返す
-	}
-	if projectData.UserID != userID { // UserID が一致しない場合は禁止エラーを返す
+	if cancelProjectData.UserID != userID { // UserID が一致しない場合は禁止エラーを返す
 		return ErrForbidden
 	}
 
@@ -253,16 +268,12 @@ func (svc *buildServiceImpl) GetBuildLogs(ctx context.Context, userID string, bu
 		return "", nil, err // 取得エラーを返す
 	}
 
-	// 2. 所有権チェック（Build → Deployment → Project → UserID を辿る）
-	deploymentData, err := svc.deploymentRepo.FindByID(ctx, buildData.DeploymentID) // deployment を取得する
+	// 2. 所有権チェック（Build → Project → UserID を辿る）
+	logsProjectData, err := svc.projectRepo.FindByIDNoTx(ctx, buildData.ProjectID) // project を取得する
 	if err != nil {
 		return "", nil, err // 取得エラーを返す
 	}
-	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // project を取得する
-	if err != nil {
-		return "", nil, err // 取得エラーを返す
-	}
-	if projectData.UserID != userID { // UserID が一致しない場合は禁止エラーを返す
+	if logsProjectData.UserID != userID { // UserID が一致しない場合は禁止エラーを返す
 		return "", nil, ErrForbidden
 	}
 
@@ -311,6 +322,85 @@ func (svc *buildServiceImpl) ListBuilds(ctx context.Context, userID string, depl
 	return buildList, nil // ビルド一覧を返す
 }
 
+
+// ListBuildsByProject は projectID に紐づくビルド一覧を返す
+func (svc *buildServiceImpl) ListBuildsByProject(ctx context.Context, userID string, projectID string) ([]models.DeploymentBuild, error) {
+	// 1. 所有権チェック
+	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, projectID) // project を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	if projectData.UserID != userID { // UserID が一致しない場合は禁止エラーを返す
+		return nil, ErrForbidden
+	}
+
+	// 2. ビルド一覧を取得して返す
+	buildList, err := svc.buildRepo.FindAllByProjectID(ctx, projectID) // project 単位でビルド一覧を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	return buildList, nil // ビルド一覧を返す
+}
+
+// DeleteBuild はビルドを削除する（Harbor イメージも削除する）
+func (svc *buildServiceImpl) DeleteBuild(ctx context.Context, userID string, projectID string, buildID string) error {
+	// 1. 所有権チェック
+	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, projectID) // project を取得する
+	if err != nil {
+		return err // 取得エラーを返す
+	}
+	if projectData.UserID != userID { // UserID が一致しない場合は禁止エラーを返す
+		return ErrForbidden
+	}
+
+	// 2. ビルドレコードを取得する
+	buildData, err := svc.buildRepo.FindByID(ctx, buildID) // ビルドを取得する
+	if err != nil {
+		return err // 取得エラーを返す
+	}
+	if buildData.ProjectID != projectID { // 別プロジェクトのビルドへのアクセスを禁止する
+		return ErrForbidden
+	}
+
+	// 3. 進行中のビルドは削除不可とする
+	if buildData.Status == models.BuildStatusPending || buildData.Status == models.BuildStatusBuilding { // ビルド中の場合は削除不可
+		return ErrBuildConflict
+	}
+
+	// 4. FK 制約回避: このビルドを current_build_id として参照している Deployment の current_build_id を NULL にクリアする
+	if buildData.DeploymentID != nil { // DeploymentID が存在する場合のみ確認する
+		deploymentData, findErr := svc.deploymentRepo.FindByID(ctx, *buildData.DeploymentID) // Deployment を取得する
+		if findErr == nil && deploymentData.CurrentBuildID != nil && *deploymentData.CurrentBuildID == buildID { // current_build_id が削除対象ビルドを指している場合
+			if clearErr := svc.deploymentRepo.ClearCurrentBuildID(ctx, *buildData.DeploymentID); clearErr != nil { // current_build_id を NULL にクリアする
+				return fmt.Errorf("current_build_id のクリアに失敗しました: %w", clearErr) // クリアエラーを返す
+			}
+		}
+	}
+
+	// 6. Harbor からイメージを削除する（succeeded 状態の場合のみ Harbor 上にイメージが存在する）
+	if buildData.BuiltImageURL != "" { // BuiltImageURL が設定されている場合のみ Harbor 削除を試みる
+		credentialData, credErr := svc.harborCredentialRepo.FindByProjectIDNoTx(ctx, projectID) // Harbor 認証情報を取得する
+		if credErr == nil {                                                                       // 認証情報が取得できた場合のみ削除を試みる
+			repositoryName := buildData.ID               // デフォルトはビルド ID をリポジトリ名として使う
+			if buildData.DeploymentID != nil {
+				repositoryName = *buildData.DeploymentID // Deployment ID が存在する場合はそれを使う
+			}
+			credential := k8s.HarborRobotCredential{
+				Name:   credentialData.RobotName,   // robot アカウント名を設定する
+				Secret: credentialData.RobotSecret, // シークレットを設定する
+			}
+			if harborErr := svc.harborClient.DeleteHarborImage(ctx, projectID, repositoryName, credential); harborErr != nil { // Harbor イメージを削除する
+				return fmt.Errorf("Harbor イメージの削除に失敗しました: %w", harborErr) // 削除エラーを返す
+			}
+		}
+	}
+
+	// 7. DB レコードを削除する
+	if err := svc.buildRepo.Delete(ctx, buildData); err != nil { // ビルドレコードを削除する
+		return err // 削除エラーを返す
+	}
+	return nil // 正常終了
+}
 
 // resolveBuildType は DeploymentType からビルドタイプを解決する
 func resolveBuildType(deploymentType models.DeploymentType) (models.BuildType, error) {

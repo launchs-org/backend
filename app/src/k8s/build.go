@@ -43,6 +43,7 @@ func WatchBuildJobs(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
+	harborClient *HarborClient,
 	registryHost string,
 ) {
 	// 起動時リカバリ: building 状態のビルドに対してログストリームを再開する
@@ -76,7 +77,7 @@ func WatchBuildJobs(
 
 		logger.Println("WatchBuildJobs: 監視を開始しました") // 監視開始ログを出力する
 
-		watchBuildJobLoop(ctx, watcher, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, registryHost) // イベントループを実行する
+		watchBuildJobLoop(ctx, watcher, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, harborClient, registryHost) // イベントループを実行する
 
 		logger.Println("WatchBuildJobs: Watch チャネルが終了しました。再接続します") // 再接続ログを出力する
 	}
@@ -92,6 +93,7 @@ func watchBuildJobLoop(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
+	harborClient *HarborClient,
 	registryHost string,
 ) {
 	defer watcher.Stop() // 終了時に Watch を停止する
@@ -104,7 +106,7 @@ func watchBuildJobLoop(
 			if !ok { // チャネルが閉じられた場合はループを抜ける
 				return
 			}
-			handleBuildJobEvent(ctx, event, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, registryHost) // イベントを処理する
+			handleBuildJobEvent(ctx, event, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, harborClient, registryHost) // イベントを処理する
 		}
 	}
 }
@@ -119,6 +121,7 @@ func handleBuildJobEvent(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
+	harborClient *HarborClient,
 	registryHost string,
 ) {
 	k8sJob, ok := event.Object.(*batchv1.Job) // イベントオブジェクトを Job にキャストする
@@ -159,33 +162,37 @@ func handleBuildJobEvent(
 			logger.PrintErr("WatchBuildJobs: BuiltImageURL の組み立てに失敗しました（buildID=" + buildID + "）: " + urlErr.Error()) // エラーをログ出力する
 			return
 		}
-		finishedAt := time.Now()                                                                                                  // 完了時刻を取得する
-		if err := buildRepo.UpdateBuildResult(ctx, buildID, models.BuildStatusSucceeded, builtImageURL, finishedAt); err != nil { // ビルド結果を更新する
+		imageSizeBytes := fetchImageSizeBytes(ctx, buildData, harborClient, harborCredentialRepo) // イメージサイズを Harbor から取得する（失敗しても 0 で継続）
+		finishedAt := time.Now()                                                                                                                    // 完了時刻を取得する
+		if err := buildRepo.UpdateBuildResult(ctx, buildID, models.BuildStatusSucceeded, builtImageURL, imageSizeBytes, finishedAt); err != nil { // ビルド結果を更新する
 			logger.PrintErr("WatchBuildJobs: ビルド結果更新に失敗しました（buildID=" + buildID + "）: " + err.Error()) // エラーをログ出力する
 			return
 		}
-		if err := deploymentRepo.UpdatePendingImageURL(ctx, buildData.DeploymentID, builtImageURL); err != nil { // pending_image_url を更新する
-			logger.PrintErr("WatchBuildJobs: pending_image_url 更新に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + err.Error()) // エラーをログ出力する
-			return
-		}
-		builtDeploymentData, findErr := deploymentRepo.FindByID(ctx, buildData.DeploymentID) // pending_github_* 更新用に deployment を取得する
-		if findErr != nil {
-			logger.PrintErr("WatchBuildJobs: deployment 取得に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + findErr.Error()) // エラーをログ出力する
-			return
-		}
-		if err := deploymentRepo.UpdatePendingGithubBuildFields(ctx, buildData.DeploymentID, builtDeploymentData.GithubRepoURL, buildData.Branch, buildData.CommitSHA, buildData.Directory); err != nil { // pending_github_* フィールドを現在のビルド情報で更新する（apply 後に空にならないようにするため）
-			logger.PrintErr("WatchBuildJobs: pending_github_* 更新に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + err.Error()) // エラーをログ出力する
-			return
-		}
-		if err := deploymentRepo.UpdateDeploymentStatus(ctx, buildData.DeploymentID, models.DeploymentStatusPending); err != nil { // not_init → pending に遷移する（ビルド成功で apply 可能になる）
-			logger.PrintErr("WatchBuildJobs: DeploymentStatus 更新に失敗しました（deploymentID=" + buildData.DeploymentID + "）: " + err.Error()) // エラーをログ出力する
-			return
+		if buildData.DeploymentID != nil { // DeploymentID が存在する場合のみ Deployment を更新する（Deployment 削除済みの場合はスキップする）
+			deploymentIDValue := *buildData.DeploymentID // pointer をデリファレンスしてローカル変数に格納する
+			if err := deploymentRepo.UpdatePendingImageURL(ctx, deploymentIDValue, builtImageURL); err != nil { // pending_image_url を更新する
+				logger.PrintErr("WatchBuildJobs: pending_image_url 更新に失敗しました（deploymentID=" + deploymentIDValue + "）: " + err.Error()) // エラーをログ出力する
+				return
+			}
+			builtDeploymentData, findErr := deploymentRepo.FindByID(ctx, deploymentIDValue) // pending_github_* 更新用に deployment を取得する
+			if findErr != nil {
+				logger.PrintErr("WatchBuildJobs: deployment 取得に失敗しました（deploymentID=" + deploymentIDValue + "）: " + findErr.Error()) // エラーをログ出力する
+				return
+			}
+			if err := deploymentRepo.UpdatePendingGithubBuildFields(ctx, deploymentIDValue, builtDeploymentData.GithubRepoURL, buildData.Branch, buildData.CommitSHA, buildData.Directory); err != nil { // pending_github_* フィールドを現在のビルド情報で更新する
+				logger.PrintErr("WatchBuildJobs: pending_github_* 更新に失敗しました（deploymentID=" + deploymentIDValue + "）: " + err.Error()) // エラーをログ出力する
+				return
+			}
+			if err := deploymentRepo.UpdateDeploymentStatus(ctx, deploymentIDValue, models.DeploymentStatusPending); err != nil { // not_init → pending に遷移する
+				logger.PrintErr("WatchBuildJobs: DeploymentStatus 更新に失敗しました（deploymentID=" + deploymentIDValue + "）: " + err.Error()) // エラーをログ出力する
+				return
+			}
 		}
 		logger.Println("WatchBuildJobs: ビルド成功。succeeded に更新し pending_image_url をセットしました: " + buildID) // 成功ログを出力する
 
 	case k8sJob.Status.Failed > 0 && buildData.Status == models.BuildStatusBuilding: // Job が失敗かつ DB が building の場合
-		finishedAt := time.Now()                                                                                               // 完了時刻を取得する
-		if err := buildRepo.UpdateBuildResult(ctx, buildID, models.BuildStatusFailed, "", finishedAt); err != nil { // ビルド結果を failed で更新する
+		finishedAt := time.Now()                                                                                                  // 完了時刻を取得する
+		if err := buildRepo.UpdateBuildResult(ctx, buildID, models.BuildStatusFailed, "", 0, finishedAt); err != nil { // ビルド結果を failed で更新する
 			logger.PrintErr("WatchBuildJobs: ビルド失敗結果更新に失敗しました（buildID=" + buildID + "）: " + err.Error()) // エラーをログ出力する
 			return
 		}
@@ -411,30 +418,57 @@ func buildBuiltImageURL(
 	harborCredentialRepo repository.HarborCredentialRepository,
 	registryHost string,
 ) (string, error) {
-	deploymentData, err := deploymentRepo.FindByID(ctx, buildData.DeploymentID) // deployment を取得する
-	if err != nil {
-		return "", fmt.Errorf("deployment の取得に失敗しました: %w", err) // 取得エラーを返す
-	}
-
-	projectData, err := projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // project を取得する
+	projectData, err := projectRepo.FindByIDNoTx(ctx, buildData.ProjectID) // project を ProjectID から直接取得する
 	if err != nil {
 		return "", fmt.Errorf("project の取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
 	// harbor credential はロボットアカウント認証情報の取得のみに使う（エンドポイントは registryHost を使う）
-	_, err = harborCredentialRepo.FindByProjectIDNoTx(ctx, deploymentData.ProjectID) // harbor credential の存在確認をする
+	_, err = harborCredentialRepo.FindByProjectIDNoTx(ctx, buildData.ProjectID) // harbor credential の存在確認をする
 	if err != nil {
 		return "", fmt.Errorf("harbor credential の取得に失敗しました: %w", err) // 取得エラーを返す
+	}
+
+	// イメージ名にはビルド元の Deployment ID を使う（DeploymentID が nil の場合はビルド ID で代替する）
+	imageName := buildData.ID // デフォルトはビルド ID を使う
+	if buildData.DeploymentID != nil {
+		imageName = *buildData.DeploymentID // Deployment ID が存在する場合はそれを使う
 	}
 
 	imageURL := fmt.Sprintf("%s/%s/%s:%s",
 		registryHost,       // クラスタ内 DNS 名を使用する
 		projectData.ID,     // Harbor プロジェクト名にプロジェクト ID を使う
-		deploymentData.ID,  // イメージ名にデプロイメント ID を使う
+		imageName,          // イメージ名に Deployment ID を使う
 		buildData.ID,       // ビルド ID をタグに使用する
 	) // イメージURLを組み立てる
 
 	return imageURL, nil // イメージURLを返す
+}
+
+// fetchImageSizeBytes は Harbor からビルドイメージのサイズをバイト単位で取得する（失敗時は 0 を返す）
+func fetchImageSizeBytes(ctx context.Context, buildData *models.DeploymentBuild, harborClient *HarborClient, harborCredentialRepo repository.HarborCredentialRepository) int64 {
+	if harborClient == nil { // harborClient が nil の場合はスキップする（テスト環境など）
+		return 0
+	}
+	credentialData, err := harborCredentialRepo.FindByProjectIDNoTx(ctx, buildData.ProjectID) // Harbor 認証情報を取得する
+	if err != nil {
+		logger.PrintErr("fetchImageSizeBytes: harbor credential の取得に失敗しました（projectID=" + buildData.ProjectID + "）: " + err.Error()) // エラーをログ出力する
+		return 0                                                                                                                               // 失敗しても 0 を返して継続する
+	}
+	credential := HarborRobotCredential{
+		Name:   credentialData.RobotName,   // robot アカウント名を設定する
+		Secret: credentialData.RobotSecret, // シークレットを設定する
+	}
+	repositoryName := buildData.ID // デフォルトはビルド ID を使う
+	if buildData.DeploymentID != nil {
+		repositoryName = *buildData.DeploymentID // Deployment ID が存在する場合はそれをリポジトリ名として使う
+	}
+	sizeBytes, sizeErr := harborClient.GetArtifactSize(ctx, buildData.ProjectID, repositoryName, credential) // Harbor からサイズを取得する
+	if sizeErr != nil {
+		logger.PrintErr("fetchImageSizeBytes: イメージサイズの取得に失敗しました（buildID=" + buildData.ID + "）: " + sizeErr.Error()) // エラーをログ出力する
+		return 0                                                                                                                  // 失敗しても 0 を返して継続する
+	}
+	return sizeBytes // サイズを返す
 }
 
 // resolveNamespace はビルドデータから namespace を解決する
@@ -444,12 +478,7 @@ func resolveNamespace(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 ) (string, error) {
-	deploymentData, err := deploymentRepo.FindByID(ctx, buildData.DeploymentID) // deployment を取得する
-	if err != nil {
-		return "", fmt.Errorf("deployment の取得に失敗しました: %w", err) // 取得エラーを返す
-	}
-
-	projectData, err := projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // project を取得する
+	projectData, err := projectRepo.FindByIDNoTx(ctx, buildData.ProjectID) // project を ProjectID から直接取得する
 	if err != nil {
 		return "", fmt.Errorf("project の取得に失敗しました: %w", err) // 取得エラーを返す
 	}
