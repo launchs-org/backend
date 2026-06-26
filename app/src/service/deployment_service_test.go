@@ -236,13 +236,22 @@ func (mock *mockBuildRepository) FindAllBuilding(ctx context.Context) ([]models.
 func (mock *mockBuildRepository) UpdateStatus(ctx context.Context, buildID string, status models.BuildStatus) error {
 	return nil
 }
-func (mock *mockBuildRepository) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, finishedAt time.Time) error {
+func (mock *mockBuildRepository) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, imageSizeBytes int64, finishedAt time.Time) error {
 	return nil
 }
 func (mock *mockBuildRepository) UpdateK8sJobName(ctx context.Context, buildID string, jobName string) error {
 	return nil
 }
+func (mock *mockBuildRepository) Delete(ctx context.Context, build *models.DeploymentBuild) error {
+	return nil
+}
 func (mock *mockBuildRepository) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error {
+	return nil
+}
+func (mock *mockBuildRepository) FindAllByProjectID(ctx context.Context, projectID string) ([]models.DeploymentBuild, error) {
+	return nil, nil
+}
+func (mock *mockBuildRepository) DeleteAllByProjectID(ctx context.Context, db *gorm.DB, projectID string) error {
 	return nil
 }
 

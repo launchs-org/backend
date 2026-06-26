@@ -166,7 +166,7 @@ type podStreamState struct {
 }
 
 // WatchDeployments は全 Namespace の Deployment 変化を監視して DB を自動更新する
-func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository) {
+func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository) {
 	// 実行中のログストリームを管理するマップ（deploymentID → podStreamState）
 	streamCancelMap := make(map[string]podStreamState) // ストリーム状態を管理するマップ
 	var streamCancelMu sync.Mutex                      // マップへの排他アクセスのためのミューテックス
@@ -210,14 +210,14 @@ func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deplo
 
 		logger.Println("WatchDeployments: 監視を開始しました") // 監視開始ログを出力する
 
-		watchLoop(ctx, watcher, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, podLogChunkRepo, projectRepo, streamCancelMap, &streamCancelMu) // イベントループを実行する
+		watchLoop(ctx, watcher, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, podLogChunkRepo, projectRepo, streamCancelMap, &streamCancelMu) // イベントループを実行する
 
 		logger.Println("WatchDeployments: Watch チャネルが終了しました。再接続します") // 再接続ログを出力する
 	}
 }
 
 // watchLoop は Watch イベントチャネルを処理するループ
-func watchLoop(ctx context.Context, watcher watch.Interface, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
+func watchLoop(ctx context.Context, watcher watch.Interface, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
 	defer watcher.Stop() // 終了時に Watch を停止する
 
 	for {
@@ -228,13 +228,13 @@ func watchLoop(ctx context.Context, watcher watch.Interface, k8sClient kubernete
 			if !ok { // チャネルが閉じられた場合はループを抜ける
 				return
 			}
-			handleDeploymentEvent(ctx, event, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, podLogChunkRepo, projectRepo, streamCancelMap, streamCancelMu) // イベントを処理する
+			handleDeploymentEvent(ctx, event, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, podLogChunkRepo, projectRepo, streamCancelMap, streamCancelMu) // イベントを処理する
 		}
 	}
 }
 
 // handleDeploymentEvent は Deployment の Watch イベントを処理する
-func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, buildRepo repository.DeploymentBuildRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
+func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
 	k8sDeployment, ok := event.Object.(*appsv1.Deployment) // イベントオブジェクトを Deployment にキャストする
 	if !ok {                                                 // キャストに失敗した場合はスキップする
 		return
@@ -292,12 +292,6 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kub
 			_ = deploymentRepo.UpdateDeleteProgress(ctx, deploymentID, "Apply履歴を削除中") // 進捗を記録する
 			if err := applyHistoryRepo.DeleteAllByDeploymentID(ctx, deploymentID); err != nil { // ApplyHistory を削除する
 				logger.PrintErr("WatchDeployments: ApplyHistory 削除に失敗しました: " + err.Error()) // エラーをログ出力する
-			}
-
-			// DeploymentBuild を全件削除する
-			_ = deploymentRepo.UpdateDeleteProgress(ctx, deploymentID, "ビルド履歴を削除中") // 進捗を記録する
-			if err := buildRepo.DeleteAllByDeploymentID(ctx, deploymentID); err != nil { // DeploymentBuild を削除する
-				logger.PrintErr("WatchDeployments: DeploymentBuild 削除に失敗しました: " + err.Error()) // エラーをログ出力する
 			}
 
 			// Deployment レコード本体を削除する

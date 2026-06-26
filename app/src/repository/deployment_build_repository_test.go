@@ -37,8 +37,10 @@ func TestDeploymentBuildRepository_Create(t *testing.T) {
 
 	buildRepo := NewDeploymentBuildRepository(db) // リポジトリを生成する
 
+	deploymentIDValue := deploymentData.ID // ポインタ用変数を宣言する
 	buildData := &models.DeploymentBuild{
-		DeploymentID: deploymentData.ID,         // デプロイメント ID を設定する
+		ProjectID:    projectData.ID,            // プロジェクト ID を設定する
+		DeploymentID: &deploymentIDValue,        // デプロイメント ID をポインタで設定する
 		BuildType:    models.BuildTypeDockerfile, // ビルドタイプを設定する
 		Status:       models.BuildStatusPending,  // ステータスを設定する
 	}
@@ -85,8 +87,10 @@ func TestDeploymentBuildRepository_UpdateStatus(t *testing.T) {
 	}
 	defer db.Delete(deploymentData) // テスト後にデプロイメントを削除する
 
+	deploymentIDValue := deploymentData.ID // ポインタ用変数を宣言する
 	buildData := &models.DeploymentBuild{
-		DeploymentID: deploymentData.ID,         // デプロイメント ID を設定する
+		ProjectID:    projectData.ID,            // プロジェクト ID を設定する
+		DeploymentID: &deploymentIDValue,        // デプロイメント ID をポインタで設定する
 		BuildType:    models.BuildTypeDockerfile, // ビルドタイプを設定する
 		Status:       models.BuildStatusPending,  // 初期ステータスを pending に設定する
 	}
@@ -108,5 +112,90 @@ func TestDeploymentBuildRepository_UpdateStatus(t *testing.T) {
 	}
 	if updatedBuild.Status != models.BuildStatusBuilding { // ステータスが更新されたことを確認する
 		t.Errorf("期待するステータス %s、実際のステータス %s", models.BuildStatusBuilding, updatedBuild.Status)
+	}
+}
+
+// TestDeploymentBuildRepository_FindAllByProjectID はプロジェクト単位のビルド一覧が取得できることを確認する
+func TestDeploymentBuildRepository_FindAllByProjectID(t *testing.T) {
+	db := setupTestDB(t) // テスト用 DB を準備する
+	ctx := context.Background()
+
+	projectData := &models.Project{
+		Name:      "test-project-build-list-prj", // プロジェクト名を設定する
+		Namespace: "ns-build-list-prj",           // namespace を設定する
+		UserID:    "user-1",                      // ユーザー ID を設定する
+		Status:    models.ProjectStatusActive,    // ステータスを設定する
+	}
+	if err := db.Create(projectData).Error; err != nil { // プロジェクトを作成する
+		t.Fatalf("テスト用プロジェクトの作成に失敗しました: %v", err)
+	}
+	defer db.Delete(projectData) // テスト後にプロジェクトを削除する
+
+	// 同プロジェクトに2件のビルドを作成する
+	buildData1 := &models.DeploymentBuild{
+		ProjectID: projectData.ID,             // プロジェクト ID を設定する
+		BuildType: models.BuildTypeDockerfile, // ビルドタイプを設定する
+		Status:    models.BuildStatusPending,  // ステータスを設定する
+	}
+	buildData2 := &models.DeploymentBuild{
+		ProjectID: projectData.ID,            // プロジェクト ID を設定する
+		BuildType: models.BuildTypeRailpack,  // ビルドタイプを設定する
+		Status:    models.BuildStatusFailed,  // ステータスを設定する
+	}
+	if err := db.Create(buildData1).Error; err != nil { // 1件目のビルドを作成する
+		t.Fatalf("テスト用ビルドレコード1の作成に失敗しました: %v", err)
+	}
+	defer db.Delete(buildData1) // テスト後にビルドレコードを削除する
+	if err := db.Create(buildData2).Error; err != nil { // 2件目のビルドを作成する
+		t.Fatalf("テスト用ビルドレコード2の作成に失敗しました: %v", err)
+	}
+	defer db.Delete(buildData2) // テスト後にビルドレコードを削除する
+
+	buildRepo := NewDeploymentBuildRepository(db) // リポジトリを生成する
+
+	builds, err := buildRepo.FindAllByProjectID(ctx, projectData.ID) // プロジェクト単位のビルド一覧を取得する
+	if err != nil {                                                    // エラーが返った場合はテスト失敗
+		t.Fatalf("FindAllByProjectID() がエラーを返しました: %v", err)
+	}
+	if len(builds) != 2 { // ビルド件数を確認する
+		t.Errorf("期待するビルド件数 2、実際の件数 %d", len(builds))
+	}
+}
+
+// TestDeploymentBuildRepository_DeleteAllByProjectID はプロジェクト単位でビルドを全件削除できることを確認する
+func TestDeploymentBuildRepository_DeleteAllByProjectID(t *testing.T) {
+	db := setupTestDB(t) // テスト用 DB を準備する
+	ctx := context.Background()
+
+	projectData := &models.Project{
+		Name:      "test-project-build-del-prj", // プロジェクト名を設定する
+		Namespace: "ns-build-del-prj",           // namespace を設定する
+		UserID:    "user-1",                     // ユーザー ID を設定する
+		Status:    models.ProjectStatusActive,   // ステータスを設定する
+	}
+	if err := db.Create(projectData).Error; err != nil { // プロジェクトを作成する
+		t.Fatalf("テスト用プロジェクトの作成に失敗しました: %v", err)
+	}
+	defer db.Delete(projectData) // テスト後にプロジェクトを削除する
+
+	buildData := &models.DeploymentBuild{
+		ProjectID: projectData.ID,             // プロジェクト ID を設定する
+		BuildType: models.BuildTypeDockerfile, // ビルドタイプを設定する
+		Status:    models.BuildStatusPending,  // ステータスを設定する
+	}
+	if err := db.Create(buildData).Error; err != nil { // ビルドレコードを作成する
+		t.Fatalf("テスト用ビルドレコードの作成に失敗しました: %v", err)
+	}
+
+	buildRepo := NewDeploymentBuildRepository(db) // リポジトリを生成する
+
+	if err := buildRepo.DeleteAllByProjectID(ctx, db, projectData.ID); err != nil { // プロジェクト単位で全削除する
+		t.Fatalf("DeleteAllByProjectID() がエラーを返しました: %v", err)
+	}
+
+	var count int64
+	db.Model(&models.DeploymentBuild{}).Where("project_id = ?", projectData.ID).Count(&count) // 削除後の件数を確認する
+	if count != 0 {                                                                             // 件数が 0 であることを確認する
+		t.Errorf("削除後のビルド件数 0 を期待しましたが、実際の件数は %d です", count)
 	}
 }

@@ -18,11 +18,12 @@ import (
 
 // ProjectService は Project の CRUD ビジネスロジックを定義するインターフェース
 type ProjectService interface {
-	CreateProject(ctx context.Context, userID string, req CreateProjectRequest) (*models.Project, error)        // project を作成する
-	ListProjects(ctx context.Context, userID string) ([]*models.Project, error)                                 // project 一覧を取得する
-	GetProject(ctx context.Context, projectID string) (*models.Project, error)                                  // project を取得する
-	UpdateProject(ctx context.Context, projectID string, req UpdateProjectRequest) (*models.Project, error)     // project を更新する
-	DeleteProject(ctx context.Context, projectID string) error                                                  // project を削除する
+	CreateProject(ctx context.Context, userID string, req CreateProjectRequest) (*models.Project, error)           // project を作成する
+	ListProjects(ctx context.Context, userID string) ([]*models.Project, error)                                    // project 一覧を取得する
+	GetProject(ctx context.Context, projectID string) (*models.Project, error)                                     // project を取得する
+	UpdateProject(ctx context.Context, projectID string, req UpdateProjectRequest) (*models.Project, error)        // project を更新する
+	DeleteProject(ctx context.Context, projectID string) error                                                     // project を削除する
+	GetProjectQuota(ctx context.Context, userID string, projectID string) (*k8s.HarborProjectQuota, error)        // project のストレージクォータを取得する
 }
 
 // CreateProjectRequest は POST /projects のリクエスト構造体
@@ -37,15 +38,17 @@ type UpdateProjectRequest struct {
 
 // projectServiceImpl は ProjectService の実装
 type projectServiceImpl struct {
-	db                   *gorm.DB                              // データベース接続（トランザクション開始に使用する）
-	projectRepo          repository.ProjectRepository          // project リポジトリ
-	harborCredentialRepo repository.HarborCredentialRepository // harbor credential リポジトリ
-	deploymentRepo       repository.DeploymentRepository       // deployment リポジトリ
-	ingressRouteRepo     repository.IngressRouteRepository     // ingress_route リポジトリ
-	userQuotaRepo        repository.UserQuotaRepository        // user_quota リポジトリ（Quotaチェック用）
-	k8sClient            k8sclient.Interface                   // k8s クライアント
-	dynamicClient        dynamic.Interface                     // dynamic クライアント（IngressRoute 削除用）
-	harborClient         *k8s.HarborClient                     // Harbor API クライアント（管理用 robot）
+	db                   *gorm.DB                                    // データベース接続（トランザクション開始に使用する）
+	projectRepo          repository.ProjectRepository                // project リポジトリ
+	harborCredentialRepo repository.HarborCredentialRepository       // harbor credential リポジトリ
+	deploymentRepo       repository.DeploymentRepository             // deployment リポジトリ
+	buildRepo            repository.DeploymentBuildRepository        // deployment_build リポジトリ（Project 削除時のビルド履歴削除に使用）
+	ingressRouteRepo     repository.IngressRouteRepository           // ingress_route リポジトリ
+	userQuotaRepo        repository.UserQuotaRepository              // user_quota リポジトリ（Quotaチェック用）
+	k8sClient            k8sclient.Interface                         // k8s クライアント
+	dynamicClient        dynamic.Interface                           // dynamic クライアント（IngressRoute 削除用）
+	harborClient         *k8s.HarborClient                           // Harbor API クライアント（管理用 robot）
+	harborStorageLimit   int64                                       // Harbor プロジェクトのストレージ上限（バイト）
 }
 
 // NewProjectService は ProjectService の実装を返す
@@ -54,22 +57,26 @@ func NewProjectService(
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
 	deploymentRepo repository.DeploymentRepository,
+	buildRepo repository.DeploymentBuildRepository,
 	ingressRouteRepo repository.IngressRouteRepository,
 	userQuotaRepo repository.UserQuotaRepository,
 	k8sClient k8sclient.Interface,
 	dynamicClient dynamic.Interface,
 	harborClient *k8s.HarborClient,
+	harborStorageLimit int64,
 ) ProjectService {
 	return &projectServiceImpl{
 		db:                   db,                   // DB 接続を注入する
 		projectRepo:          projectRepo,          // project リポジトリを注入する
 		harborCredentialRepo: harborCredentialRepo, // harbor credential リポジトリを注入する
 		deploymentRepo:       deploymentRepo,       // deployment リポジトリを注入する
+		buildRepo:            buildRepo,            // deployment_build リポジトリを注入する
 		ingressRouteRepo:     ingressRouteRepo,     // ingress_route リポジトリを注入する
 		userQuotaRepo:        userQuotaRepo,        // user_quota リポジトリを注入する
 		k8sClient:            k8sClient,            // k8s クライアントを注入する
 		dynamicClient:        dynamicClient,        // dynamic クライアントを注入する
 		harborClient:         harborClient,         // Harbor クライアントを注入する
+		harborStorageLimit:   harborStorageLimit,   // Harbor ストレージ上限を注入する
 	}
 }
 
@@ -98,7 +105,7 @@ func (svc *projectServiceImpl) CreateProject(ctx context.Context, userID string,
 		}
 
 		// Harbor project を作成する（失敗時は DB ロールバック）
-		if err := svc.harborClient.CreateHarborProject(ctx, projectID); err != nil { // Harbor プロジェクト名にプロジェクト ID を使う
+		if err := svc.harborClient.CreateHarborProject(ctx, projectID, svc.harborStorageLimit); err != nil { // Harbor プロジェクト名にプロジェクト ID を使う
 			return fmt.Errorf("harbor project の作成に失敗しました: %w", err)
 		}
 
@@ -243,6 +250,11 @@ func (svc *projectServiceImpl) deleteProjectResources(projectData *models.Projec
 	}
 	waitGroup.Wait() // 全 Deployment の k8s リソース削除完了を待つ
 
+	// Project に紐づくビルド履歴を削除する（Harbor プロジェクト削除前に DB を先にクリーンアップする）
+	if err := svc.buildRepo.DeleteAllByProjectID(bgCtx, svc.db, projectData.ID); err != nil {
+		logger.PrintErr("deleteProjectResources: deployment_build レコードの削除に失敗しました: " + err.Error())
+	}
+
 	// Harbor project を削除する
 	if err := svc.harborClient.DeleteHarborProject(bgCtx, projectData.ID, k8s.HarborRobotCredential{ // Harbor プロジェクト名はプロジェクト ID
 		Name:   credentialData.RobotName,   // DB に保存した robot 名を使う
@@ -282,4 +294,29 @@ func (svc *projectServiceImpl) deleteDeploymentK8sResources(ctx context.Context,
 	if err := k8s.DeleteSecret(ctx, svc.k8sClient, namespace, deploymentData.Name); err != nil {
 		_ = err
 	}
+}
+
+// GetProjectQuota は projectID に対応する Harbor プロジェクトのストレージクォータを返す
+func (svc *projectServiceImpl) GetProjectQuota(ctx context.Context, userID string, projectID string) (*k8s.HarborProjectQuota, error) {
+	projectData, err := svc.projectRepo.FindByID(ctx, svc.db, projectID) // project を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	if projectData.UserID != userID { // 所有権チェックを行う
+		return nil, ErrForbidden // 権限なしエラーを返す
+	}
+
+	credentialData, err := svc.harborCredentialRepo.FindByProjectID(ctx, svc.db, projectID) // Harbor 認証情報を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+
+	quotaData, err := svc.harborClient.GetProjectQuota(ctx, projectID, k8s.HarborRobotCredential{ // Harbor API でクォータを取得する
+		Name:   credentialData.RobotName,   // robot アカウント名を設定する
+		Secret: credentialData.RobotSecret, // シークレットを設定する
+	})
+	if err != nil {
+		return nil, err // クォータ取得エラーを返す
+	}
+	return quotaData, nil // クォータ情報を返す
 }
