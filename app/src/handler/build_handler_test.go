@@ -15,7 +15,7 @@ import (
 
 // mockBuildService は BuildService のテスト用モック実装
 type mockBuildService struct {
-	triggerBuildFunc        func(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error)
+	triggerBuildFunc        func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string) (*models.DeploymentBuild, error)
 	cancelBuildFunc         func(ctx context.Context, userID string, buildID string) error
 	getBuildLogsFunc        func(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error)
 	getBuildFunc            func(ctx context.Context, userID string, buildID string) (*models.DeploymentBuild, error)
@@ -23,8 +23,8 @@ type mockBuildService struct {
 	listBuildsByProjectFunc func(ctx context.Context, userID string, projectID string) ([]models.DeploymentBuild, error)
 }
 
-func (mock *mockBuildService) TriggerBuild(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error) {
-	return mock.triggerBuildFunc(ctx, userID, deploymentID) // モック関数を呼び出す
+func (mock *mockBuildService) TriggerBuild(ctx context.Context, userID string, deploymentID string, commitMessage string, author string) (*models.DeploymentBuild, error) {
+	return mock.triggerBuildFunc(ctx, userID, deploymentID, commitMessage, author) // モック関数を呼び出す
 }
 
 func (mock *mockBuildService) CancelBuild(ctx context.Context, userID string, buildID string) error {
@@ -93,7 +93,7 @@ func TestTriggerBuild_正常系(t *testing.T) {
 	}
 
 	mockSvc := &mockBuildService{
-		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error) {
+		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string) (*models.DeploymentBuild, error) {
 			return expectedBuild, nil // 正常なビルドレコードを返す
 		},
 	}
@@ -121,7 +121,7 @@ func TestTriggerBuild_正常系(t *testing.T) {
 // TestTriggerBuild_403_他ユーザーのデプロイメント は他ユーザーのデプロイメントに POST すると 403 が返ることを確認する
 func TestTriggerBuild_403_他ユーザーのデプロイメント(t *testing.T) {
 	mockSvc := &mockBuildService{
-		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error) {
+		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string) (*models.DeploymentBuild, error) {
 			return nil, service.ErrForbidden // 所有権エラーを返す
 		},
 	}
@@ -141,7 +141,7 @@ func TestTriggerBuild_403_他ユーザーのデプロイメント(t *testing.T) 
 // TestTriggerBuild_409_ビルド中 はビルド中に再ビルドをトリガーすると 409 が返ることを確認する
 func TestTriggerBuild_409_ビルド中(t *testing.T) {
 	mockSvc := &mockBuildService{
-		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error) {
+		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string) (*models.DeploymentBuild, error) {
 			return nil, service.ErrBuildConflict // コンフリクトエラーを返す
 		},
 	}

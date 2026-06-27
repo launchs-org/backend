@@ -44,6 +44,12 @@ func main() {
 		log.Fatalf("dynamic クライアントの作成に失敗しました: %v", err) // dynamic クライアント作成失敗時にエラーを出す
 	}
 
+	// Metrics Server クライアント初期化
+	metricsClient, err := k8s.NewMetricsClient()
+	if err != nil {
+		log.Fatalf("Metrics Server クライアントの作成に失敗しました: %v", err) // Metrics クライアント作成失敗時にエラーを出す
+	}
+
 	// namespace 一覧を取得して k8s 接続確認を行う
 	namespaceList, err := k8sClient.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
 	if err != nil {
@@ -121,6 +127,11 @@ func main() {
 	deploymentTemplateServiceImpl := service.NewDeploymentTemplateService(repository.Database, deploymentTemplateRepo, deploymentRepo, serviceRepo, envVarRepo, envVarMountRepo, volumeRepo, volumeMountRepo, projectRepo, userQuotaRepo) // deployment template サービスを生成する
 	deploymentTemplateHandler := handler.NewDeploymentTemplateHandler(deploymentTemplateServiceImpl)                                                     // deployment template ハンドラーを生成する
 
+	// metrics ハンドラーを DI 組み立てする
+	deploymentMetricsRepo := repository.NewDeploymentMetricsRepository(repository.Database)                                         // deployment metrics リポジトリを生成する
+	metricsServiceImpl := service.NewMetricsService(deploymentMetricsRepo, deploymentRepo, projectRepo)                              // metrics サービスを生成する
+	metricsHandler := handler.NewMetricsHandler(metricsServiceImpl)                                                                  // metrics ハンドラーを生成する
+
 	// 各 Watcher をリーダーエレクション経由でバックグラウンドで起動する
 	go leader.RunAsLeader(context.Background(), repository.Database, func(ctx context.Context) { // リーダーになった Pod のみ Watcher を起動する
 		go k8s.WatchServices(ctx, k8sClient, serviceRepo)                               // k8s Service の状態変化を監視して DB を自動更新する
@@ -128,6 +139,7 @@ func main() {
 		go k8s.WatchPVCs(ctx, k8sClient, volumeRepo)                                    // PVC の Bound 状態を監視して DB を自動更新する
 		go k8s.WatchNamespaces(ctx, k8sClient, projectRepo)                             // Namespace の削除イベントを監視して DB の Project レコードを削除する
 		go k8s.WatchBuildJobs(ctx, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, harborClient, "harbor.main-harbor") // Build Job の完了・失敗を監視して DB を自動更新する
+		go k8s.PollMetrics(ctx, k8sClient, metricsClient, deploymentRepo, projectRepo, deploymentMetricsRepo) // 30 秒ごとに Pod メトリクスを収集して DB に保存する
 		k8s.WatchDeployments(ctx, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, podLogChunkRepo, projectRepo) // k8s Deployment の状態変化を監視して DB を自動更新する
 	})
 
@@ -143,6 +155,7 @@ func main() {
 		BuildHandler:              buildHandler,              // build ハンドラーを注入する
 		WebhookHandler:            webhookHandler,            // webhook ハンドラーを注入する
 		LogHandler:                logHandler,                // log ハンドラーを注入する
+		MetricsHandler:            metricsHandler,            // metrics ハンドラーを注入する
 	})
 	if err := echoRouter.Start(":" + cfg.GetServerPort()); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("サーバーの起動に失敗しました", "error", err) // サーバー起動失敗時にエラーログを出す

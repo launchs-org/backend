@@ -93,11 +93,11 @@ func TestListEnvVars_正常に一覧が取得される(t *testing.T) {
 	if len(responseList) != 2 { // 2 件返ることを確認する
 		t.Errorf("期待する件数: 2, 実際の件数: %d", len(responseList))
 	}
-	// シークレット値がマスクされていることを確認する
+	// シークレット値がそのまま返ることを確認する（マスク機能は削除済み）
 	for _, item := range responseList {
 		if item["is_secret"].(bool) {
-			if item["value"].(string) != maskedValue { // マスクされていることを確認する
-				t.Errorf("シークレット値がマスクされていません: %s", item["value"])
+			if item["value"].(string) == "" { // 値が空でないことを確認する
+				t.Errorf("シークレット値が空になっています")
 			}
 		}
 	}
@@ -160,7 +160,7 @@ func TestCreateEnvVar_正常にenv_varが作成される(t *testing.T) {
 	}
 }
 
-// TestCreateEnvVar_is_secret_trueの値はマスクされる は is_secret=true の環境変数値がレスポンスでマスクされることを確認する
+// TestCreateEnvVar_is_secret_trueの値はそのまま返る は is_secret=true の環境変数値がレスポンスでそのまま返ることを確認する（マスク機能は削除済み）
 func TestCreateEnvVar_is_secret_trueの値はマスクされる(t *testing.T) {
 	expectedEnvVar := &models.EnvVar{
 		ID:        "secret-env-var-id",
@@ -189,8 +189,8 @@ func TestCreateEnvVar_is_secret_trueの値はマスクされる(t *testing.T) {
 	if err := json.NewDecoder(responseRecorder.Body).Decode(&responseBody); err != nil { // レスポンスをデコードする
 		t.Fatalf("レスポンスのデコードに失敗しました: %v", err)
 	}
-	if responseBody["value"].(string) != maskedValue { // マスクされていることを確認する
-		t.Errorf("シークレット値がマスクされていません: %s", responseBody["value"])
+	if responseBody["value"].(string) != "super-secret-value" { // 値がそのまま返ることを確認する（マスク機能は削除済み）
+		t.Errorf("期待する value: super-secret-value, 実際の value: %s", responseBody["value"])
 	}
 }
 

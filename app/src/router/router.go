@@ -20,6 +20,7 @@ type RouterOptions struct {
 	BuildHandler               *handler.BuildHandler               // build ハンドラー
 	WebhookHandler             *handler.WebhookHandler             // webhook ハンドラー
 	LogHandler                 *handler.LogHandler                 // log ハンドラー
+	MetricsHandler             *handler.MetricsHandler             // metrics ハンドラー
 }
 
 // New はミドルウェアとルーティングを設定した Echo インスタンスを返す
@@ -72,6 +73,9 @@ func New(opts RouterOptions) *echo.Echo {
 
 	// log エンドポイントを登録する
 	apiGroup.GET("/deployments/:id/logs", opts.LogHandler.GetPodLogs) // Pod ログ取得エンドポイント
+
+	// metrics エンドポイントを登録する
+	apiGroup.GET("/deployments/:id/metrics", opts.MetricsHandler.GetDeploymentMetrics) // Deployment メトリクス取得エンドポイント
 
 	// webhook エンドポイントを登録する
 	apiGroup.POST("/deployments/:id/webhooks", opts.WebhookHandler.CreateWebhook) // webhook 作成エンドポイント

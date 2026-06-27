@@ -260,5 +260,6 @@ func AutoMigrate() error {
 		&models.Volume{},
 		&models.VolumeMount{},
 		&models.DeploymentTemplate{},
+		&models.DeploymentMetrics{}, // メトリクス時系列テーブルを追加する
 	)
 }
