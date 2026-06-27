@@ -2007,18 +2007,28 @@ function NotInitScreen({
 // ── Metrics タブ ──────────────────────────────────────────────
 
 const METRICS_POLL_INTERVAL = 30_000  // 30 秒ごとにポーリングする（バックエンドの収集間隔に合わせる）
-const METRICS_DEFAULT_LIMIT = 120     // デフォルト取得件数（30 秒 × 120 件 = 過去 1 時間分）
+
+// 表示範囲の選択肢（30 秒ポーリング換算の limit と表示ラベルを保持する）
+const METRICS_RANGE_OPTIONS = [
+  { label: '1時間',  limit: 120   },
+  { label: '3時間',  limit: 360   },
+  { label: '24時間', limit: 2880  },
+  { label: '1週間',  limit: 20160 },
+] as const
+
+type MetricsRangeOption = typeof METRICS_RANGE_OPTIONS[number]
 
 function MetricsTab({ deploymentId }: { deploymentId: string }) {
-  const [metrics, setMetrics] = useState<DeploymentMetrics[]>([])  // メトリクス一覧を管理する
-  const [metricsLoading, setMetricsLoading] = useState(true)       // 初回ローディング状態を管理する
-  const [metricsError, setMetricsError] = useState<string | null>(null)  // エラーメッセージを管理する
+  const [metrics, setMetrics] = useState<DeploymentMetrics[]>([])                    // メトリクス一覧を管理する
+  const [metricsLoading, setMetricsLoading] = useState(true)                         // 初回ローディング状態を管理する
+  const [metricsError, setMetricsError] = useState<string | null>(null)              // エラーメッセージを管理する
+  const [selectedRange, setSelectedRange] = useState<MetricsRangeOption>(METRICS_RANGE_OPTIONS[0])  // 選択中の表示範囲を管理する
 
   const fetchMetrics = useCallback(async () => {
     try {
       const response = await get<{ metrics: DeploymentMetrics[] }>(
-        `/deployments/${deploymentId}/metrics?limit=${METRICS_DEFAULT_LIMIT}`
-      )  // メトリクス一覧を取得する
+        `/deployments/${deploymentId}/metrics?limit=${selectedRange.limit}`
+      )  // 選択範囲の limit でメトリクスを取得する
       setMetrics(response.metrics ?? [])
       setMetricsError(null)  // 取得成功時はエラーをクリアする
     } catch (fetchError) {
@@ -2027,34 +2037,34 @@ function MetricsTab({ deploymentId }: { deploymentId: string }) {
     } finally {
       setMetricsLoading(false)
     }
-  }, [deploymentId])
+  }, [deploymentId, selectedRange])
 
   useEffect(() => {
-    void fetchMetrics()  // 初回データ取得
-    const intervalId = setInterval(() => { void fetchMetrics() }, METRICS_POLL_INTERVAL)  // 定期的にポーリングする
-    return () => clearInterval(intervalId)  // クリーンアップ
+    setMetricsLoading(true)                                                              // 範囲切り替え時はローディングをリセットする
+    void fetchMetrics()                                                                  // 範囲変更時に即時再取得する
+    const intervalId = setInterval(() => { void fetchMetrics() }, METRICS_POLL_INTERVAL) // 定期的にポーリングする
+    return () => clearInterval(intervalId)                                               // クリーンアップ
   }, [fetchMetrics])
 
-  if (metricsLoading) {  // 初回ローディング中はスケルトンを表示する
-    return (
-      <div className="h-48 flex items-center justify-center text-sm text-gray-400">
-        読み込み中...
-      </div>
-    )
-  }
-
-  if (metricsError) {  // エラー時はエラーメッセージを表示する
-    return (
-      <div className="h-48 flex items-center justify-center text-sm text-red-400">
-        {metricsError}
-      </div>
-    )
-  }
-
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      {/* ヘッダー: 範囲セレクタ + 更新ボタン */}
       <div className="flex items-center justify-between">
-        <p className="text-xs text-gray-400">過去 1 時間のリソース使用量（30 秒ごとに自動更新）</p>
+        <div className="flex items-center gap-1">
+          {METRICS_RANGE_OPTIONS.map((rangeOption) => (
+            <button
+              key={rangeOption.label}
+              onClick={() => setSelectedRange(rangeOption)}  // 表示範囲を切り替える
+              className={`text-xs px-3 py-1 rounded-full transition-colors ${
+                selectedRange.label === rangeOption.label
+                  ? 'bg-[#111827] text-white'
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              {rangeOption.label}
+            </button>
+          ))}
+        </div>
         <button
           onClick={() => void fetchMetrics()}
           className="text-xs text-gray-400 hover:text-gray-600 underline"
@@ -2062,7 +2072,19 @@ function MetricsTab({ deploymentId }: { deploymentId: string }) {
           更新
         </button>
       </div>
-      <MetricsCharts metrics={metrics} />
+
+      {/* コンテンツエリア */}
+      {metricsLoading ? (  // 初回ローディング中はスケルトンを表示する
+        <div className="h-48 flex items-center justify-center text-sm text-gray-400">
+          読み込み中...
+        </div>
+      ) : metricsError ? (  // エラー時はエラーメッセージを表示する
+        <div className="h-48 flex items-center justify-center text-sm text-red-400">
+          {metricsError}
+        </div>
+      ) : (
+        <MetricsCharts metrics={metrics} />
+      )}
     </div>
   )
 }
