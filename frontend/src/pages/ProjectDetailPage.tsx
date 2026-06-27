@@ -81,6 +81,7 @@ export function ProjectDetailPage() {
   const [showDeploymentListSidebar, setShowDeploymentListSidebar] = useState(false) // デプロイメント一覧サイドバーの表示フラグ
   const [showIngressListSidebar, setShowIngressListSidebar] = useState(false) // IngressRoute一覧サイドバーの表示フラグ
   const [showBuildSidebar, setShowBuildSidebar] = useState(false) // ビルド一覧サイドバーの表示フラグ
+  const [sidebarNewQuery, setSidebarNewQuery] = useState('') // デプロイメント新規作成サイドバーのクエリパラメータ
   const [buildList, setBuildList] = useState<Build[]>([]) // プロジェクトのビルド一覧を管理する
   const [projectQuota, setProjectQuota] = useState<ProjectQuota | null>(null) // Harborストレージクォータを管理する
   const [envVarList, setEnvVarList] = useState<EnvVar[]>([]) // プロジェクトの環境変数一覧を管理する
@@ -92,11 +93,13 @@ export function ProjectDetailPage() {
   const dragStartX = useRef(0) // ドラッグ開始X座標
   const dragStartWidth = useRef(SIDEBAR_INITIAL_WIDTH) // ドラッグ開始時の幅
 
-  const openDeploymentNewSidebar = useCallback(() => {
+  const openDeploymentNewSidebar = useCallback((query?: string) => {
     setSidebarMode('deployment-new') // デプロイメント作成サイドバーを開く
     setSelectedDeploymentId(null) // デプロイメント選択をリセットする
     setIframeLoaded(false) // iframe読み込みフラグをリセットする
     setIframeError(false) // iframeエラーフラグをリセットする
+    if (query) setSidebarNewQuery(query) // クエリパラメータを設定する
+    else setSidebarNewQuery('') // クエリパラメータをリセットする
   }, [])
 
   const openIngressSidebar = useCallback((ingressRouteId: string) => {
@@ -111,7 +114,7 @@ export function ProjectDetailPage() {
     currentIngressRouteList: IngressRoute[],
     currentPathRulesByIngressRouteId: Record<string, PathRule[]>,
     currentVolumeList: Volume[],
-    currentEnvVarList: EnvVar[],
+    _currentEnvVarList: EnvVar[],
     currentSelectedEnvVarId: string | null,
   ) => {
     const newNodes: Node[] = []
@@ -281,9 +284,6 @@ export function ProjectDetailPage() {
     setNodes(newNodes) // ノードを更新する
     setEdges(newEdges) // エッジを更新する
   }, [setNodes, setEdges, openIngressSidebar, setSelectedEnvVarId])
-
-  // グラフ再描画の判定に使う前回データを保持する
-  const prevGraphKey = useRef<string | null>(null)
 
   const fetchData = useCallback(async () => {
     if (!projectId) return
@@ -484,7 +484,8 @@ export function ProjectDetailPage() {
       return `/ui/projects/${projectId}/deployments/${selectedDeploymentId}` // デプロイメント詳細の iframe URL
     }
     if (sidebarMode === 'deployment-new' && projectId) {
-      return `/ui/projects/${projectId}/deployments/new` // デプロイメント作成フォームの iframe URL
+      const query = sidebarNewQuery ? `?${sidebarNewQuery}` : '' // クエリパラメータを付与する
+      return `/ui/projects/${projectId}/deployments/new${query}` // デプロイメント作成フォームの iframe URL
     }
     return null
   })()
@@ -703,6 +704,10 @@ export function ProjectDetailPage() {
                   projectQuota={projectQuota}
                   onClose={() => setShowBuildSidebar(false)}
                   onBuildDeleted={(buildId) => setBuildList(prev => prev.filter(b => b.id !== buildId))}
+                  onDeployFromBuild={(imageUrl) => {
+                    setShowBuildSidebar(false) // ビルドサイドバーを閉じる
+                    openDeploymentNewSidebar(new URLSearchParams({ image_url: imageUrl }).toString()) // デプロイメント作成サイドバーを開く
+                  }}
                 />
               </div>
             )}
@@ -1740,14 +1745,15 @@ function BuildSidebar({
   projectQuota,
   onClose,
   onBuildDeleted,
+  onDeployFromBuild,
 }: {
   projectId: string
   buildList: Build[]
   projectQuota: ProjectQuota | null
   onClose: () => void
   onBuildDeleted: (buildId: string) => void
+  onDeployFromBuild: (imageUrl: string) => void
 }) {
-  const navigate = useNavigate() // ページ遷移に使用する
   const [deletingBuildId, setDeletingBuildId] = useState<string | null>(null) // 削除中のビルド ID を管理する
 
   const buildStatusColor: Record<string, string> = { // ビルドステータスに対応する色を定義する
@@ -1767,8 +1773,7 @@ function BuildSidebar({
   }
 
   const handleDeployFromBuild = (build: Build) => {
-    const params = new URLSearchParams({ image_url: build.built_image_url }) // クエリパラメータを生成する
-    navigate(`/projects/${projectId}/deployments/new?${params.toString()}`) // デプロイメント作成画面へ遷移する
+    onDeployFromBuild(build.built_image_url) // 親コンポーネントのサイドバーを開く
   }
 
   const handleDeleteBuild = async (build: Build) => {
