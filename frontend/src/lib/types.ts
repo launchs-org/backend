@@ -289,3 +289,21 @@ export type Webhook = {
   created_at: string
   updated_at: string
 }
+
+// ── DeploymentMetrics ─────────────────────────────────────────
+
+export type DeploymentMetrics = {
+  id: string
+  deployment_id: string
+  pod_name: string
+  cpu_millicores: number
+  memory_bytes: number
+  ready_replicas: number
+  total_replicas: number
+  recorded_at: string
+  created_at: string
+}
+
+export type DeploymentMetricsResponse = {
+  metrics: DeploymentMetrics[]
+}
