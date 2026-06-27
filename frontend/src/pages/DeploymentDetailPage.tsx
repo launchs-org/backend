@@ -2006,14 +2006,14 @@ function NotInitScreen({
 
 // ── Metrics タブ ──────────────────────────────────────────────
 
-const METRICS_POLL_INTERVAL = 30_000  // 30 秒ごとにポーリングする（バックエンドの収集間隔に合わせる）
+const METRICS_POLL_INTERVAL = 5_000  // 5 秒ごとにポーリングする（バックエンドの収集間隔に合わせる）
 
-// 表示範囲の選択肢（30 秒ポーリング換算の limit と表示ラベルを保持する）
+// 表示範囲の選択肢（5 秒ポーリング換算の limit と表示ラベルを保持する）
 const METRICS_RANGE_OPTIONS = [
-  { label: '1時間',  limit: 120   },
-  { label: '3時間',  limit: 360   },
-  { label: '24時間', limit: 2880  },
-  { label: '1週間',  limit: 20160 },
+  { label: '1時間',  limit: 720    },
+  { label: '3時間',  limit: 2160   },
+  { label: '24時間', limit: 17280  },
+  { label: '1週間',  limit: 120960 },
 ] as const
 
 type MetricsRangeOption = typeof METRICS_RANGE_OPTIONS[number]

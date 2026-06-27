@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	defaultMetricsLimit = 120   // デフォルト取得件数（30 秒×120 件 = 過去 1 時間分）
-	maxMetricsLimit     = 20160 // 最大取得件数（30 秒×20160 件 = 過去 1 週間分）
+	defaultMetricsLimit = 720    // デフォルト取得件数（5 秒×720 件 = 過去 1 時間分）
+	maxMetricsLimit     = 120960 // 最大取得件数（5 秒×120960 件 = 過去 1 週間分）
 )
 
 // MetricsHandler は Deployment メトリクス取得の HTTP ハンドラーを提供する

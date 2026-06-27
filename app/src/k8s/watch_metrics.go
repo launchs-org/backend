@@ -10,7 +10,7 @@ import (
 	metricsv1beta1 "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
-// PollMetrics は 30 秒ごとに running 状態の全 Deployment のメトリクスを収集して DB に保存する
+// PollMetrics は 5 秒ごとに running 状態の全 Deployment のメトリクスを収集して DB に保存する
 func PollMetrics(
 	ctx context.Context,
 	k8sClient kubernetes.Interface,
@@ -21,7 +21,7 @@ func PollMetrics(
 ) {
 	logger.Println("メトリクスポーリングを開始します") // 起動ログを出す
 
-	ticker := time.NewTicker(30 * time.Second) // 30 秒ごとにポーリングするタイマーを生成する
+	ticker := time.NewTicker(5 * time.Second) // 5 秒ごとにポーリングするタイマーを生成する
 	defer ticker.Stop()                        // 関数終了時にタイマーを停止する
 
 	for {
@@ -29,7 +29,7 @@ func PollMetrics(
 		case <-ctx.Done(): // コンテキストがキャンセルされた場合
 			logger.Println("メトリクスポーリングを停止します") // 停止ログを出す
 			return
-		case <-ticker.C: // 30 秒ごとに実行する
+		case <-ticker.C: // 5 秒ごとに実行する
 			collectAllMetrics(ctx, k8sClient, metricsClient, deploymentRepo, projectRepo, metricsRepo) // メトリクスを収集する
 		}
 	}
