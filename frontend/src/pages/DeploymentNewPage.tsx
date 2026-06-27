@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
-import { Container, GitBranch, Package, LayoutTemplate, Plus, Trash2, Dice6 } from 'lucide-react'
+import { Container, Package, LayoutTemplate, Plus, Trash2, Dice6 } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { get, post, QuotaExceededApiError } from '@/lib/api'
 import type { Deployment, DeploymentType, DeploymentTemplate, EnvVar } from '@/lib/types'

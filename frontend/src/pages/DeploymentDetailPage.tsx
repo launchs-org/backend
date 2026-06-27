@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Play, Trash2, GitBranch, Container, Package, ExternalLink, Clock, CheckCircle2, XCircle, AlertCircle, Ban, GitCommit, X, Hammer } from 'lucide-react'
 import { Layout } from '@/components/Layout'
@@ -593,6 +593,7 @@ const BUILD_STATUS_META: Record<string, { label: string; icon: React.ReactNode; 
 
 function BuildsTab({
   deploymentId,
+  deployment,
 }: {
   deploymentId: string
   projectId: string
@@ -621,7 +622,27 @@ function BuildsTab({
   const handleBuild = async () => {
     setBuilding(true)
     try {
-      const result = await post<Build>(`/deployments/${deploymentId}/build`) // ビルドを開始する
+      // GitHub リポジトリ情報から最新コミットのメッセージと著者を取得する
+      let commitMessage = ''
+      let author = ''
+      const repoUrl = deployment.pending_github_repo_url || deployment.github_repo_url
+      const branch = deployment.pending_github_branch || deployment.github_branch
+      if (repoUrl && branch) {
+        const repo = extractGitHubRepo(repoUrl) // owner/repo を抽出する
+        if (repo) {
+          try {
+            const commits = await fetchGitHubCommits(repo, branch) // 最新コミット一覧を取得する
+            if (commits.length > 0) {
+              commitMessage = commits[0].commit.message // 最新コミットメッセージを取得する
+              author = commits[0].commit.author.name   // 最新コミット著者を取得する
+            }
+          } catch {
+            // GitHub API 取得失敗は無視してビルドを続行する
+          }
+        }
+      }
+
+      const result = await post<Build>(`/deployments/${deploymentId}/build`, { commit_message: commitMessage, author }) // ビルドを開始する
       await fetchBuilds() // 一覧を即座に更新する
       navigate(`/builds/${result.id}/logs`) // ビルドログページへ遷移する
     } catch (buildError) {
@@ -757,7 +778,7 @@ function extractGitHubRepo(url: string): string | null {
 }
 
 type GitHubBranch = { name: string }
-type GitHubCommit = { sha: string; commit: { message: string } }
+type GitHubCommit = { sha: string; commit: { message: string; author: { name: string } } }
 type GitHubTree  = { path: string; type: string }
 
 // GitHub API からブランチ一覧を取得する

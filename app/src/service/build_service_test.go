@@ -184,7 +184,7 @@ func TestTriggerBuild_正常系(t *testing.T) {
 
 	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, nil, "") // サービスを生成する
 
-	resultBuild, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1") // ビルドをトリガーする
+	resultBuild, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "") // ビルドをトリガーする
 	if err != nil {
 		t.Fatalf("TriggerBuild() がエラーを返しました: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestTriggerBuild_403_他ユーザー(t *testing.T) {
 
 	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, nil, "") // サービスを生成する
 
-	_, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1") // ビルドをトリガーする
+	_, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "") // ビルドをトリガーする
 	if err == nil {                                                  // エラーが返ることを確認する
 		t.Fatal("TriggerBuild() はエラーを返すべきです")
 	}
@@ -283,7 +283,7 @@ func TestTriggerBuild_409_ビルド中(t *testing.T) {
 
 	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, nil, "") // サービスを生成する
 
-	_, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1") // ビルドをトリガーする
+	_, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "") // ビルドをトリガーする
 	if err == nil {                                                  // エラーが返ることを確認する
 		t.Fatal("TriggerBuild() はエラーを返すべきです")
 	}

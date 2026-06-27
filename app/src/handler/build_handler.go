@@ -23,12 +23,21 @@ func NewBuildHandler(buildService service.BuildService) *BuildHandler {
 	}
 }
 
+// TriggerBuildRequest は TriggerBuild のリクエストボディ
+type TriggerBuildRequest struct {
+	CommitMessage string `json:"commit_message"` // コミットメッセージ（オプション）
+	Author        string `json:"author"`         // コミット著者（オプション）
+}
+
 // TriggerBuild は POST /api/v1/deployments/:id/build のハンドラー
 func (buildHandler *BuildHandler) TriggerBuild(echoCtx echo.Context) error {
 	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
 	deploymentID := echoCtx.Param("id")     // パスパラメータから deployment ID を取得する
 
-	buildData, err := buildHandler.buildService.TriggerBuild(echoCtx.Request().Context(), userID, deploymentID) // サービスを呼び出してビルドをトリガーする
+	var requestBody TriggerBuildRequest                      // リクエストボディの構造体を定義する
+	_ = echoCtx.Bind(&requestBody)                          // バインド失敗は無視してオプション扱いにする
+
+	buildData, err := buildHandler.buildService.TriggerBuild(echoCtx.Request().Context(), userID, deploymentID, requestBody.CommitMessage, requestBody.Author) // サービスを呼び出してビルドをトリガーする
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 所有権エラーの場合は 403 を返す
 			logger.PrintHandlerError("BuildHandler", "TriggerBuild", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する

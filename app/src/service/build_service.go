@@ -27,7 +27,7 @@ var ErrDockerfileNotSupported = errors.New("dockerfile タイプは現在サポ�
 
 // BuildService はビルドトリガーのビジネスロジックを定義するインターフェース
 type BuildService interface {
-	TriggerBuild(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error)         // ビルドをトリガーする
+	TriggerBuild(ctx context.Context, userID string, deploymentID string, commitMessage string, author string) (*models.DeploymentBuild, error) // ビルドをトリガーする
 	CancelBuild(ctx context.Context, userID string, buildID string) error                                          // ビルドをキャンセルする
 	GetBuild(ctx context.Context, userID string, buildID string) (*models.DeploymentBuild, error)                  // ビルド情報を取得する
 	GetBuildLogs(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error) // ビルドログを取得する（ログ文字列・最終チャンク時刻・エラー）
@@ -74,7 +74,7 @@ func NewBuildService(
 }
 
 // TriggerBuild はデプロイメントのビルドをトリガーする
-func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, deploymentID string) (*models.DeploymentBuild, error) {
+func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, deploymentID string, commitMessage string, author string) (*models.DeploymentBuild, error) {
 	// 1. Deployment を取得する
 	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得する
 	if err != nil {
@@ -125,11 +125,13 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 		DeploymentID:   &deploymentIDValue,                    // deployment ID を設定する（nullable pointer）
 		BuildType:      buildType,                             // ビルドタイプを設定する
 		Status:         models.BuildStatusPending,             // 初期ステータスを pending に設定する
-		GithubRepoURL:  deploymentData.PendingGithubRepoURL,  // GitHub リポジトリ URL をスナップショットする
-		CommitSHA:      deploymentData.PendingGithubCommitSHA, // コミット SHA を設定する
-		Branch:         deploymentData.PendingGithubBranch,    // ブランチを設定する
-		Directory:      deploymentData.PendingGithubRepoDirectory, // ビルドディレクトリを設定する
-		DockerfilePath: deploymentData.PendingDockerfilePath,  // Dockerfile パスを設定する
+		GithubRepoURL:  deploymentData.PendingGithubRepoURL,       // GitHub リポジトリ URL をスナップショットする
+		CommitSHA:      deploymentData.PendingGithubCommitSHA,      // コミット SHA を設定する
+		Branch:         deploymentData.PendingGithubBranch,         // ブランチを設定する
+		Directory:      deploymentData.PendingGithubRepoDirectory,  // ビルドディレクトリを設定する
+		DockerfilePath: deploymentData.PendingDockerfilePath,       // Dockerfile パスを設定する
+		CommitMessage:  commitMessage,                               // コミットメッセージを設定する
+		Author:         author,                                      // コミット著者を設定する
 	}
 	if err := svc.buildRepo.Create(ctx, buildData); err != nil { // build レコードを作成する
 		return nil, err // 作成エラーを返す
