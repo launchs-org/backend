@@ -24,6 +24,7 @@ import { get, post, del } from '@/lib/api'
 import { put } from '@/lib/api'
 import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar, VolumeMount, EnvVarMount, Build, ProjectQuota } from '@/lib/types'
 import { SIDEBAR_INITIAL_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, FLOW_ROW_HEIGHT } from '@/lib/config'
+import { useTutorialContext } from '@/tutorial/TutorialContext' // チュートリアル Context をインポートする
 
 const NODE_TYPES = {
   deployment: DeploymentNode,
@@ -57,6 +58,7 @@ type SidebarMode = 'deployment' | 'deployment-new' | 'ingress' | null // サイ�
 export function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
+  const { advance: tutorialAdvance, isActive: tutorialIsActive, actualStep: tutorialActualStep, pause: tutorialPause, resume: tutorialResume } = useTutorialContext() // チュートリアルの進行関数を取得する
   const [project, setProject] = useState<Project | null>(null) // プロジェクト情報を管理する
   const [deploymentRelations, setDeploymentRelations] = useState<DeploymentWithRelations[]>([]) // デプロイメントとその関連リソースを管理する
   const [loading, setLoading] = useState(true) // ローディング状態を管理する
@@ -159,6 +161,10 @@ export function ProjectDetailPage() {
             setSidebarMode('deployment')
             setIframeLoaded(false)
             setIframeError(false) // iframeエラーフラグをリセットする
+            // チュートリアル中にカードをクリックしたらステップを進める
+            if (tutorialIsActive && (tutorialActualStep?.id === 'deployment-open-card' || tutorialActualStep?.id === 'adv-storage-open-card' || tutorialActualStep?.id === 'adv-envvar-open-card')) {
+              tutorialAdvance()
+            }
           }, // ノードクリック時にデプロイメントサイドバーを開く
         },
       })
@@ -365,6 +371,16 @@ export function ProjectDetailPage() {
     buildGraph(deploymentRelations, projectId!, ingressRouteList, pathRulesByIngressRouteId, volumeList, envVarList, selectedEnvVarId)
   }, [selectedEnvVarId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // deployment-new サイドバーが開いている間だけチュートリアルを一時停止する
+  // deployment（詳細）サイドバーは pause しない（close-sidebar ステップを親側で表示するため）
+  useEffect(() => {
+    if (sidebarMode === 'deployment-new') {
+      tutorialPause() // 新規作成 iframe が開いている間はオーバーレイを非表示にする
+    } else {
+      tutorialResume() // それ以外は再表示する
+    }
+  }, [sidebarMode, tutorialPause, tutorialResume])
+
   // iframe から postMessage でデプロイメント作成完了を受信したらサイドバーを閉じてデータを再取得する
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -372,10 +388,15 @@ export function ProjectDetailPage() {
       setSidebarMode(null) // サイドバーを閉じる
       setSelectedDeploymentId(null) // 選択をリセットする
       void fetchData() // データを再取得する
+      // チュートリアル中の場合はデプロイメント作成完了でステップを進める（deployment-open-card へ）
+      const deploymentFlowStepIds = ['add-deployment-menu', 'deployment-type-select', 'deployment-name-input', 'deployment-image-input', 'deployment-create-button']
+      if (tutorialIsActive && deploymentFlowStepIds.includes(tutorialActualStep?.id ?? '')) {
+        tutorialAdvance() // 次のステップ（deployment-open-card）へ進む
+      }
     }
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
-  }, [fetchData])
+  }, [fetchData, tutorialActualStep, tutorialAdvance, tutorialIsActive])
 
   useEffect(() => {
     const onMouseMove = (ev: MouseEvent) => {
@@ -512,7 +533,7 @@ export function ProjectDetailPage() {
       actions={
         <div className="flex items-center gap-2">
           {/* 追加メニュー */}
-          <div className="relative">
+          <div className="relative" data-tutorial="tutorial-add-button">
             <button
               onClick={() => setShowAddMenu(prev => !prev)}
               className="flex items-center gap-1.5 bg-[#111827] text-white text-sm px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors"
@@ -523,9 +544,10 @@ export function ProjectDetailPage() {
             {showAddMenu && (
               <>
                 {/* 背景クリックで閉じる */}
-                <div className="fixed inset-0 z-10" onClick={() => setShowAddMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden w-48">
+                <div className="fixed inset-0" style={{ zIndex: 9999 }} onClick={() => setShowAddMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden w-48" style={{ zIndex: 10000 }}>
                   <button
+                    data-tutorial="tutorial-add-deployment-menu"
                     onClick={() => { setShowAddMenu(false); openDeploymentNewSidebar() }}
                     className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-[#111827] hover:bg-gray-50 transition-colors"
                   >
@@ -533,6 +555,7 @@ export function ProjectDetailPage() {
                     Deployment
                   </button>
                   <button
+                    data-tutorial="tutorial-add-ingress-menu"
                     onClick={() => {
                       setShowAddMenu(false)
                       void handleCreateIngressRoute() // 常に新規作成する（複数作成可能）
@@ -544,14 +567,24 @@ export function ProjectDetailPage() {
                     {creatingIngress ? 'IngressRoute作成中...' : 'IngressRoute'}
                   </button>
                   <button
-                    onClick={() => { setShowAddMenu(false); setShowVolumeSidebar(true) }}
+                    data-tutorial="tutorial-add-volume-menu"
+                    onClick={() => {
+                      setShowAddMenu(false)
+                      setShowVolumeSidebar(true)
+                      if (tutorialActualStep?.id === 'adv-storage-menu') tutorialAdvance() // ボリュームサイドバーを開いたらチュートリアルを進める
+                    }}
                     className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-[#111827] hover:bg-gray-50 transition-colors"
                   >
                     <HardDrive className="w-3.5 h-3.5 text-gray-400" />
                     Volume
                   </button>
                   <button
-                    onClick={() => { setShowAddMenu(false); setShowEnvVarSidebar(true) }}
+                    data-tutorial="tutorial-add-envvar-menu"
+                    onClick={() => {
+                      setShowAddMenu(false)
+                      setShowEnvVarSidebar(true)
+                      if (tutorialActualStep?.id === 'adv-envvar-menu') tutorialAdvance() // 環境変数サイドバーを開いたらチュートリアルを進める
+                    }}
                     className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-[#111827] hover:bg-gray-50 transition-colors"
                   >
                     <KeyRound className="w-3.5 h-3.5 text-gray-400" />
@@ -645,6 +678,10 @@ export function ProjectDetailPage() {
                     setSidebarMode('deployment') // デプロイメントサイドバーを開く
                     setIframeLoaded(false) // iframe読み込みフラグをリセットする
                     setIframeError(false) // iframeエラーフラグをリセットする
+                    // チュートリアル中にカードをクリックしたらステップを進める
+                    if (tutorialIsActive && (tutorialActualStep?.id === 'deployment-open-card' || tutorialActualStep?.id === 'adv-storage-open-card' || tutorialActualStep?.id === 'adv-envvar-open-card')) {
+                      tutorialAdvance()
+                    }
                   }}
                   selectedDeploymentId={selectedDeploymentId}
                   onClose={() => setShowDeploymentListSidebar(false)}
@@ -782,7 +819,14 @@ export function ProjectDetailPage() {
                             全画面で開く
                           </button>
                           <button
-                            onClick={handleCloseSidebar}
+                            data-tutorial="tutorial-deployment-close-btn"
+                            onClick={() => {
+                              handleCloseSidebar() // サイドバーを閉じる
+                              // チュートリアル中なら×で閉じたタイミングでステップを進める
+                              if (tutorialIsActive && tutorialActualStep?.id === 'deployment-close-sidebar') {
+                                tutorialAdvance()
+                              }
+                            }}
                             className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors"
                           >
                             <X className="w-3.5 h-3.5" />
@@ -880,6 +924,8 @@ function IngressRouteSidebar({
   onRefresh: () => Promise<void>
   onClose: () => void
 }) {
+  const { advance: tutorialAdvance, isActive: tutorialIsActive, actualStep: tutorialActualStep } = useTutorialContext() // チュートリアルの状態を取得する
+
   const [activeTab, setActiveTab] = useState<IngressTab>('overview') // アクティブなタブを管理する
   const [applying, setApplying] = useState(false) // apply 中フラグ
   const [deleting, setDeleting] = useState(false) // 削除中フラグ
@@ -891,6 +937,10 @@ function IngressRouteSidebar({
     try {
       await post(`/projects/${projectId}/apply`) // IngressRoute を k8s に apply する
       await onRefresh() // データを再取得する
+      // チュートリアル中なら Apply 完了で完了ステップへ進む
+      if (tutorialIsActive && tutorialActualStep?.id === 'ingress-apply') {
+        tutorialAdvance()
+      }
     } catch (applyError) {
       console.error(applyError)
       alert('Apply に失敗しました')
@@ -926,6 +976,7 @@ function IngressRouteSidebar({
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <button
+            data-tutorial="tutorial-ingress-apply-btn"
             onClick={() => void handleApply()}
             disabled={applying || ingressRoute.status === 'deleting'}
             className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded transition-colors disabled:opacity-50 ${
@@ -977,7 +1028,14 @@ function IngressRouteSidebar({
           {(['overview', 'paths'] as IngressTab[]).map(tab => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              data-tutorial={tab === 'paths' ? 'tutorial-ingress-paths-tab' : undefined}
+              onClick={() => {
+                setActiveTab(tab) // タブを切り替える
+                // チュートリアル中にパスルールタブをクリックしたらステップを進める
+                if (tab === 'paths' && tutorialIsActive && tutorialActualStep?.id === 'ingress-paths-tab') {
+                  tutorialAdvance()
+                }
+              }}
               className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab
                   ? 'border-[#00C2D1] text-[#00C2D1]'
@@ -1024,7 +1082,7 @@ function IngressOverviewTab({ ingressRoute }: { ingressRoute: IngressRoute }) {
       <div className="space-y-3">
         <Row label="ステータス"><StatusBadge status={ingressRoute.status} /></Row>
         <Row label="ホスト">
-          <div className="flex items-center gap-1 min-w-0">
+          <div data-tutorial="tutorial-ingress-host" className="flex items-center gap-1 min-w-0">
             <span className="font-mono text-sm text-[#111827] truncate">{ingressRoute.host}</span>
             <button
               onClick={() => void handleCopyHost()}
@@ -1063,6 +1121,8 @@ function IngressPathsTab({
   deploymentRelations: DeploymentWithRelations[]
   onRefresh: () => Promise<void>
 }) {
+  const { advance: tutorialAdvance, isActive: tutorialIsActive, actualStep: tutorialActualStep } = useTutorialContext() // チュートリアルの状態を取得する
+
   const [deletingPathRuleId, setDeletingPathRuleId] = useState<string | null>(null) // 削除中のパスルールID
   const [pathPrefix, setPathPrefix] = useState('/') // 追加するパスプレフィックス
   const [serviceId, setServiceId] = useState('') // 追加する転送先サービスID
@@ -1099,6 +1159,10 @@ function IngressPathsTab({
       setServiceId('') // 選択をリセットする
       setStripPrefix(false) // strip_prefix フラグをリセットする
       await onRefresh() // データを再取得する
+      // チュートリアル中ならパスルール追加完了でステップを進める
+      if (tutorialIsActive && (tutorialActualStep?.id === 'ingress-service-select' || tutorialActualStep?.id === 'ingress-add-path-rule')) {
+        tutorialAdvance()
+      }
     } catch (addError) {
       console.error(addError)
       alert('パスルールの追加に失敗しました')
@@ -1166,8 +1230,15 @@ function IngressPathsTab({
             <div>
               <label className={labelClass}>転送先 Service</label>
               <select
+                data-tutorial="tutorial-ingress-service-select"
                 value={serviceId}
-                onChange={ev => setServiceId(ev.target.value)}
+                onChange={ev => {
+                  setServiceId(ev.target.value) // 転送先 Service を選択する
+                  // チュートリアル中に Service を選択したらステップを進める
+                  if (ev.target.value && tutorialIsActive && tutorialActualStep?.id === 'ingress-service-select') {
+                    tutorialAdvance()
+                  }
+                }}
                 className={inputClass}
               >
                 <option value="">デプロイメントを選択</option>
@@ -1189,6 +1260,7 @@ function IngressPathsTab({
               </label>
             </div>
             <button
+              data-tutorial="tutorial-ingress-add-path-rule"
               onClick={() => void handleAddPathRule()}
               disabled={addingPathRule || !serviceId || !pathPrefix}
               className="bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
@@ -1219,6 +1291,7 @@ function EnvVarSidebar({
   onRefresh: () => Promise<void>
   onClose: () => void
 }) {
+  const { advance: tutorialAdvance, actualStep: tutorialActualStep } = useTutorialContext() // チュートリアルの進行関数を取得する
   const [newKey, setNewKey] = useState('') // 新規環境変数キー
   const [newValue, setNewValue] = useState('') // 新規環境変数値
   const [newIsSecret, setNewIsSecret] = useState(false) // シークレットフラグ
@@ -1252,6 +1325,7 @@ function EnvVarSidebar({
       setNewValue('') // 値をリセットする
       setNewIsSecret(false) // シークレットフラグをリセットする
       await onRefresh() // 一覧を再取得する
+      if (tutorialActualStep?.id === 'adv-envvar-create') tutorialAdvance() // 環境変数作成後にチュートリアルを進める
     } catch (addError) {
       console.error(addError)
       alert('環境変数の作成に失敗しました')
@@ -1416,6 +1490,7 @@ function EnvVarSidebar({
           <div>
             <label className={labelClass}>キー</label>
             <input
+              data-tutorial="tutorial-envvar-key-input"
               type="text"
               value={newKey}
               onChange={ev => setNewKey(ev.target.value)}
@@ -1426,6 +1501,7 @@ function EnvVarSidebar({
           <div>
             <label className={labelClass}>値</label>
             <input
+              data-tutorial="tutorial-envvar-value-input"
               type={newIsSecret ? 'password' : 'text'}
               value={newValue}
               onChange={ev => setNewValue(ev.target.value)}
@@ -1433,7 +1509,7 @@ function EnvVarSidebar({
               className={inputClass}
             />
           </div>
-          <label className="flex items-center gap-2 cursor-pointer select-none">
+          <label data-tutorial="tutorial-envvar-secret-checkbox" className="flex items-center gap-2 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={newIsSecret}
@@ -1443,6 +1519,7 @@ function EnvVarSidebar({
             <span className="text-xs text-gray-600">シークレット（k8s Secret に格納）</span>
           </label>
           <button
+            data-tutorial="tutorial-envvar-create-btn"
             onClick={() => void handleAdd()}
             disabled={adding || !newKey}
             className="w-full bg-[#111827] text-white text-sm py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
@@ -1470,6 +1547,7 @@ function VolumeSidebar({
   onDelete: (volumeId: string) => Promise<void>
   onClose: () => void
 }) {
+  const { advance: tutorialAdvance, actualStep: tutorialActualStep } = useTutorialContext() // チュートリアルの進行関数を取得する
   const [newVolumeName, setNewVolumeName] = useState('') // 新規ボリューム名
   const [newVolumeSizeMb, setNewVolumeSizeMb] = useState('') // 新規ボリュームサイズ（MB）
   const [adding, setAdding] = useState(false) // 作成中フラグ
@@ -1484,6 +1562,7 @@ function VolumeSidebar({
       })
       setNewVolumeName('') // フォームをリセットする
       setNewVolumeSizeMb('') // サイズをリセットする
+      if (tutorialActualStep?.id === 'adv-storage-create') tutorialAdvance() // ボリューム作成後にチュートリアルを進める
     } catch (addError) {
       console.error(addError)
       alert('ボリュームの作成に失敗しました')
@@ -1551,6 +1630,7 @@ function VolumeSidebar({
           <div>
             <label className={labelClass}>名前</label>
             <input
+              data-tutorial="tutorial-volume-name-input"
               type="text"
               value={newVolumeName}
               onChange={ev => setNewVolumeName(ev.target.value)}
@@ -1561,6 +1641,7 @@ function VolumeSidebar({
           <div>
             <label className={labelClass}>サイズ（MB）</label>
             <input
+              data-tutorial="tutorial-volume-size-input"
               type="number"
               min={1}
               value={newVolumeSizeMb}
@@ -1570,6 +1651,7 @@ function VolumeSidebar({
             />
           </div>
           <button
+            data-tutorial="tutorial-volume-create-btn"
             onClick={() => void handleAdd()}
             disabled={adding || !newVolumeName || !newVolumeSizeMb}
             className="w-full bg-[#111827] text-white text-sm py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"

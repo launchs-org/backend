@@ -4,6 +4,7 @@ import { Container, Package, LayoutTemplate, Plus, Trash2, Dice6 } from 'lucide-
 import { Layout } from '@/components/Layout'
 import { get, post, QuotaExceededApiError } from '@/lib/api'
 import type { Deployment, DeploymentType, DeploymentTemplate, EnvVar } from '@/lib/types'
+import { useTutorialContext } from '@/tutorial/TutorialContext' // チュートリアル Context をインポートする
 
 type Step = 'type' | 'form' | 'template'
 
@@ -66,6 +67,8 @@ async function fetchGitHubDirs(repo: string, branch: string): Promise<string[]> 
 }
 
 export function DeploymentNewPage() {
+  const { advance: tutorialAdvance, isActive: tutorialIsActive, actualStep: tutorialActualStep } = useTutorialContext() // チュートリアルの状態を取得する
+
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
   const location = useLocation() // URL クエリパラメータを取得するために使用する
@@ -187,6 +190,10 @@ export function DeploymentNewPage() {
   const handleTypeSelect = (type: DeploymentType) => {
     setSelectedType(type) // タイプを選択する
     setStep('form') // フォームステップへ進む
+    // チュートリアル中に image_url を選択したらステップを進める
+    if (type === 'image_url' && tutorialIsActive && tutorialActualStep?.id === 'deployment-type-select') {
+      tutorialAdvance()
+    }
   }
 
   // テンプレートを選択する
@@ -370,6 +377,7 @@ export function DeploymentNewPage() {
               {DEPLOYMENT_TYPES.map(({ type, label, description, Icon }) => (
                 <button
                   key={type}
+                  data-tutorial={type === 'image_url' ? 'tutorial-deployment-type-image' : undefined}
                   onClick={() => handleTypeSelect(type)}
                   className="flex items-start gap-4 p-4 bg-white rounded-lg border border-gray-200 text-left hover:border-[#00C2D1] hover:shadow-sm transition-all group"
                 >
@@ -670,6 +678,7 @@ export function DeploymentNewPage() {
               <div>
                 <label className={labelClass}>デプロイメント名 *</label>
                 <input
+                  data-tutorial="tutorial-deployment-name-input"
                   type="text"
                   value={formData.name}
                   onChange={(event) => setFormData((prev) => ({ ...prev, name: event.target.value }))}
@@ -686,6 +695,7 @@ export function DeploymentNewPage() {
                 <div>
                   <label className={labelClass}>イメージURL *</label>
                   <input
+                    data-tutorial="tutorial-deployment-image-input"
                     type="text"
                     value={formData.image_url}
                     onChange={(event) => setFormData((prev) => ({ ...prev, image_url: event.target.value }))}
@@ -934,6 +944,7 @@ export function DeploymentNewPage() {
                 ← 戻る
               </button>
               <button
+                data-tutorial="tutorial-deployment-create-btn"
                 onClick={() => void handleCreate()}
                 disabled={creating}
                 className="bg-[#111827] text-white text-sm px-6 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"

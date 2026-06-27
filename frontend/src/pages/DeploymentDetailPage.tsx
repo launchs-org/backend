@@ -31,6 +31,7 @@ import {
   GITHUB_COMMITS_PER_PAGE,
   GITHUB_COMMIT_MESSAGE_MAX_LENGTH,
 } from '@/lib/config'
+import { useTutorialContext } from '@/tutorial/TutorialContext' // チュートリアル Context をインポートする
 
 type Tab = 'overview' | 'logs' | 'builds' | 'settings' | 'networking' | 'env-vars' | 'volumes' | 'history'
 
@@ -47,6 +48,8 @@ const TYPE_ICON = {
 }
 
 export function DeploymentDetailPage() {
+  const { advance: tutorialAdvance, isActive: tutorialIsActive, actualStep: tutorialActualStep } = useTutorialContext() // チュートリアルの状態を取得する
+
   const { projectId, deploymentId } = useParams<{ projectId: string; deploymentId: string }>()
   const navigate = useNavigate()
 
@@ -176,6 +179,10 @@ export function DeploymentDetailPage() {
     try {
       await post(`/deployments/${deploymentId}/apply`) // Applyを実行する
       await Promise.all([fetchDeployment(), fetchAllPending()]) // デプロイメント情報と pending 一覧を再取得する
+      // チュートリアル中なら Apply 完了でステップを進める
+      if (tutorialIsActive && (tutorialActualStep?.id === 'deployment-apply-button' || tutorialActualStep?.id === 'adv-storage-apply' || tutorialActualStep?.id === 'adv-envvar-apply')) {
+        tutorialAdvance() // 次のステップへ進む
+      }
     } catch (applyError) {
       console.error(applyError)
       alert('Apply に失敗しました')
@@ -303,6 +310,7 @@ export function DeploymentDetailPage() {
       actions={
         <div className="flex items-center gap-2">
           <button
+            data-tutorial="tutorial-deployment-apply-btn"
             onClick={() => void handleApply()}
             disabled={applying}
             className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md transition-colors ${
@@ -381,7 +389,26 @@ export function DeploymentDetailPage() {
             {availableTabs.map((tab) => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                data-tutorial={
+                  tab === 'networking' ? 'tutorial-deployment-networking-tab'
+                  : tab === 'env-vars' ? 'tutorial-deployment-envvars-tab'
+                  : tab === 'volumes' ? 'tutorial-deployment-volumes-tab'
+                  : tab === 'history' ? 'tutorial-deployment-history-tab'
+                  : undefined
+                }
+                onClick={() => {
+                  setActiveTab(tab) // タブを切り替える
+                  // チュートリアル中：各タブクリックで対応するステップを進める
+                  const tabToStepIds: Record<string, string[]> = {
+                    networking: ['deployment-networking-tab'],
+                    'env-vars': ['deployment-envvars-tab', 'adv-envvar-mount-tab'],
+                    volumes: ['deployment-volumes-tab', 'adv-storage-mount-tab'],
+                    history: ['deployment-history-tab'],
+                  }
+                  if (tutorialIsActive && tabToStepIds[tab]?.includes(tutorialActualStep?.id ?? '')) {
+                    tutorialAdvance()
+                  }
+                }}
                 className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                   activeTab === tab
                     ? 'border-[#00C2D1] text-[#00C2D1]'
@@ -1089,6 +1116,8 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
 // ── Networking タブ ───────────────────────────────────────────
 
 function NetworkingTab({ deploymentId, projectId, onUpdated }: { deploymentId: string; projectId: string; onUpdated: () => Promise<void> }) {
+  const { advance: tutorialAdvance, isActive: tutorialIsActive, actualStep: tutorialActualStep } = useTutorialContext() // チュートリアルの状態を取得する
+
   const [service, setService] = useState<K8sService | null>(null) // サービス情報を管理する
   const [namespace, setNamespace] = useState<string>('') // プロジェクトの namespace を管理する
   const [svcForm, setSvcForm] = useState({ port: '', target_port: '' }) // サービス設定フォーム
@@ -1157,6 +1186,10 @@ function NetworkingTab({ deploymentId, projectId, onUpdated }: { deploymentId: s
         })
       }
       await Promise.all([fetchNetworking(), onUpdated()]) // 最新状態を再取得する
+      // チュートリアル中なら Service 保存完了でステップを進める
+      if (tutorialIsActive && (tutorialActualStep?.id === 'deployment-port-input' || tutorialActualStep?.id === 'deployment-target-port-input' || tutorialActualStep?.id === 'deployment-service-save')) {
+        tutorialAdvance() // 次のステップへ進む
+      }
     } catch (saveError) {
       console.error(saveError)
       alert('サービスの保存に失敗しました')
@@ -1254,14 +1287,14 @@ function NetworkingTab({ deploymentId, projectId, onUpdated }: { deploymentId: s
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>ポート（外部）</label>
-                <input type="number" className={inputClass} placeholder="80" value={svcForm.port} onChange={ev => setSvcForm(prev => ({ ...prev, port: ev.target.value }))} />
+                <input data-tutorial="tutorial-deployment-port-input" type="number" className={inputClass} placeholder="80" value={svcForm.port} onChange={ev => setSvcForm(prev => ({ ...prev, port: ev.target.value }))} />
               </div>
               <div>
                 <label className={labelClass}>ターゲットポート（コンテナ）</label>
-                <input type="number" className={inputClass} placeholder="8080" value={svcForm.target_port} onChange={ev => setSvcForm(prev => ({ ...prev, target_port: ev.target.value }))} />
+                <input data-tutorial="tutorial-deployment-target-port-input" type="number" className={inputClass} placeholder="8080" value={svcForm.target_port} onChange={ev => setSvcForm(prev => ({ ...prev, target_port: ev.target.value }))} />
               </div>
             </div>
-            <button onClick={() => void handleSaveService()} disabled={savingSvc || !svcForm.port || !svcForm.target_port} className="bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50">
+            <button data-tutorial="tutorial-deployment-service-save" onClick={() => void handleSaveService()} disabled={savingSvc || !svcForm.port || !svcForm.target_port} className="bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50">
               {savingSvc ? '保存中...' : 'Serviceを設定'}
             </button>
           </div>
@@ -1289,6 +1322,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 // ── EnvVars タブ ─────────────────────────────────────────────
 
 function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: string; projectId: string; onUpdated: () => Promise<void> }) {
+  const { advance: tutorialAdvance, actualStep: tutorialActualStep } = useTutorialContext() // チュートリアルの進行関数を取得する
   const [envVarList, setEnvVarList] = useState<EnvVar[]>([]) // プロジェクトの環境変数一覧を管理する
   const [mountList, setMountList] = useState<EnvVarMount[]>([]) // デプロイメントのマウント設定一覧を管理する
   const [newMountEnvVarId, setNewMountEnvVarId] = useState('') // マウントする環境変数ID
@@ -1327,6 +1361,7 @@ function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
       setNewMountEnvVarId('') // フォームをリセットする
       setNewOverrideKey('') // オーバーライドキーをリセットする
       await Promise.all([fetchData(), onUpdated()]) // データと pending 一覧を再取得する
+      if (tutorialActualStep?.id === 'adv-envvar-mount-add') tutorialAdvance() // マウント追加後にチュートリアルを進める
     } catch (addError) {
       console.error(addError)
       alert('マウント設定の作成に失敗しました')
@@ -1437,8 +1472,12 @@ function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
                 <div>
                   <label className={labelClass}>環境変数</label>
                   <select
+                    data-tutorial="tutorial-envvar-mount-select"
                     value={newMountEnvVarId}
-                    onChange={ev => setNewMountEnvVarId(ev.target.value)}
+                    onChange={ev => {
+                      setNewMountEnvVarId(ev.target.value)
+                      if (tutorialActualStep?.id === 'adv-envvar-mount-select' && ev.target.value) tutorialAdvance() // 環境変数を選択したらチュートリアルを進める
+                    }}
                     className={inputClass}
                   >
                     <option value="">選択してください</option>
@@ -1461,6 +1500,7 @@ function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
                 </div>
               </div>
               <button
+                data-tutorial="tutorial-envvar-mount-add-btn"
                 onClick={() => void handleAddMount()}
                 disabled={addingMount || !newMountEnvVarId}
                 className="bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
@@ -1554,6 +1594,7 @@ function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
 // ── Volumes タブ ──────────────────────────────────────────────
 
 function VolumesTab({ deploymentId, projectId, onUpdated }: { deploymentId: string; projectId: string; onUpdated: () => Promise<void> }) {
+  const { advance: tutorialAdvance, actualStep: tutorialActualStep } = useTutorialContext() // チュートリアルの進行関数を取得する
   const [volumeList, setVolumeList] = useState<Volume[]>([]) // プロジェクトのボリューム一覧を管理する
   const [mountList, setMountList] = useState<VolumeMount[]>([]) // デプロイメントのマウント設定一覧を管理する
   const [newMountVolumeId, setNewMountVolumeId] = useState('') // マウントするボリュームID
@@ -1592,6 +1633,7 @@ function VolumesTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
       setNewMountVolumeId('') // フォームをリセットする
       setNewMountPath('') // パスをリセットする
       await Promise.all([fetchData(), onUpdated()]) // データと pending 一覧を再取得する
+      if (tutorialActualStep?.id === 'adv-storage-mount-add') tutorialAdvance() // マウント追加後にチュートリアルを進める
     } catch (addError) {
       console.error(addError)
       alert('マウント設定の作成に失敗しました')
@@ -1697,8 +1739,12 @@ function VolumesTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
                 <div>
                   <label className={labelClass}>ボリューム</label>
                   <select
+                    data-tutorial="tutorial-volume-mount-select"
                     value={newMountVolumeId}
-                    onChange={ev => setNewMountVolumeId(ev.target.value)}
+                    onChange={ev => {
+                      setNewMountVolumeId(ev.target.value)
+                      if (tutorialActualStep?.id === 'adv-storage-mount-select' && ev.target.value) tutorialAdvance() // ボリュームを選択したらチュートリアルを進める
+                    }}
                     className={inputClass}
                   >
                     <option value="">選択してください</option>
@@ -1710,15 +1756,20 @@ function VolumesTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
                 <div>
                   <label className={labelClass}>マウントパス</label>
                   <input
+                    data-tutorial="tutorial-volume-mount-path"
                     type="text"
                     value={newMountPath}
-                    onChange={ev => setNewMountPath(ev.target.value)}
+                    onChange={ev => {
+                      setNewMountPath(ev.target.value)
+                      if (tutorialActualStep?.id === 'adv-storage-mount-path' && ev.target.value) tutorialAdvance() // パス入力開始でチュートリアルを進める
+                    }}
                     placeholder="/data"
                     className={`${inputClass} font-mono`}
                   />
                 </div>
               </div>
               <button
+                data-tutorial="tutorial-volume-mount-add-btn"
                 onClick={() => void handleAddMount()}
                 disabled={addingMount || !newMountVolumeId || !newMountPath}
                 className="bg-[#111827] text-white text-sm px-4 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"

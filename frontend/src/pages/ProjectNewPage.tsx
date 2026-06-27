@@ -43,6 +43,7 @@ export function ProjectNewPage() {
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">プロジェクト名 *</label>
             <input
+              data-tutorial="tutorial-project-name-input"
               type="text"
               value={name}
               onChange={(event) => setName(event.target.value)}
@@ -70,6 +71,7 @@ export function ProjectNewPage() {
             ← キャンセル
           </button>
           <button
+            data-tutorial="tutorial-project-create-btn"
             onClick={() => void handleCreate()}
             disabled={creating || !name.trim()}
             className="bg-[#111827] text-white text-sm px-6 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"

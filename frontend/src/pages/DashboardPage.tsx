@@ -1,13 +1,15 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Plus, FolderOpen, Clock } from 'lucide-react'
+import { Plus, FolderOpen, Clock, GraduationCap } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { StatusBadge } from '@/components/StatusBadge'
 import { get } from '@/lib/api'
 import type { Project, Quota } from '@/lib/types'
+import { useTutorialContext } from '@/tutorial/TutorialContext' // チュートリアル Context をインポートする
 
 export function DashboardPage() {
   const navigate = useNavigate()
+  const { reset } = useTutorialContext() // チュートリアルリセット関数を取得する
   const [projectList, setProjectList] = useState<Project[]>([]) // プロジェクト一覧を管理する
   const [quota, setQuota] = useState<Quota | null>(null) // クォータ情報を管理する
   const [loading, setLoading] = useState(true) // ローディング状態を管理する
@@ -55,6 +57,7 @@ export function DashboardPage() {
     <Layout
       actions={
         <button
+          data-tutorial="tutorial-new-project-btn"
           onClick={() => navigate('/projects/new')}
           className="flex items-center gap-1.5 bg-[#111827] text-white text-sm px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors"
         >
@@ -65,13 +68,23 @@ export function DashboardPage() {
     >
       <div className="space-y-6">
         {/* ページタイトル */}
-        <div>
-          <h1 className="text-xl font-semibold text-[#111827]">Projects</h1>
-          {quota && (
-            <p className="text-sm text-gray-500 mt-1">
-              {quota.current_projects} / {quota.max_projects} projects used
-            </p>
-          )}
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-xl font-semibold text-[#111827]">Projects</h1>
+            {quota && (
+              <p className="text-sm text-gray-500 mt-1">
+                {quota.current_projects} / {quota.max_projects} projects used
+              </p>
+            )}
+          </div>
+          {/* チュートリアルボタン */}
+          <button
+            onClick={reset}
+            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 rounded-md px-2.5 py-1.5 hover:bg-gray-50 transition-colors"
+          >
+            <GraduationCap className="w-3.5 h-3.5" />
+            チュートリアル
+          </button>
         </div>
 
         {/* クォータバー */}

@@ -8,6 +8,8 @@ import { DeploymentDetailPage } from '@/pages/DeploymentDetailPage'
 import { DeploymentNewPage } from '@/pages/DeploymentNewPage'
 import { BuildLogPage } from '@/pages/BuildLogPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { TutorialProvider } from '@/tutorial/TutorialContext' // チュートリアル Context プロバイダーをインポートする
+import { TutorialOverlay } from '@/tutorial/TutorialOverlay' // チュートリアルオーバーレイをインポートする
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { authState } = useAuth() // 認証状態を取得する
@@ -31,7 +33,9 @@ function AuthGate({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <BrowserRouter basename="/ui">
-      <Routes>
+      <TutorialProvider>
+        <TutorialOverlay />
+        <Routes>
         {/* ログインリダイレクト */}
         <Route
           path="/login"
@@ -98,7 +102,8 @@ export default function App() {
 
         {/* 存在しないパスはダッシュボードへ */}
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+        </Routes>
+      </TutorialProvider>
     </BrowserRouter>
   )
 }

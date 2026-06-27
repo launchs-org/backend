@@ -83,6 +83,7 @@ export function DeploymentNode({ data }: NodeProps) {
 
       {/* メインカード */}
       <div
+        data-tutorial="tutorial-deployment-card"
         className="bg-white rounded-xl shadow-md cursor-pointer hover:shadow-lg transition-all overflow-hidden"
         style={{
           borderTopColor: hasPending ? '#D97706' : color.accent,
