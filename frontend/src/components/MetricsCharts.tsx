@@ -32,9 +32,10 @@ type MetricsChartsProps = {
 }
 
 // formatTime は ISO 文字列を HH:mm:ss 形式に変換する
+// timeZone を明示しないとブラウザのシステム TZ で表示されるため Asia/Tokyo を固定指定する
 function formatTime(isoString: string): string {
   const date = new Date(isoString)
-  return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return date.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Tokyo' })
 }
 
 // formatMemory はバイト数を人間が読みやすい形式に変換する

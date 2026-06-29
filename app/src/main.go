@@ -91,7 +91,7 @@ func main() {
 	baseDomain := os.Getenv("BASE_DOMAIN")                                                                                                                                                          // ベースドメインを環境変数から取得する
 	pathRuleRepo := repository.NewPathRuleRepository(repository.Database)                                                                                                                             // path_rule リポジトリを生成する
 	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, userQuotaRepo, k8sClient) // deployment サービスを生成する
-	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, pathRuleRepo, envVarRepo, envVarMountRepo, volumeRepo, volumeMountRepo, userQuotaRepo) // apply サービスを生成する
+	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, pathRuleRepo, envVarRepo, envVarMountRepo, volumeRepo, volumeMountRepo, userQuotaRepo, baseDomain) // apply サービスを生成する
 	deploymentHandler := handler.NewDeploymentHandler(deploymentServiceImpl, applyServiceImpl)                                                                                                        // deployment ハンドラーを生成する
 
 	// ingress_route ハンドラーを DI 組み立てする

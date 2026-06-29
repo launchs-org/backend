@@ -20,8 +20,7 @@ import { IngressNode } from '@/components/flow/IngressNode'
 import { InternetNode } from '@/components/flow/InternetNode'
 import { VolumeNode } from '@/components/flow/VolumeNode'
 import { EnvVarNode } from '@/components/flow/EnvVarNode'
-import { get, post, del } from '@/lib/api'
-import { put } from '@/lib/api'
+import { get, post, put, del, patch } from '@/lib/api'
 import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar, VolumeMount, EnvVarMount, Build, ProjectQuota } from '@/lib/types'
 import { SIDEBAR_INITIAL_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, FLOW_ROW_HEIGHT } from '@/lib/config'
 import { toast } from 'sonner' // トースト通知をインポートする
@@ -93,6 +92,8 @@ export function ProjectDetailPage() {
   const [deleteProjectConfirmOpen, setDeleteProjectConfirmOpen] = useState(false) // プロジェクト削除確認ダイアログの表示フラグ
   const [deleteVolumeConfirmId, setDeleteVolumeConfirmId] = useState<string | null>(null) // ボリューム削除確認ダイアログ対象ID
   const [deleteEnvVarConfirmId, setDeleteEnvVarConfirmId] = useState<string | null>(null) // 環境変数削除確認ダイアログ対象ID
+  const [createIngressDialogOpen, setCreateIngressDialogOpen] = useState(false) // IngressRoute作成ダイアログの表示フラグ
+  const [createIngressNameInput, setCreateIngressNameInput] = useState('') // IngressRoute作成時の名前入力値
   const sidebarWidth = useRef(SIDEBAR_INITIAL_WIDTH) // サイドバー幅（px）: re-render を避けるため ref で管理する
   const sidebarElRef = useRef<HTMLDivElement>(null) // サイドバー DOM 要素への参照
   const [isResizing, setIsResizing] = useState(false) // リサイズ中フラグ（iframe のイベント遮断に使う）
@@ -139,7 +140,7 @@ export function ProjectDetailPage() {
 
     // 各ノードの固定高さ（ノードコンポーネントの style.height と必ず一致させること）
     const SVC_H = 98   // Service ノード高さ
-    const ING_H = 104  // IngressRoute ノード高さ
+    const ING_H = 116  // IngressRoute ノード高さ
     const NET_H = 80   // Internet ノード高さ（h-20 固定）
 
     relations.forEach((relation, relationIndex) => {
@@ -437,11 +438,12 @@ export function ProjectDetailPage() {
     document.body.style.userSelect = 'none'
   }
 
-  const handleCreateIngressRoute = async () => {
+  const handleCreateIngressRoute = async (name?: string) => {
     if (!projectId) return
     setCreatingIngress(true) // 作成中フラグを立てる
     try {
-      const created = await post<IngressRoute>(`/projects/${projectId}/ingress-routes`) // IngressRouteを作成する
+      const body = name ? { name } : undefined // 名前が指定されている場合のみボディに含める
+      const created = await post<IngressRoute>(`/projects/${projectId}/ingress-routes`, body) // IngressRouteを作成する
       await fetchData() // データを再取得する
       if (created) {
         openIngressSidebar(created.id) // 作成した IngressRoute のサイドバーを開く
@@ -452,6 +454,27 @@ export function ProjectDetailPage() {
     } finally {
       setCreatingIngress(false) // 作成中フラグを下げる
     }
+  }
+
+  const handleOpenCreateIngressDialog = () => {
+    setCreateIngressNameInput('') // 名前入力をリセットする
+    setCreateIngressDialogOpen(true) // ダイアログを開く
+    tutorialPause() // ダイアログが開いている間はチュートリアルオーバーレイを非表示にする
+  }
+
+  const handleConfirmCreateIngress = async () => {
+    setCreateIngressDialogOpen(false) // ダイアログを閉じる
+    tutorialResume() // チュートリアルオーバーレイを再表示する
+    // チュートリアル中の ingress-menu ステップで作成した場合は次のステップに進む
+    if (tutorialIsActive && tutorialActualStep?.id === 'ingress-menu') {
+      tutorialAdvance() // ingress-overview ステップへ進む
+    }
+    await handleCreateIngressRoute(createIngressNameInput.trim() || undefined) // 名前を渡して作成する
+  }
+
+  const handleCancelCreateIngressDialog = () => {
+    setCreateIngressDialogOpen(false) // ダイアログを閉じる
+    tutorialResume() // チュートリアルオーバーレイを再表示する
   }
 
   const handleDeleteProject = async () => {
@@ -560,7 +583,7 @@ export function ProjectDetailPage() {
                     data-tutorial="tutorial-add-ingress-menu"
                     onClick={() => {
                       setShowAddMenu(false)
-                      void handleCreateIngressRoute() // 常に新規作成する（複数作成可能）
+                      handleOpenCreateIngressDialog() // 名前入力ダイアログを開く
                     }}
                     disabled={creatingIngress}
                     className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-[#111827] hover:bg-gray-50 transition-colors disabled:opacity-50"
@@ -700,7 +723,7 @@ export function ProjectDetailPage() {
                   pathRulesByIngressRouteId={pathRulesByIngressRouteId}
                   selectedIngressRouteId={selectedIngressRouteId}
                   onSelect={openIngressSidebar}
-                  onCreateIngress={handleCreateIngressRoute}
+                  onCreateIngress={handleOpenCreateIngressDialog}
                   creatingIngress={creatingIngress}
                   onClose={() => setShowIngressListSidebar(false)}
                 />
@@ -948,6 +971,46 @@ export function ProjectDetailPage() {
         if (targetId) await handleDeleteEnvVar(targetId) // 環境変数を削除する
       }}
     />
+    {/* IngressRoute作成ダイアログ */}
+    {createIngressDialogOpen && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/40" onClick={handleCancelCreateIngressDialog} />
+        <div className="relative bg-white rounded-xl shadow-xl w-80 p-5 space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-sm font-semibold text-[#111827]">IngressRoute を作成</h2>
+            <p className="text-xs text-gray-500">名前を入力します（省略可）。省略するとプロジェクト名から自動生成されます。</p>
+          </div>
+          <div className="space-y-1">
+            <label className="block text-xs font-medium text-gray-500">名前（英小文字・数字・ハイフン、最大20文字）</label>
+            <input
+              type="text"
+              value={createIngressNameInput}
+              onChange={ev => setCreateIngressNameInput(ev.target.value)}
+              placeholder="my-api（省略可）"
+              maxLength={20}
+              className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#00C2D1]/50 focus:border-[#00C2D1] transition-colors"
+              autoFocus
+              onKeyDown={ev => { if (ev.key === 'Enter') void handleConfirmCreateIngress() }} // Enter で確定する
+            />
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={handleCancelCreateIngressDialog}
+              className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded hover:bg-gray-100 transition-colors"
+            >
+              キャンセル
+            </button>
+            <button
+              onClick={() => void handleConfirmCreateIngress()}
+              disabled={creatingIngress}
+              className="text-sm bg-[#111827] text-white px-4 py-1.5 rounded hover:bg-gray-800 transition-colors disabled:opacity-50"
+            >
+              {creatingIngress ? '作成中...' : '作成'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     </>
   )
 }
@@ -978,7 +1041,7 @@ function IngressRouteSidebar({
   const [deleting, setDeleting] = useState(false) // 削除中フラグ
   const [deleteIngressConfirmOpen, setDeleteIngressConfirmOpen] = useState(false) // IngressRoute削除確認ダイアログの表示フラグ
 
-  const hasPending = pathRules.some(pr => pr.status === 'pending' || pr.status === 'deleting') // 保留中の変更があるかどうか
+  const hasPending = !!ingressRoute.pending_name || pathRules.some(pr => pr.status === 'pending' || pr.status === 'deleting') // 保留中の変更があるかどうか
 
   const handleApply = async () => {
     setApplying(true) // apply 中フラグを立てる
@@ -1098,7 +1161,7 @@ function IngressRouteSidebar({
       {/* タブコンテンツ */}
       <div className="flex-1 overflow-y-auto">
         {activeTab === 'overview' && (
-          <IngressOverviewTab ingressRoute={ingressRoute} />
+          <IngressOverviewTab ingressRoute={ingressRoute} onRefresh={onRefresh} />
         )}
         {activeTab === 'paths' && (
           <IngressPathsTab
@@ -1129,8 +1192,11 @@ function IngressRouteSidebar({
 
 // ── 概要タブ ──────────────────────────────────────────────────
 
-function IngressOverviewTab({ ingressRoute }: { ingressRoute: IngressRoute }) {
+function IngressOverviewTab({ ingressRoute, onRefresh }: { ingressRoute: IngressRoute; onRefresh: () => Promise<void> }) {
   const [copied, setCopied] = useState(false) // コピー完了フラグ
+  const [editingName, setEditingName] = useState(false) // 名前編集モードフラグ
+  const [nameInput, setNameInput] = useState('') // 名前入力値
+  const [savingName, setSavingName] = useState(false) // 名前保存中フラグ
 
   const handleCopyHost = async () => {
     await navigator.clipboard.writeText(ingressRoute.host) // ホスト名をクリップボードにコピーする
@@ -1138,10 +1204,81 @@ function IngressOverviewTab({ ingressRoute }: { ingressRoute: IngressRoute }) {
     setTimeout(() => setCopied(false), 2000) // 2秒後にリセットする
   }
 
+  const handleStartEditName = () => {
+    setNameInput(ingressRoute.pending_name || ingressRoute.name) // 現在の名前をフォームに設定する
+    setEditingName(true) // 編集モードを開始する
+  }
+
+  const handleSaveName = async () => {
+    if (!nameInput.trim()) return
+    setSavingName(true) // 保存中フラグを立てる
+    try {
+      await patch(`/ingress-routes/${ingressRoute.id}/name`, { name: nameInput.trim() }) // 名前変更APIを呼び出す
+      await onRefresh() // データを再取得する
+      setEditingName(false) // 編集モードを終了する
+      toast.success('名前を変更しました。Apply すると反映されます。') // 成功トーストを表示する
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : '名前の変更に失敗しました') // エラートーストを表示する
+    } finally {
+      setSavingName(false) // 保存中フラグを下げる
+    }
+  }
+
   return (
     <div className="p-4 space-y-4">
       <div className="space-y-3">
         <Row label="ステータス"><StatusBadge status={ingressRoute.status} /></Row>
+
+        {/* 名前フィールド */}
+        <div className="flex items-start justify-between gap-4 text-sm">
+          <span className="text-gray-400 shrink-0">名前</span>
+          <div className="text-right min-w-0 flex-1">
+            {editingName ? (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={nameInput}
+                  onChange={ev => setNameInput(ev.target.value)}
+                  placeholder="my-api"
+                  maxLength={20}
+                  className="flex-1 min-w-0 rounded border border-gray-200 px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-[#00C2D1]"
+                  autoFocus
+                  onKeyDown={ev => { if (ev.key === 'Enter') void handleSaveName() }} // Enter で保存する
+                />
+                <button
+                  onClick={() => void handleSaveName()}
+                  disabled={savingName || !nameInput.trim()}
+                  className="text-[10px] bg-[#111827] text-white px-2 py-1 rounded hover:bg-gray-800 disabled:opacity-50 shrink-0"
+                >
+                  {savingName ? '...' : '保存'}
+                </button>
+                <button
+                  onClick={() => setEditingName(false)}
+                  className="text-[10px] text-gray-400 hover:text-gray-600 px-1 shrink-0"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1 justify-end">
+                <span className="font-mono text-sm text-[#111827] truncate">{ingressRoute.name || '(未設定)'}</span>
+                {ingressRoute.pending_name && (
+                  <span className="text-[10px] bg-amber-50 text-amber-600 border border-amber-200 px-1.5 py-0.5 rounded shrink-0">
+                    → {ingressRoute.pending_name}
+                  </span>
+                )}
+                <button
+                  onClick={handleStartEditName}
+                  className="p-1 rounded hover:bg-gray-200 text-gray-400 hover:text-gray-600 transition-colors shrink-0"
+                  title="名前を変更"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
         <Row label="ホスト">
           <div data-tutorial="tutorial-ingress-host" className="flex items-center gap-1 min-w-0">
             <span className="font-mono text-sm text-[#111827] truncate">{ingressRoute.host}</span>
@@ -1811,7 +1948,7 @@ function IngressListSidebar({
   pathRulesByIngressRouteId: Record<string, PathRule[]>
   selectedIngressRouteId: string | null
   onSelect: (ingressRouteId: string) => void
-  onCreateIngress: () => Promise<void>
+  onCreateIngress: () => void
   creatingIngress: boolean
   onClose: () => void
 }) {
@@ -1850,7 +1987,13 @@ function IngressListSidebar({
                 }`}
               >
                 <div className="min-w-0 flex-1 space-y-0.5">
-                  <p className="text-sm font-mono font-medium text-[#111827] truncate">{ingressRoute.host || '(ホスト未設定)'}</p>
+                  <p className="text-sm font-medium text-[#111827] truncate">
+                    {ingressRoute.name || '(名前未設定)'}
+                    {ingressRoute.pending_name && (
+                      <span className="ml-1 text-[10px] text-amber-500">({ingressRoute.pending_name}に変更予定)</span>
+                    )}
+                  </p>
+                  <p className="text-[10px] font-mono text-gray-400 truncate">{ingressRoute.host || '(ホスト未設定)'}</p>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={ingressRoute.status} />
                     {ruleCount > 0 && (
@@ -1868,7 +2011,7 @@ function IngressListSidebar({
       {/* フッター：新規作成ボタン */}
       <div className="shrink-0 border-t border-gray-100 p-3">
         <button
-          onClick={() => void onCreateIngress()} // 新規IngressRouteを作成する
+          onClick={onCreateIngress} // 名前入力ダイアログを開く
           disabled={creatingIngress}
           className="w-full flex items-center justify-center gap-1.5 bg-[#111827] text-white text-sm py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
         >

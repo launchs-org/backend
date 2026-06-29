@@ -41,21 +41,79 @@ func (ingressRouteHandler *IngressRouteHandler) ListIngressRoutes(echoCtx echo.C
 	return echoCtx.JSON(http.StatusOK, ingressRouteList) // ingress_route 一覧を返す
 }
 
+// CreateIngressRouteRequest は POST /projects/:id/ingress-route のリクエスト構造体
+type CreateIngressRouteRequest struct {
+	Name string `json:"name"` // IngressRoute の名前（省略時はプロジェクト名から自動生成）
+}
+
+// UpdateIngressRouteNameRequest は PATCH /ingress-routes/:id/name のリクエスト構造体
+type UpdateIngressRouteNameRequest struct {
+	Name string `json:"name"` // 変更後の名前
+}
+
 // CreateIngressRoute は POST /projects/:id/ingress-route のハンドラー
 func (ingressRouteHandler *IngressRouteHandler) CreateIngressRoute(echoCtx echo.Context) error {
 	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
 	projectID := echoCtx.Param("id")         // パスパラメータから project ID を取得する
 
-	ingressRouteData, err := ingressRouteHandler.ingressRouteService.CreateIngressRoute(echoCtx.Request().Context(), userID, projectID) // サービスを呼び出して ingress_route を作成する
-	if err != nil {                                                                                                                       // エラーが発生した場合
+	var requestBody CreateIngressRouteRequest                  // リクエストボディの構造体を定義する
+	if err := echoCtx.Bind(&requestBody); err != nil {        // リクエストをバインドする
+		logger.PrintHandlerError("IngressRouteHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusBadRequest, err)
+		return echoCtx.JSON(http.StatusBadRequest, map[string]string{"error": "リクエストが不正です"})
+	}
+
+	ingressRouteData, err := ingressRouteHandler.ingressRouteService.CreateIngressRoute(echoCtx.Request().Context(), userID, projectID, requestBody.Name) // サービスを呼び出して ingress_route を作成する
+	if err != nil {                                                                                                                                          // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
 			logger.PrintHandlerError("IngressRouteHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusForbidden, err)
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{"error": "アクセスが禁止されています"})
+		}
+		if errors.Is(err, service.ErrInvalidIngressRouteName) { // 名前が不正な場合は 400 を返す
+			logger.PrintHandlerError("IngressRouteHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusBadRequest, err)
+			return echoCtx.JSON(http.StatusBadRequest, map[string]string{"error": "名前は英小文字・数字・ハイフンのみ使用可能で、最大20文字です"})
+		}
+		if errors.Is(err, service.ErrDuplicateIngressRouteName) { // 同名が既に存在する場合は 409 を返す
+			logger.PrintHandlerError("IngressRouteHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusConflict, err)
+			return echoCtx.JSON(http.StatusConflict, map[string]string{"error": "同じ名前の IngressRoute がこのプロジェクトに既に存在します"})
 		}
 		logger.PrintHandlerError("IngressRouteHandler", "CreateIngressRoute", echoCtx.Request().URL.Path, http.StatusInternalServerError, err)
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{"error": "内部サーバーエラー"})
 	}
 	return echoCtx.JSON(http.StatusCreated, ingressRouteData) // 作成した ingress_route を返す
+}
+
+// UpdateIngressRouteName は PATCH /ingress-routes/:id/name のハンドラー
+func (ingressRouteHandler *IngressRouteHandler) UpdateIngressRouteName(echoCtx echo.Context) error {
+	userID := echoCtx.Get("UserID").(string)      // ミドルウェアがセットした UserID を取得する
+	ingressRouteID := echoCtx.Param("id")         // パスパラメータから ingress_route ID を取得する
+
+	var requestBody UpdateIngressRouteNameRequest              // リクエストボディの構造体を定義する
+	if err := echoCtx.Bind(&requestBody); err != nil {        // リクエストをバインドする
+		logger.PrintHandlerError("IngressRouteHandler", "UpdateIngressRouteName", echoCtx.Request().URL.Path, http.StatusBadRequest, err)
+		return echoCtx.JSON(http.StatusBadRequest, map[string]string{"error": "リクエストが不正です"})
+	}
+
+	if err := ingressRouteHandler.ingressRouteService.UpdateIngressRouteName(echoCtx.Request().Context(), userID, ingressRouteID, requestBody.Name); err != nil { // サービスを呼び出して名前を変更する
+		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("IngressRouteHandler", "UpdateIngressRouteName", echoCtx.Request().URL.Path, http.StatusForbidden, err)
+			return echoCtx.JSON(http.StatusForbidden, map[string]string{"error": "アクセスが禁止されています"})
+		}
+		if errors.Is(err, service.ErrInvalidIngressRouteName) { // 名前が不正な場合は 400 を返す
+			logger.PrintHandlerError("IngressRouteHandler", "UpdateIngressRouteName", echoCtx.Request().URL.Path, http.StatusBadRequest, err)
+			return echoCtx.JSON(http.StatusBadRequest, map[string]string{"error": "名前は英小文字・数字・ハイフンのみ使用可能で、最大20文字です"})
+		}
+		if errors.Is(err, service.ErrDuplicateIngressRouteName) { // 同名が既に存在する場合は 409 を返す
+			logger.PrintHandlerError("IngressRouteHandler", "UpdateIngressRouteName", echoCtx.Request().URL.Path, http.StatusConflict, err)
+			return echoCtx.JSON(http.StatusConflict, map[string]string{"error": "同じ名前の IngressRoute がこのプロジェクトに既に存在します"})
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) { // レコードが存在しない場合は 404 を返す
+			logger.PrintHandlerError("IngressRouteHandler", "UpdateIngressRouteName", echoCtx.Request().URL.Path, http.StatusNotFound, err)
+			return echoCtx.JSON(http.StatusNotFound, map[string]string{"error": "リソースが見つかりません"})
+		}
+		logger.PrintHandlerError("IngressRouteHandler", "UpdateIngressRouteName", echoCtx.Request().URL.Path, http.StatusInternalServerError, err)
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{"error": "内部サーバーエラー"})
+	}
+	return echoCtx.NoContent(http.StatusNoContent) // 204 No Content を返す
 }
 
 // DeleteIngressRoute は DELETE /ingress-routes/:id のハンドラー

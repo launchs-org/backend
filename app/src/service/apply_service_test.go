@@ -149,7 +149,7 @@ func TestApplyService_Apply_正常にapplyされk8sDeploymentが作成される(
 	projectRepo := repository.NewProjectRepository(db)           // project リポジトリを生成する
 	serviceRepo := repository.NewServiceRepository(db)           // service リポジトリを生成する
 	ingressRouteRepo := repository.NewIngressRouteRepository(db) // ingress_route リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	result, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil {
@@ -190,7 +190,7 @@ func TestApplyService_Apply_apply後にpendingフィールドが空になる(t *
 	projectRepo := repository.NewProjectRepository(db)           // project リポジトリを生成する
 	serviceRepo := repository.NewServiceRepository(db)           // service リポジトリを生成する
 	ingressRouteRepo := repository.NewIngressRouteRepository(db) // ingress_route リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil {
@@ -229,7 +229,7 @@ func TestApplyService_Apply_apply後にcurrent値が更新される(t *testing.T
 	projectRepo := repository.NewProjectRepository(db)           // project リポジトリを生成する
 	serviceRepo := repository.NewServiceRepository(db)           // service リポジトリを生成する
 	ingressRouteRepo := repository.NewIngressRouteRepository(db) // ingress_route リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil {
@@ -268,7 +268,7 @@ func TestApplyService_Apply_apply後にstatusがrunningappstatusがdeployingに�
 	projectRepo := repository.NewProjectRepository(db)           // project リポジトリを生成する
 	serviceRepo := repository.NewServiceRepository(db)           // service リポジトリを生成する
 	ingressRouteRepo := repository.NewIngressRouteRepository(db) // ingress_route リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil {
@@ -307,7 +307,7 @@ func TestApplyService_Apply_applyHistoryが1件作成される(t *testing.T) {
 	projectRepo := repository.NewProjectRepository(db)           // project リポジトリを生成する
 	serviceRepo := repository.NewServiceRepository(db)           // service リポジトリを生成する
 	ingressRouteRepo := repository.NewIngressRouteRepository(db) // ingress_route リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	result, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil {
@@ -518,7 +518,7 @@ func TestApplyService_Apply_k8sapply失敗時にapplyHistorystatusがfailedに�
 		return true, nil, errors.New("k8s update failed: simulated error") // エラーを返す
 	})
 
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentMock, applyHistoryMock, projectMock, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentMock, applyHistoryMock, projectMock, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する（失敗が期待される）
 	if err == nil { // エラーが返ることを確認する
@@ -553,7 +553,7 @@ func TestApplyService_Apply_k8sapply失敗時にpendingフィールドがその�
 
 	deploymentRepo := repository.NewDeploymentRepository(db)     // リポジトリを生成する
 	applyHistoryRepo := repository.NewApplyHistoryRepository(db) // apply_history リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectMock, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectMock, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する（失敗が期待される）
 	if err == nil { // エラーが返ることを確認する
@@ -610,7 +610,7 @@ func TestApplyService_ListApplyHistories_正常に履歴一覧が取得できる
 		historyList: expectedHistoryList,
 	}
 	projectRepo := repository.NewProjectRepository(db)                // project リポジトリを生成する
-	applyService := NewApplyService(db, nil, nil, deploymentRepo, applyHistoryRepo, projectRepo, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, nil, nil, deploymentRepo, applyHistoryRepo, projectRepo, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	historyList, err := applyService.ListApplyHistories(context.Background(), "test-user-id", deploymentData.ID) // 履歴一覧を取得する
 	if err != nil {
@@ -630,7 +630,7 @@ func TestApplyService_ListApplyHistories_他ユーザーのdeploymentはErrForbi
 	deploymentRepo := repository.NewDeploymentRepository(db)          // リポジトリを生成する
 	applyHistoryRepo := &listApplyHistoriesMockRepository{}            // モックリポジトリを生成する
 	projectRepo := repository.NewProjectRepository(db)                // project リポジトリを生成する
-	applyService := NewApplyService(db, nil, nil, deploymentRepo, applyHistoryRepo, projectRepo, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, nil, nil, deploymentRepo, applyHistoryRepo, projectRepo, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.ListApplyHistories(context.Background(), "other-user-id", deploymentData.ID) // 別ユーザーで取得する
 	if !errors.Is(err, ErrForbidden) { // ErrForbidden が返ることを確認する
@@ -645,7 +645,7 @@ func TestApplyService_ListApplyHistories_存在しないdeploymentはエラー�
 	deploymentRepo := repository.NewDeploymentRepository(db)          // リポジトリを生成する
 	applyHistoryRepo := &listApplyHistoriesMockRepository{}            // モックリポジトリを生成する
 	projectRepo := repository.NewProjectRepository(db)                // project リポジトリを生成する
-	applyService := NewApplyService(db, nil, nil, deploymentRepo, applyHistoryRepo, projectRepo, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, nil, nil, deploymentRepo, applyHistoryRepo, projectRepo, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.ListApplyHistories(context.Background(), "test-user-id", "non-existent-id") // 存在しない ID で取得する
 	if err == nil { // エラーが返ることを確認する
@@ -681,7 +681,7 @@ func TestApplyService_Apply_applyでk8sServiceが作成される(t *testing.T) {
 	projectRepo := repository.NewProjectRepository(db)              // project リポジトリを生成する
 	serviceRepo := repository.NewServiceRepository(db)              // service リポジトリを生成する
 	ingressRouteRepo := repository.NewIngressRouteRepository(db)    // ingress_route リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil {
@@ -729,7 +729,7 @@ func TestApplyService_Apply_apply後にServiceのpendingフィールドがクリ
 	projectRepo := repository.NewProjectRepository(db)              // project リポジトリを生成する
 	serviceRepo := repository.NewServiceRepository(db)              // service リポジトリを生成する
 	ingressRouteRepo := repository.NewIngressRouteRepository(db)    // ingress_route リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil {
@@ -769,7 +769,7 @@ func TestApplyService_Apply_Serviceがない場合でもapplyが成功する(t *
 	projectRepo := repository.NewProjectRepository(db)              // project リポジトリを生成する
 	serviceRepo := repository.NewServiceRepository(db)              // service リポジトリを生成する
 	ingressRouteRepo := repository.NewIngressRouteRepository(db)    // ingress_route リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil {                                                  // エラーが返らないことを確認する
@@ -812,7 +812,7 @@ func TestApplyService_Apply_k8sService失敗時にapplyHistoryがfailedになる
 		return true, nil, errors.New("k8s service create failed: simulated error") // k8s Service 作成をエラーにする
 	})
 
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentMock, applyHistoryMock, projectMock, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentMock, applyHistoryMock, projectMock, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する（失敗が期待される）
 	if err == nil {                                                  // エラーが返ることを確認する
@@ -883,7 +883,7 @@ func TestApplyService_Apply_applyでConfigMapとSecretが作成される(t *test
 	ingressRouteRepo := repository.NewIngressRouteRepository(db)        // ingress_route リポジトリを生成する
 	envVarRepo := repository.NewEnvVarRepository(db)                    // env_var リポジトリを生成する
 	envVarMountRepo := repository.NewEnvVarMountRepository(db)          // env_var_mount リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), envVarRepo, envVarMountRepo, repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), envVarRepo, envVarMountRepo, repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil {
@@ -938,7 +938,7 @@ func TestApplyService_Apply_DeploymentのenvFromにConfigMapとSecretが設定�
 	ingressRouteRepo := repository.NewIngressRouteRepository(db)        // ingress_route リポジトリを生成する
 	envVarRepo := repository.NewEnvVarRepository(db)                    // env_var リポジトリを生成する
 	envVarMountRepo := repository.NewEnvVarMountRepository(db)          // env_var_mount リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), envVarRepo, envVarMountRepo, repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), envVarRepo, envVarMountRepo, repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil {
@@ -1082,7 +1082,7 @@ func TestApplyService_Apply_重複キーが存在する場合applyがエラー�
 	}
 
 	fakeK8sClient := fake.NewSimpleClientset()                       // fake k8s クライアントを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentMock, applyHistoryMockRepo, projectMock, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), envVarMock, envVarMountMock, repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentMock, applyHistoryMockRepo, projectMock, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), envVarMock, envVarMountMock, repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する（失敗が期待される）
 	if err == nil { // エラーが返ることを確認する
@@ -1121,7 +1121,7 @@ func TestApplyService_Apply_ConfigMapのみの場合も正常にapplyできる(t
 	ingressRouteRepo := repository.NewIngressRouteRepository(db)         // ingress_route リポジトリを生成する
 	envVarRepo := repository.NewEnvVarRepository(db)                     // env_var リポジトリを生成する
 	envVarMountRepo := repository.NewEnvVarMountRepository(db)           // env_var_mount リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), envVarRepo, envVarMountRepo, repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), envVarRepo, envVarMountRepo, repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil { // エラーが返らないことを確認する
@@ -1170,7 +1170,7 @@ func TestApplyService_Apply_Secretのみの場合も正常にapplyできる(t *t
 	ingressRouteRepo := repository.NewIngressRouteRepository(db)         // ingress_route リポジトリを生成する
 	envVarRepo := repository.NewEnvVarRepository(db)                     // env_var リポジトリを生成する
 	envVarMountRepo := repository.NewEnvVarMountRepository(db)           // env_var_mount リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), envVarRepo, envVarMountRepo, repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), envVarRepo, envVarMountRepo, repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil { // エラーが返らないことを確認する
@@ -1249,7 +1249,7 @@ func TestApplyService_Apply_applyでPVCが作成される(t *testing.T) {
 	ingressRouteRepo := repository.NewIngressRouteRepository(db)       // ingress_route リポジトリを生成する
 	volumeRepo := repository.NewVolumeRepository(db)                   // volume リポジトリを生成する
 	volumeMountRepo := repository.NewVolumeMountRepository(db)         // volume_mount リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), volumeRepo, volumeMountRepo, &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), volumeRepo, volumeMountRepo, &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil {
@@ -1287,7 +1287,7 @@ func TestApplyService_Apply_applyでDeploymentのvolumeMountsが設定される(
 	ingressRouteRepo := repository.NewIngressRouteRepository(db)       // ingress_route リポジトリを生成する
 	volumeRepo := repository.NewVolumeRepository(db)                   // volume リポジトリを生成する
 	volumeMountRepo := repository.NewVolumeMountRepository(db)         // volume_mount リポジトリを生成する
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), volumeRepo, volumeMountRepo, &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), volumeRepo, volumeMountRepo, &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する
 	if err != nil {
@@ -1355,7 +1355,7 @@ func TestApplyService_Apply_PVC作成失敗時にapplyHistoryがfailedになる(
 		return true, nil, errors.New("k8s pvc create failed: simulated error") // PVC 作成をエラーにする
 	})
 
-	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentMock, applyHistoryMockRepo, projectMock, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}) // サービスを生成する
+	applyService := NewApplyService(db, fakeK8sClient, nil, deploymentMock, applyHistoryMockRepo, projectMock, repository.NewServiceRepository(db), repository.NewIngressRouteRepository(db), repository.NewPathRuleRepository(db), repository.NewEnvVarRepository(db), repository.NewEnvVarMountRepository(db), repository.NewVolumeRepository(db), repository.NewVolumeMountRepository(db), &noopUserQuotaRepository{}, "") // サービスを生成する
 
 	_, err := applyService.Apply(context.Background(), "test-user-id", deploymentData.ID) // apply を実行する（失敗が期待される）
 	if err == nil { // エラーが返ることを確認する

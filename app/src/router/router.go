@@ -89,6 +89,7 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.GET("/projects/:id/ingress-routes", opts.IngressRouteHandler.ListIngressRoutes)                                // ingress-route 一覧取得エンドポイント
 	apiGroup.POST("/projects/:id/ingress-routes", opts.IngressRouteHandler.CreateIngressRoute)                              // ingress-route 作成エンドポイント
 	apiGroup.DELETE("/ingress-routes/:id", opts.IngressRouteHandler.DeleteIngressRoute)                                     // ingress-route 削除エンドポイント
+	apiGroup.PATCH("/ingress-routes/:id/name", opts.IngressRouteHandler.UpdateIngressRouteName)                             // ingress-route 名前変更エンドポイント
 	apiGroup.POST("/projects/:id/apply", opts.IngressRouteHandler.ApplyProject)                                             // project 単位 IngressRoute apply エンドポイント
 	apiGroup.GET("/ingress-routes/:id/path-rules", opts.IngressRouteHandler.ListPathRules)                                  // path-rule 一覧取得エンドポイント
 	apiGroup.POST("/ingress-routes/:id/path-rules", opts.IngressRouteHandler.CreatePathRule)                                // path-rule 作成エンドポイント

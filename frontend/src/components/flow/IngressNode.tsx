@@ -18,7 +18,7 @@ export function IngressNode({ data }: NodeProps) {
     <div
       onClick={onSelect} // クリックでサイドバーを開く
       className="bg-white rounded-xl shadow-md w-56 cursor-pointer hover:shadow-lg transition-all overflow-hidden border border-gray-100"
-      style={{ borderTopColor: '#7C3AED', borderTopWidth: 3, height: 104 }}
+      style={{ borderTopColor: '#7C3AED', borderTopWidth: 3, height: 116 }}
     >
       <Handle type="target" position={Position.Left} style={{ opacity: 0, top: '50%' }} /> {/* Internet からの接続を受け取る */}
       <Handle type="source" position={Position.Right} style={{ opacity: 0, top: '50%' }} /> {/* Service へ接続する */}
@@ -34,9 +34,12 @@ export function IngressNode({ data }: NodeProps) {
         </div>
       </div>
 
-      {/* ホスト名 */}
+      {/* 名前・ホスト名 */}
       <div className="px-3 pb-2">
-        <p className="text-xs font-mono font-semibold text-gray-800 truncate" title={ingress.host}>
+        <p className="text-xs font-semibold text-gray-800 truncate" title={ingress.name}>
+          {ingress.name || '(名前未設定)'}
+        </p>
+        <p className="text-[10px] font-mono text-gray-400 truncate" title={ingress.host}>
           {ingress.host}
         </p>
       </div>

@@ -114,6 +114,8 @@ export type IngressStatus = 'pending' | 'active' | 'deleting'
 export type IngressRoute = {
   id: string
   project_id: string
+  name: string
+  pending_name: string
   host: string
   status: IngressStatus
   k8s_status: Record<string, unknown> | null

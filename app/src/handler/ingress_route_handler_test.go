@@ -17,20 +17,25 @@ import (
 
 // mockIngressRouteService は IngressRouteService のテスト用モック実装
 type mockIngressRouteService struct {
-	listIngressRoutesFunc  func(ctx context.Context, userID string, projectID string) ([]*models.IngressRoute, error)
-	createIngressRouteFunc func(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error)
-	deleteIngressRouteFunc func(ctx context.Context, userID string, ingressRouteID string) error
-	listPathRulesFunc      func(ctx context.Context, userID string, ingressRouteID string) ([]*models.PathRule, error)
-	createPathRuleFunc     func(ctx context.Context, userID string, ingressRouteID string, req service.CreatePathRuleRequest) (*models.PathRule, error)
-	deletePathRuleFunc     func(ctx context.Context, userID string, pathRuleID string) error
+	listIngressRoutesFunc      func(ctx context.Context, userID string, projectID string) ([]*models.IngressRoute, error)
+	createIngressRouteFunc     func(ctx context.Context, userID string, projectID string, name string) (*models.IngressRoute, error)
+	updateIngressRouteNameFunc func(ctx context.Context, userID string, ingressRouteID string, newName string) error
+	deleteIngressRouteFunc     func(ctx context.Context, userID string, ingressRouteID string) error
+	listPathRulesFunc          func(ctx context.Context, userID string, ingressRouteID string) ([]*models.PathRule, error)
+	createPathRuleFunc         func(ctx context.Context, userID string, ingressRouteID string, req service.CreatePathRuleRequest) (*models.PathRule, error)
+	deletePathRuleFunc         func(ctx context.Context, userID string, pathRuleID string) error
 }
 
 func (mock *mockIngressRouteService) ListIngressRoutes(ctx context.Context, userID string, projectID string) ([]*models.IngressRoute, error) {
 	return mock.listIngressRoutesFunc(ctx, userID, projectID) // モック関数を呼び出す
 }
 
-func (mock *mockIngressRouteService) CreateIngressRoute(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error) {
-	return mock.createIngressRouteFunc(ctx, userID, projectID) // モック関数を呼び出す
+func (mock *mockIngressRouteService) CreateIngressRoute(ctx context.Context, userID string, projectID string, name string) (*models.IngressRoute, error) {
+	return mock.createIngressRouteFunc(ctx, userID, projectID, name) // モック関数を呼び出す
+}
+
+func (mock *mockIngressRouteService) UpdateIngressRouteName(ctx context.Context, userID string, ingressRouteID string, newName string) error {
+	return mock.updateIngressRouteNameFunc(ctx, userID, ingressRouteID, newName) // モック関数を呼び出す
 }
 
 func (mock *mockIngressRouteService) DeleteIngressRoute(ctx context.Context, userID string, ingressRouteID string) error {
@@ -153,7 +158,7 @@ func TestIngressRouteHandler_CreateIngressRoute_正常に作成される(t *test
 	}
 
 	mockSvc := &mockIngressRouteService{
-		createIngressRouteFunc: func(ctx context.Context, userID string, projectID string) (*models.IngressRoute, error) {
+		createIngressRouteFunc: func(ctx context.Context, userID string, projectID string, name string) (*models.IngressRoute, error) {
 			return expectedIngressRoute, nil // 作成した ingress_route を返す
 		},
 	}

@@ -206,7 +206,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     page: '/projects/:id',
     track: 'basic',
     title: '「IngressRoute」を選択してください',
-    body: 'メニューから「IngressRoute」をクリックすると、外部公開用のURLが自動で作成され、設定サイドバーが開きます。',
+    body: 'メニューから「IngressRoute」をクリックすると名前入力ダイアログが開きます。名前は省略してもプロジェクト名から自動生成されます。ダイアログで「作成」を押してください。',
     autoAdvanceOnAppear: true,
   },
   {
@@ -216,7 +216,7 @@ export const TUTORIAL_STEPS: TutorialStep[] = [
     page: '/projects/:id',
     track: 'basic',
     title: 'IngressRoute が作成されました',
-    body: 'ホスト名が自動で割り当てられました。このURLがアプリの外部公開アドレスになります。次はパスルールを設定して、どのデプロイメントにトラフィックを転送するか指定します。',
+    body: '名前とホスト名が自動で割り当てられました。ホスト名がアプリの外部公開アドレスです。名前は「概要」タブで後から変更できます（Apply 時に反映）。次はパスルールを設定します。',
   },
   {
     id: 'ingress-paths-tab',

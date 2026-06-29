@@ -17,6 +17,8 @@ type IngressRouteRepository interface {
 	Update(ctx context.Context, tx *gorm.DB, ingressRoute *models.IngressRoute) error                                                       // ingress_route を更新する
 	UpdateStatus(ctx context.Context, ingressRouteID string, status models.IngressRouteStatus, k8sStatus datatypes.JSON) error              // ingress_route の status と k8s_status を更新する
 	Delete(ctx context.Context, tx *gorm.DB, ingressRouteID string) error                                                                   // ingress_route を削除する
+	ExistsByHost(ctx context.Context, tx *gorm.DB, host string) (bool, error)                                                               // ホスト名がすでに存在するか確認する（グローバル衝突チェック用）
+	ExistsByNameInProject(ctx context.Context, tx *gorm.DB, projectID string, name string) (bool, error)                                    // プロジェクト内で同一名が存在するか確認する
 }
 
 // ingressRouteRepositoryImpl は IngressRouteRepository の GORM 実装
@@ -87,6 +89,34 @@ func (repo *ingressRouteRepositoryImpl) UpdateStatus(ctx context.Context, ingres
 		return gorm.ErrRecordNotFound // レコードなしエラーを返す
 	}
 	return nil // 正常終了
+}
+
+// ExistsByHost はホスト名がすでに登録されているか確認する
+func (repo *ingressRouteRepositoryImpl) ExistsByHost(ctx context.Context, tx *gorm.DB, host string) (bool, error) {
+	db := repo.db  // デフォルトは repo の db を使う
+	if tx != nil { // トランザクションが渡された場合はそちらを使う
+		db = tx
+	}
+	var count int64                                                              // レコード件数を格納する変数を定義する
+	err := db.WithContext(ctx).Model(&models.IngressRoute{}).Where("host = ?", host).Count(&count).Error // ホスト名が一致するレコード数を取得する
+	if err != nil {                                                              // エラーが発生した場合
+		return false, err // エラーを返す
+	}
+	return count > 0, nil // 存在する場合は true を返す
+}
+
+// ExistsByNameInProject はプロジェクト内に同一名の ingress_route が存在するか確認する
+func (repo *ingressRouteRepositoryImpl) ExistsByNameInProject(ctx context.Context, tx *gorm.DB, projectID string, name string) (bool, error) {
+	db := repo.db  // デフォルトは repo の db を使う
+	if tx != nil { // トランザクションが渡された場合はそちらを使う
+		db = tx
+	}
+	var count int64                                                                                                                                    // レコード件数を格納する変数を定義する
+	err := db.WithContext(ctx).Model(&models.IngressRoute{}).Where("project_id = ? AND name = ?", projectID, name).Count(&count).Error // プロジェクト内で同一名のレコード数を取得する
+	if err != nil {                                                                                                                                    // エラーが発生した場合
+		return false, err // エラーを返す
+	}
+	return count > 0, nil // 存在する場合は true を返す
 }
 
 // Delete は ingressRouteID に対応する ingress_route レコードを削除する

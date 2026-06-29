@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"gorm.io/gorm"
@@ -51,6 +52,7 @@ type ApplyService struct {
 	VolumeRepo         repository.VolumeRepository         // volume リポジトリ
 	VolumeMountRepo    repository.VolumeMountRepository    // volume_mount リポジトリ
 	UserQuotaRepo      repository.UserQuotaRepository      // user_quota リポジトリ（Quotaチェック用）
+	BaseDomain         string                              // ホスト再生成に使うベースドメイン
 }
 
 // ApplyResult は Apply 処理の結果を表す構造体
@@ -76,6 +78,7 @@ func NewApplyService(
 	volumeRepo repository.VolumeRepository,
 	volumeMountRepo repository.VolumeMountRepository,
 	userQuotaRepo repository.UserQuotaRepository,
+	baseDomain string,
 ) *ApplyService {
 	return &ApplyService{ // 依存を注入して返す
 		DB:                db,
@@ -92,6 +95,7 @@ func NewApplyService(
 		VolumeRepo:        volumeRepo,
 		VolumeMountRepo:   volumeMountRepo,
 		UserQuotaRepo:     userQuotaRepo,   // user_quota リポジトリを注入する
+		BaseDomain:        baseDomain,      // ベースドメインを注入する
 	}
 }
 
@@ -508,6 +512,24 @@ func (applyService *ApplyService) applySingleIngressRoute(ctx context.Context, n
 		return nil // 削除完了
 	}
 
+	// PendingName が設定されている場合はホスト名を再生成して昇格する
+	if ingressRouteData.PendingName != "" {
+		baseDomain := applyService.BaseDomain          // ベースドメインを取得する
+		if baseDomain == "" {                          // 環境変数が未設定の場合はフォールバックする
+			baseDomain = os.Getenv("BASE_DOMAIN")
+		}
+		newHost, newHostErr := generateUniqueHostForApply(ctx, applyService.IngressRouteRepo, ingressRouteData.PendingName, baseDomain) // 新ホスト名を生成する
+		if newHostErr != nil {
+			return fmt.Errorf("ホスト名の再生成に失敗しました: %w", newHostErr) // 生成エラーを返す
+		}
+		ingressRouteData.Name = ingressRouteData.PendingName // 名前を昇格する
+		ingressRouteData.Host = newHost                      // ホスト名を更新する
+		ingressRouteData.PendingName = ""                    // pending をクリアする
+		if updateErr := applyService.IngressRouteRepo.Update(ctx, nil, ingressRouteData); updateErr != nil { // DB に保存する
+			return fmt.Errorf("ingress_route 名前昇格の保存に失敗しました: %w", updateErr) // 保存エラーを返す
+		}
+	}
+
 	pathRuleList, err := applyService.PathRuleRepo.FindActiveAndPendingByIngressRouteID(ctx, ingressRouteData.ID) // active/pending の PathRule 一覧を取得する
 	if err != nil {
 		return fmt.Errorf("path_rule 一覧の取得に失敗しました: %w", err) // 取得エラーを返す
@@ -578,6 +600,25 @@ func (applyService *ApplyService) applySingleIngressRoute(ctx context.Context, n
 	}
 
 	return nil // 正常終了
+}
+
+// generateUniqueHostForApply は apply.go 内でホスト衝突チェック付きの新ホスト名を生成するパッケージレベル関数
+func generateUniqueHostForApply(ctx context.Context, ingressRouteRepo repository.IngressRouteRepository, name string, baseDomain string) (string, error) {
+	for retryIndex := 0; retryIndex < 5; retryIndex++ { // 最大5回リトライする
+		suffix, suffixErr := generateRandomSuffix(8) // 8文字のランダムサフィックスを生成する
+		if suffixErr != nil {
+			return "", suffixErr // 生成エラーを返す
+		}
+		host := fmt.Sprintf("%s-%s.%s", name, suffix, baseDomain) // {name}-{suffix}.{baseDomain} 形式でホストを生成する
+		exists, existsErr := ingressRouteRepo.ExistsByHost(ctx, nil, host) // ホストの重複チェック
+		if existsErr != nil {
+			return "", existsErr // 確認エラーを返す
+		}
+		if !exists { // 重複なしの場合は生成したホストを返す
+			return host, nil
+		}
+	}
+	return "", fmt.Errorf("ホスト名の生成に失敗しました（最大リトライ回数に達しました）") // リトライ上限に達した場合はエラーを返す
 }
 
 // ListApplyHistories は deploymentID に紐づく apply 履歴一覧を返す
