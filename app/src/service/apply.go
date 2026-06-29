@@ -3,6 +3,7 @@ package service
 import (
 	"app/k8s"
 	"app/k8s/manifest"
+	"app/logger"
 	"app/models"
 	"app/repository"
 	"context"
@@ -15,6 +16,7 @@ import (
 	k8sclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/dynamic"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ErrDuplicateEnvKey は apply 時に環境変数キーが重複している場合のエラー
@@ -95,7 +97,9 @@ func NewApplyService(
 
 // Apply は deployment に対して apply を実行する
 func (applyService *ApplyService) Apply(ctx context.Context, userID string, deploymentID string) (*ApplyResult, error) {
-	var applyResult *ApplyResult // 結果を格納する変数を定義する
+	var applyResult *ApplyResult        // 結果を格納する変数を定義する
+	var appliedServiceID string         // Apply した Service の ID（ClusterIP 同期に使う）
+	var appliedServiceNamespace string  // Apply した Service の Namespace（ClusterIP 同期に使う）
 
 	err := applyService.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error { // トランザクションを開始する
 		// 1. SELECT FOR UPDATE でロックを取得する
@@ -339,6 +343,8 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 					}
 					return fmt.Errorf("k8s service apply: %w", err) // k8s Service apply エラーを返す
 				}
+				appliedServiceID = serviceData.ID            // ClusterIP 同期のために Service ID を記録する
+				appliedServiceNamespace = projectData.Namespace // ClusterIP 同期のために Namespace を記録する
 			}
 			// pending_port=0 かつ status が deleting でない場合は変更なし → 何もしない
 		}
@@ -433,6 +439,18 @@ func (applyService *ApplyService) Apply(ctx context.Context, userID string, depl
 		}
 		return nil // トランザクションをコミットする
 	})
+
+	// トランザクション成功後に k8s から ClusterIP を取得して DB に同期する
+	// Watch イベントのタイミングによっては ClusterIP が反映されない場合があるため、Apply 直後に明示的に同期する
+	if err == nil && appliedServiceID != "" && appliedServiceNamespace != "" {
+		k8sServiceName := appliedServiceID + "-svc"                                                                                          // k8s Service 名を生成する
+		k8sSvc, getErr := applyService.K8s.CoreV1().Services(appliedServiceNamespace).Get(ctx, k8sServiceName, metav1.GetOptions{})          // k8s から Service を取得する
+		if getErr == nil && k8sSvc.Spec.ClusterIP != "" {                                                                                    // ClusterIP が割り当て済みの場合のみ保存する
+			if updateErr := applyService.ServiceRepo.UpdateClusterIP(ctx, appliedServiceID, k8sSvc.Spec.ClusterIP); updateErr != nil { // cluster_ip を DB に保存する
+				logger.PrintErr("Apply: cluster_ip 同期に失敗しました: " + updateErr.Error()) // エラーをログ出力する（非致命的）
+			}
+		}
+	}
 
 	return applyResult, err // 結果とエラーを返す
 }
