@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, X, GitBranch, GitCommit, Clock, CheckCircle2, XCircle, AlertCircle, Ban } from 'lucide-react'
 import { LogViewer } from '@/components/LogViewer'
 import { get, del } from '@/lib/api'
+import { toast } from 'sonner' // トースト通知をインポートする
 import type { Build, BuildLogsResponse, BuildStatus } from '@/lib/types'
 import { POLL_INTERVAL_NORMAL, POLL_INTERVAL_FAST } from '@/lib/config'
 
@@ -62,7 +63,7 @@ export function BuildLogPage() {
       navigate(-1) // 前のページへ戻る
     } catch (cancelError) {
       console.error(cancelError)
-      alert('キャンセルに失敗しました')
+      toast.error(cancelError instanceof Error ? cancelError.message : 'キャンセルに失敗しました') // エラーをトーストで表示する
     } finally {
       setCancelling(false)
     }

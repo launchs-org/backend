@@ -171,8 +171,11 @@ async function handleResponse<T>(res: Response): Promise<T> {
     if (res.status === 403 && json?.error === 'quota_exceeded') {
       throw new QuotaExceededApiError(json.resource, json.current, json.limit) // quota 超過エラーを専用クラスで throw する
     }
-    const err = json?.error ?? { code: 'UNKNOWN', message: `HTTP ${res.status}` }
-    throw new ApiError(err.code ?? 'UNKNOWN', err.message ?? String(res.status), res.status)
+    const errField = json?.error
+    // error フィールドが文字列の場合はそのままメッセージとして使う
+    const errMessage = typeof errField === 'string' ? errField : (errField?.message ?? `HTTP ${res.status}`)
+    const errCode = typeof errField === 'object' ? (errField?.code ?? 'UNKNOWN') : 'UNKNOWN'
+    throw new ApiError(errCode, errMessage, res.status)
   }
 
   return json as T // レスポンスデータを返す

@@ -24,6 +24,8 @@ import { get, post, del } from '@/lib/api'
 import { put } from '@/lib/api'
 import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar, VolumeMount, EnvVarMount, Build, ProjectQuota } from '@/lib/types'
 import { SIDEBAR_INITIAL_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, FLOW_ROW_HEIGHT } from '@/lib/config'
+import { toast } from 'sonner' // トースト通知をインポートする
+import { ConfirmDialog } from '@/components/ui/confirm-dialog' // 確認ダイアログをインポートする
 import { useTutorialContext } from '@/tutorial/TutorialContext' // チュートリアル Context をインポートする
 
 const NODE_TYPES = {
@@ -88,6 +90,9 @@ export function ProjectDetailPage() {
   const [projectQuota, setProjectQuota] = useState<ProjectQuota | null>(null) // Harborストレージクォータを管理する
   const [envVarList, setEnvVarList] = useState<EnvVar[]>([]) // プロジェクトの環境変数一覧を管理する
   const [deletingEnvVarId, setDeletingEnvVarId] = useState<string | null>(null) // 削除中の環境変数ID
+  const [deleteProjectConfirmOpen, setDeleteProjectConfirmOpen] = useState(false) // プロジェクト削除確認ダイアログの表示フラグ
+  const [deleteVolumeConfirmId, setDeleteVolumeConfirmId] = useState<string | null>(null) // ボリューム削除確認ダイアログ対象ID
+  const [deleteEnvVarConfirmId, setDeleteEnvVarConfirmId] = useState<string | null>(null) // 環境変数削除確認ダイアログ対象ID
   const sidebarWidth = useRef(SIDEBAR_INITIAL_WIDTH) // サイドバー幅（px）: re-render を避けるため ref で管理する
   const sidebarElRef = useRef<HTMLDivElement>(null) // サイドバー DOM 要素への参照
   const [isResizing, setIsResizing] = useState(false) // リサイズ中フラグ（iframe のイベント遮断に使う）
@@ -443,7 +448,7 @@ export function ProjectDetailPage() {
       }
     } catch (createError) {
       console.error(createError)
-      alert('IngressRouteの作成に失敗しました')
+      toast.error(createError instanceof Error ? createError.message : 'IngressRouteの作成に失敗しました') // エラートーストを表示する
     } finally {
       setCreatingIngress(false) // 作成中フラグを下げる
     }
@@ -451,43 +456,39 @@ export function ProjectDetailPage() {
 
   const handleDeleteProject = async () => {
     if (!projectId || !project) return
-    if (!confirm(`プロジェクト「${project.name}」を削除しますか？この操作は取り消せません。`)) return
-
-    setDeletingProject(true)
+    setDeletingProject(true) // 削除中フラグを立てる
     try {
       await del(`/projects/${projectId}`) // プロジェクトを削除する
       navigate('/') // ダッシュボードへ遷移する
     } catch (deleteError) {
       console.error(deleteError)
-      alert('プロジェクトの削除に失敗しました')
+      toast.error(deleteError instanceof Error ? deleteError.message : 'プロジェクトの削除に失敗しました') // エラートーストを表示する
     } finally {
       setDeletingProject(false)
     }
   }
 
   const handleDeleteVolume = async (volumeId: string) => {
-    if (!confirm('ボリュームを削除しますか？この操作は取り消せません。')) return
     setDeletingVolumeId(volumeId) // 削除中のボリュームIDを設定する
     try {
       await del(`/volumes/${volumeId}`) // ボリュームを削除する
       await fetchData() // データを再取得する
     } catch (deleteError) {
       console.error(deleteError)
-      alert('ボリュームの削除に失敗しました')
+      toast.error(deleteError instanceof Error ? deleteError.message : 'ボリュームの削除に失敗しました') // エラートーストを表示する
     } finally {
       setDeletingVolumeId(null) // 削除中フラグをリセットする
     }
   }
 
   const handleDeleteEnvVar = async (envVarId: string) => {
-    if (!confirm('環境変数を削除しますか？この操作は取り消せません。')) return
     setDeletingEnvVarId(envVarId) // 削除中の環境変数IDを設定する
     try {
       await del(`/env-vars/${envVarId}`) // 環境変数を削除する
       await fetchData() // データを再取得する
     } catch (deleteError) {
       console.error(deleteError)
-      alert('環境変数の削除に失敗しました')
+      toast.error(deleteError instanceof Error ? deleteError.message : '環境変数の削除に失敗しました') // エラートーストを表示する
     } finally {
       setDeletingEnvVarId(null) // 削除中フラグをリセットする
     }
@@ -527,6 +528,7 @@ export function ProjectDetailPage() {
   }
 
   return (
+    <>
     <Layout
       fullWidth
       breadcrumbs={[{ label: project?.name ?? '', sub: project?.namespace }]}
@@ -596,7 +598,7 @@ export function ProjectDetailPage() {
           </div>
 
           <button
-            onClick={() => void handleDeleteProject()}
+            onClick={() => setDeleteProjectConfirmOpen(true)} // プロジェクト削除確認ダイアログを開く
             disabled={deletingProject}
             className="flex items-center gap-1.5 text-red-500 text-sm px-3 py-1.5 rounded-md hover:bg-red-50 border border-red-200 transition-colors disabled:opacity-50"
           >
@@ -712,7 +714,7 @@ export function ProjectDetailPage() {
                   projectId={projectId!}
                   volumeList={volumeList}
                   deletingVolumeId={deletingVolumeId}
-                  onDelete={handleDeleteVolume}
+                  onDelete={async (volumeId: string) => { setDeleteVolumeConfirmId(volumeId) }} // 確認ダイアログを開く
                   onClose={() => setShowVolumeSidebar(false)}
                 />
               </div>
@@ -725,7 +727,7 @@ export function ProjectDetailPage() {
                   projectId={projectId!}
                   envVarList={envVarList}
                   deletingEnvVarId={deletingEnvVarId}
-                  onDelete={handleDeleteEnvVar}
+                  onDelete={async (envVarId: string) => { setDeleteEnvVarConfirmId(envVarId) }} // 確認ダイアログを開く
                   onRefresh={fetchData}
                   onClose={() => setShowEnvVarSidebar(false)}
                 />
@@ -902,6 +904,51 @@ export function ProjectDetailPage() {
       </div>
 
     </Layout>
+
+    {/* プロジェクト削除確認ダイアログ */}
+    <ConfirmDialog
+      open={deleteProjectConfirmOpen}
+      onOpenChange={setDeleteProjectConfirmOpen}
+      title="プロジェクトを削除"
+      description={`プロジェクト「${project?.name}」を削除しますか？\nこの操作は取り消せません。`}
+      confirmLabel="削除"
+      variant="destructive"
+      onConfirm={async () => {
+        setDeleteProjectConfirmOpen(false) // ダイアログを閉じる
+        await handleDeleteProject() // プロジェクトを削除する
+      }}
+    />
+
+    {/* ボリューム削除確認ダイアログ */}
+    <ConfirmDialog
+      open={deleteVolumeConfirmId !== null}
+      onOpenChange={open => { if (!open) setDeleteVolumeConfirmId(null) }} // ダイアログを閉じる
+      title="ボリュームを削除"
+      description="ボリュームを削除しますか？この操作は取り消せません。"
+      confirmLabel="削除"
+      variant="destructive"
+      onConfirm={async () => {
+        const targetId = deleteVolumeConfirmId // 削除対象IDを保持する
+        setDeleteVolumeConfirmId(null) // ダイアログを閉じる
+        if (targetId) await handleDeleteVolume(targetId) // ボリュームを削除する
+      }}
+    />
+
+    {/* 環境変数削除確認ダイアログ */}
+    <ConfirmDialog
+      open={deleteEnvVarConfirmId !== null}
+      onOpenChange={open => { if (!open) setDeleteEnvVarConfirmId(null) }} // ダイアログを閉じる
+      title="環境変数を削除"
+      description="環境変数を削除しますか？この操作は取り消せません。"
+      confirmLabel="削除"
+      variant="destructive"
+      onConfirm={async () => {
+        const targetId = deleteEnvVarConfirmId // 削除対象IDを保持する
+        setDeleteEnvVarConfirmId(null) // ダイアログを閉じる
+        if (targetId) await handleDeleteEnvVar(targetId) // 環境変数を削除する
+      }}
+    />
+    </>
   )
 }
 
@@ -929,6 +976,7 @@ function IngressRouteSidebar({
   const [activeTab, setActiveTab] = useState<IngressTab>('overview') // アクティブなタブを管理する
   const [applying, setApplying] = useState(false) // apply 中フラグ
   const [deleting, setDeleting] = useState(false) // 削除中フラグ
+  const [deleteIngressConfirmOpen, setDeleteIngressConfirmOpen] = useState(false) // IngressRoute削除確認ダイアログの表示フラグ
 
   const hasPending = pathRules.some(pr => pr.status === 'pending' || pr.status === 'deleting') // 保留中の変更があるかどうか
 
@@ -943,14 +991,13 @@ function IngressRouteSidebar({
       }
     } catch (applyError) {
       console.error(applyError)
-      alert('Apply に失敗しました')
+      toast.error(applyError instanceof Error ? applyError.message : 'Apply に失敗しました') // エラートーストを表示する
     } finally {
       setApplying(false) // apply 中フラグを下げる
     }
   }
 
   const handleDelete = async () => {
-    if (!confirm('IngressRoute を削除しますか？k8s からも即時削除されます。')) return
     setDeleting(true) // 削除中フラグを立てる
     try {
       await del(`/ingress-routes/${ingressRoute.id}`) // IngressRoute を deleting 状態にする
@@ -959,7 +1006,7 @@ function IngressRouteSidebar({
       onClose() // サイドバーを閉じる
     } catch (deleteError) {
       console.error(deleteError)
-      alert('IngressRoute の削除に失敗しました')
+      toast.error(deleteError instanceof Error ? deleteError.message : 'IngressRoute の削除に失敗しました') // エラートーストを表示する
     } finally {
       setDeleting(false) // 削除中フラグを下げる
     }
@@ -989,7 +1036,7 @@ function IngressRouteSidebar({
             {applying ? 'Apply中...' : 'Apply'}
           </button>
           <button
-            onClick={() => void handleDelete()}
+            onClick={() => setDeleteIngressConfirmOpen(true)} // IngressRoute削除確認ダイアログを開く
             disabled={deleting || ingressRoute.status === 'deleting'}
             className="flex items-center gap-1 text-xs px-2 py-1 rounded text-red-500 hover:bg-red-50 border border-red-200 transition-colors disabled:opacity-50"
           >
@@ -1062,6 +1109,20 @@ function IngressRouteSidebar({
           />
         )}
       </div>
+
+      {/* IngressRoute削除確認ダイアログ */}
+      <ConfirmDialog
+        open={deleteIngressConfirmOpen}
+        onOpenChange={setDeleteIngressConfirmOpen}
+        title="IngressRoute を削除"
+        description="IngressRoute を削除しますか？k8s からも即時削除されます。"
+        confirmLabel="削除"
+        variant="destructive"
+        onConfirm={async () => {
+          setDeleteIngressConfirmOpen(false) // ダイアログを閉じる
+          await handleDelete() // IngressRoute を削除する
+        }}
+      />
     </div>
   )
 }
@@ -1140,7 +1201,7 @@ function IngressPathsTab({
       await onRefresh() // データを再取得する
     } catch (deleteError) {
       console.error(deleteError)
-      alert('パスルールの削除に失敗しました')
+      toast.error(deleteError instanceof Error ? deleteError.message : 'パスルールの削除に失敗しました') // エラートーストを表示する
     } finally {
       setDeletingPathRuleId(null) // 削除中フラグをリセットする
     }
@@ -1165,7 +1226,7 @@ function IngressPathsTab({
       }
     } catch (addError) {
       console.error(addError)
-      alert('パスルールの追加に失敗しました')
+      toast.error(addError instanceof Error ? addError.message : 'パスルールの追加に失敗しました') // エラートーストを表示する
     } finally {
       setAddingPathRule(false) // 追加中フラグを下げる
     }
@@ -1304,7 +1365,7 @@ function EnvVarSidebar({
 
   const handleCopy = async (envVar: EnvVar) => {
     if (!envVar.value) { // 値が空（バックエンドがマスクして空を返す場合）はアラートを表示する
-      alert('値が取得できません（シークレット値はバックエンドによってマスクされています）')
+      toast.info('値が取得できません（シークレット値はバックエンドによってマスクされています）') // インフォトーストを表示する
       return
     }
     await navigator.clipboard.writeText(envVar.value) // クリップボードに書き込む
@@ -1328,7 +1389,7 @@ function EnvVarSidebar({
       if (tutorialActualStep?.id === 'adv-envvar-create') tutorialAdvance() // 環境変数作成後にチュートリアルを進める
     } catch (addError) {
       console.error(addError)
-      alert('環境変数の作成に失敗しました')
+      toast.error(addError instanceof Error ? addError.message : '環境変数の作成に失敗しました') // エラートーストを表示する
     } finally {
       setAdding(false) // 作成中フラグを下げる
     }
@@ -1347,7 +1408,7 @@ function EnvVarSidebar({
       await onRefresh() // 一覧を再取得する
     } catch (saveError) {
       console.error(saveError)
-      alert('環境変数の更新に失敗しました')
+      toast.error(saveError instanceof Error ? saveError.message : '環境変数の更新に失敗しました') // エラートーストを表示する
     } finally {
       setSavingId(null) // 保存中フラグをリセットする
     }
@@ -1565,7 +1626,7 @@ function VolumeSidebar({
       if (tutorialActualStep?.id === 'adv-storage-create') tutorialAdvance() // ボリューム作成後にチュートリアルを進める
     } catch (addError) {
       console.error(addError)
-      alert('ボリュームの作成に失敗しました')
+      toast.error(addError instanceof Error ? addError.message : 'ボリュームの作成に失敗しました') // エラートーストを表示する
     } finally {
       setAdding(false) // 作成中フラグを下げる
     }
@@ -1837,6 +1898,7 @@ function BuildSidebar({
   onDeployFromBuild: (imageUrl: string) => void
 }) {
   const [deletingBuildId, setDeletingBuildId] = useState<string | null>(null) // 削除中のビルド ID を管理する
+  const [deleteBuildConfirmId, setDeleteBuildConfirmId] = useState<string | null>(null) // ビルド削除確認ダイアログ対象ID
 
   const buildStatusColor: Record<string, string> = { // ビルドステータスに対応する色を定義する
     pending: 'bg-gray-100 text-gray-500',
@@ -1859,13 +1921,13 @@ function BuildSidebar({
   }
 
   const handleDeleteBuild = async (build: Build) => {
-    if (!window.confirm(`このビルドを削除しますか？\n\nHarbor 上のイメージも削除されます。`)) return // 削除確認ダイアログを表示する
     setDeletingBuildId(build.id) // 削除中フラグを立てる
     try {
       await del(`/projects/${projectId}/builds/${build.id}`) // DELETE API を呼び出す
       onBuildDeleted(build.id) // 親コンポーネントに削除を通知する
-    } catch {
-      alert('削除に失敗しました') // エラーを表示する
+    } catch (deleteBuildError) {
+      console.error(deleteBuildError)
+      toast.error(deleteBuildError instanceof Error ? deleteBuildError.message : '削除に失敗しました') // エラートーストを表示する
     } finally {
       setDeletingBuildId(null) // 削除中フラグを解除する
     }
@@ -1945,7 +2007,7 @@ function BuildSidebar({
                           : new Date(build.created_at).toLocaleString('ja-JP')}
                     </span>
                     <button
-                      onClick={() => handleDeleteBuild(build)}
+                      onClick={() => setDeleteBuildConfirmId(build.id)} // ビルド削除確認ダイアログを開く
                       disabled={deletingBuildId === build.id || build.status === 'pending' || build.status === 'building'}
                       className="p-1 rounded hover:bg-red-100 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                       title="ビルドを削除"
@@ -2010,6 +2072,21 @@ function BuildSidebar({
           </div>
         )}
       </div>
+
+      {/* ビルド削除確認ダイアログ */}
+      <ConfirmDialog
+        open={deleteBuildConfirmId !== null}
+        onOpenChange={open => { if (!open) setDeleteBuildConfirmId(null) }} // ダイアログを閉じる
+        title="ビルドを削除"
+        description={`このビルドを削除しますか？\nHarbor 上のイメージも削除されます。`}
+        confirmLabel="削除"
+        variant="destructive"
+        onConfirm={async () => {
+          const targetBuild = buildList.find(build => build.id === deleteBuildConfirmId) // 削除対象ビルドを取得する
+          setDeleteBuildConfirmId(null) // ダイアログを閉じる
+          if (targetBuild) await handleDeleteBuild(targetBuild) // ビルドを削除する
+        }}
+      />
     </div>
   )
 }

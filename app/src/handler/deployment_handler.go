@@ -377,7 +377,7 @@ func (deploymentHandler *DeploymentHandler) ApplyDeployment(echoCtx echo.Context
 		}
 		logger.PrintHandlerError("DeploymentHandler", "ApplyDeployment", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "内部サーバーエラー",
+			"error": err.Error(),
 		})
 	}
 	return echoCtx.JSON(http.StatusOK, applyResult) // apply 結果を返す

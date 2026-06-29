@@ -34,6 +34,8 @@ import {
   GITHUB_COMMIT_MESSAGE_MAX_LENGTH,
 } from '@/lib/config'
 import { useTutorialContext } from '@/tutorial/TutorialContext' // チュートリアル Context をインポートする
+import { toast } from 'sonner' // トースト通知をインポートする
+import { ConfirmDialog } from '@/components/ui/confirm-dialog' // 確認ダイアログをインポートする
 
 type Tab = 'overview' | 'logs' | 'builds' | 'settings' | 'networking' | 'env-vars' | 'volumes' | 'history' | 'metrics'
 
@@ -64,6 +66,7 @@ export function DeploymentDetailPage() {
   const [allPendingItems, setAllPendingItems] = useState<PendingItem[]>([]) // 全pending項目を管理する
   const [discardingLabel, setDiscardingLabel] = useState<string | null>(null) // 取り消し中の項目ラベル
   const [fastPolling, setFastPolling] = useState(false) // 高速ポーリングフラグ（操作後に有効化する）
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false) // デプロイメント削除確認ダイアログの開閉を管理する
 
   const fetchDeployment = useCallback(async () => {
     if (!deploymentId) return
@@ -168,7 +171,7 @@ export function DeploymentDetailPage() {
       await Promise.all([fetchDeployment(), fetchAllPending()]) // 取り消し後に全データを再取得する
     } catch (discardError) {
       console.error(discardError)
-      alert('取り消しに失敗しました')
+      toast.error(discardError instanceof Error ? discardError.message : '取り消しに失敗しました') // エラーをトーストで表示する
     } finally {
       setDiscardingLabel(null) // 取り消し中フラグをリセットする
     }
@@ -187,29 +190,16 @@ export function DeploymentDetailPage() {
       }
     } catch (applyError) {
       console.error(applyError)
-      alert('Apply に失敗しました')
+      toast.error(applyError instanceof Error ? applyError.message : 'Apply に失敗しました') // エラーをトーストで表示する
     } finally {
       setApplying(false)
       setTimeout(() => setFastPolling(false), FAST_POLL_DURATION) // 一定時間後に通常ポーリングへ戻す
     }
   }
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!deploymentId || !deployment) return
-    if (!confirm(`「${deployment.name}」を削除しますか？この操作は取り消せません。`)) return
-
-    setDeleting(true)
-    setFastPolling(true) // 削除後はポーリングを高速化する
-    try {
-      await del(`/deployments/${deploymentId}`) // デプロイメントを削除する
-      setDeleted(true) // 削除完了画面を表示する（navigate しない）
-    } catch (deleteError) {
-      console.error(deleteError)
-      alert('削除に失敗しました')
-      setFastPolling(false)
-    } finally {
-      setDeleting(false)
-    }
+    setDeleteConfirmOpen(true) // 削除確認ダイアログを開く
   }
 
   // type によって表示するタブを決定する
@@ -437,6 +427,29 @@ export function DeploymentDetailPage() {
           {activeTab === 'metrics' && <MetricsTab deploymentId={deploymentId!} />}
         </div>
       </div>
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        onOpenChange={setDeleteConfirmOpen}
+        title="デプロイメントを削除"
+        description={`「${deployment?.name}」を削除しますか？\nこの操作は取り消せません。`}
+        confirmLabel="削除"
+        variant="destructive"
+        onConfirm={async () => {
+          setDeleteConfirmOpen(false) // ダイアログを閉じる
+          setDeleting(true) // 削除中フラグを立てる
+          setFastPolling(true) // 削除後はポーリングを高速化する
+          try {
+            await del(`/deployments/${deploymentId}`) // デプロイメントを削除する
+            setDeleted(true) // 削除完了画面を表示する（navigate しない）
+          } catch (deleteError) {
+            console.error(deleteError)
+            toast.error(deleteError instanceof Error ? deleteError.message : '削除に失敗しました') // エラーをトーストで表示する
+            setFastPolling(false)
+          } finally {
+            setDeleting(false) // 削除中フラグを下げる
+          }
+        }}
+      />
     </Layout>
   )
 }
@@ -678,7 +691,7 @@ function BuildsTab({
       navigate(`/builds/${result.id}/logs`) // ビルドログページへ遷移する
     } catch (buildError) {
       console.error(buildError)
-      alert('ビルドの開始に失敗しました')
+      toast.error(buildError instanceof Error ? buildError.message : 'ビルドの開始に失敗しました') // エラーをトーストで表示する
     } finally {
       setBuilding(false)
     }
@@ -693,7 +706,7 @@ function BuildsTab({
       await fetchBuilds() // 一覧を即座に更新する
     } catch (cancelError) {
       console.error(cancelError)
-      alert('キャンセルに失敗しました')
+      toast.error(cancelError instanceof Error ? cancelError.message : 'キャンセルに失敗しました') // エラーをトーストで表示する
     } finally {
       setCancellingId(null)
     }
@@ -931,7 +944,7 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
       await onSaved() // 保存後にデプロイメント情報を再取得する
     } catch (saveError) {
       console.error(saveError)
-      alert('保存に失敗しました')
+      toast.error(saveError instanceof Error ? saveError.message : '保存に失敗しました') // エラーをトーストで表示する
     } finally {
       setSaving(false)
     }
@@ -1128,6 +1141,7 @@ function NetworkingTab({ deploymentId, projectId, onUpdated }: { deploymentId: s
   const [savingSvc, setSavingSvc] = useState(false) // サービス保存中フラグ
   const [deletingSvc, setDeletingSvc] = useState(false) // サービス削除中フラグ
   const [copiedKey, setCopiedKey] = useState<string | null>(null) // コピー済みのキーを管理する
+  const [deleteSvcConfirmOpen, setDeleteSvcConfirmOpen] = useState(false) // Service無効化確認ダイアログの開閉を管理する
 
   const fetchNetworking = async () => {
     const svcResult = await get<K8sService>(`/deployments/${deploymentId}/service`).catch(() => null) // サービス情報を取得する
@@ -1157,18 +1171,8 @@ function NetworkingTab({ deploymentId, projectId, onUpdated }: { deploymentId: s
   // 無効化が保留中：status=pending かつ port が設定済み（無効化を予約して Apply 前の状態）
   const serviceDisablePending = service && service.status === 'pending' && service.port !== 0
 
-  const handleDeleteService = async () => {
-    if (!confirm('Serviceを無効化しますか？保留中になり、Applyで反映されます。')) return
-    setDeletingSvc(true)
-    try {
-      await del(`/deployments/${deploymentId}/service`) // pending_port=0 にして無効化を予約する
-      await Promise.all([fetchNetworking(), onUpdated()]) // 最新状態を再取得する
-    } catch (deleteError) {
-      console.error(deleteError)
-      alert('Serviceの無効化に失敗しました')
-    } finally {
-      setDeletingSvc(false)
-    }
+  const handleDeleteService = () => {
+    setDeleteSvcConfirmOpen(true) // Service無効化確認ダイアログを開く
   }
 
   const handleSaveService = async () => {
@@ -1196,7 +1200,7 @@ function NetworkingTab({ deploymentId, projectId, onUpdated }: { deploymentId: s
       }
     } catch (saveError) {
       console.error(saveError)
-      alert('サービスの保存に失敗しました')
+      toast.error(saveError instanceof Error ? saveError.message : 'サービスの保存に失敗しました') // エラーをトーストで表示する
     } finally {
       setSavingSvc(false)
     }
@@ -1310,6 +1314,27 @@ function NetworkingTab({ deploymentId, projectId, onUpdated }: { deploymentId: s
         <h3 className="text-sm font-semibold text-[#111827] mb-2">IngressRoute</h3>
         <p className="text-sm text-gray-400">IngressRoute はプロジェクト単位で管理されます。プロジェクトページから設定してください。</p>
       </div>
+      <ConfirmDialog
+        open={deleteSvcConfirmOpen}
+        onOpenChange={setDeleteSvcConfirmOpen}
+        title="Serviceを無効化"
+        description="Serviceを無効化しますか？保留中になり、Applyで反映されます。"
+        confirmLabel="無効化"
+        variant="destructive"
+        onConfirm={async () => {
+          setDeleteSvcConfirmOpen(false) // ダイアログを閉じる
+          setDeletingSvc(true) // Service削除中フラグを立てる
+          try {
+            await del(`/deployments/${deploymentId}/service`) // pending_port=0 にして無効化を予約する
+            await Promise.all([fetchNetworking(), onUpdated()]) // 最新状態を再取得する
+          } catch (deleteError) {
+            console.error(deleteError)
+            toast.error(deleteError instanceof Error ? deleteError.message : 'Serviceの無効化に失敗しました') // エラーをトーストで表示する
+          } finally {
+            setDeletingSvc(false) // Service削除中フラグを下げる
+          }
+        }}
+      />
     </div>
   )
 }
@@ -1368,7 +1393,7 @@ function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
       if (tutorialActualStep?.id === 'adv-envvar-mount-add') tutorialAdvance() // マウント追加後にチュートリアルを進める
     } catch (addError) {
       console.error(addError)
-      alert('マウント設定の作成に失敗しました')
+      toast.error(addError instanceof Error ? addError.message : 'マウント設定の作成に失敗しました') // エラーをトーストで表示する
     } finally {
       setAddingMount(false) // マウント作成中フラグを下げる
     }
@@ -1381,7 +1406,7 @@ function EnvVarsTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
       await Promise.all([fetchData(), onUpdated()]) // データと pending 一覧を再取得する
     } catch (deleteError) {
       console.error(deleteError)
-      alert('マウント設定の削除に失敗しました')
+      toast.error(deleteError instanceof Error ? deleteError.message : 'マウント設定の削除に失敗しました') // エラーをトーストで表示する
     } finally {
       setDeletingMountId(null) // 削除中フラグをリセットする
     }
@@ -1640,7 +1665,7 @@ function VolumesTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
       if (tutorialActualStep?.id === 'adv-storage-mount-add') tutorialAdvance() // マウント追加後にチュートリアルを進める
     } catch (addError) {
       console.error(addError)
-      alert('マウント設定の作成に失敗しました')
+      toast.error(addError instanceof Error ? addError.message : 'マウント設定の作成に失敗しました') // エラーをトーストで表示する
     } finally {
       setAddingMount(false) // マウント作成中フラグを下げる
     }
@@ -1653,7 +1678,7 @@ function VolumesTab({ deploymentId, projectId, onUpdated }: { deploymentId: stri
       await Promise.all([fetchData(), onUpdated()]) // データと pending 一覧を再取得する
     } catch (deleteError) {
       console.error(deleteError)
-      alert('マウント設定の削除に失敗しました')
+      toast.error(deleteError instanceof Error ? deleteError.message : 'マウント設定の削除に失敗しました') // エラーをトーストで表示する
     } finally {
       setDeletingMountId(null) // 削除中フラグをリセットする
     }
@@ -1948,7 +1973,7 @@ function NotInitScreen({
       navigate(`/builds/${result.id}/logs`) // ビルドログページへ遷移する
     } catch (buildError) {
       console.error(buildError)
-      alert('ビルドの開始に失敗しました')
+      toast.error(buildError instanceof Error ? buildError.message : 'ビルドの開始に失敗しました') // エラーをトーストで表示する
     } finally {
       setBuilding(false)
     }

@@ -10,6 +10,7 @@ import { BuildLogPage } from '@/pages/BuildLogPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { TutorialProvider } from '@/tutorial/TutorialContext' // チュートリアル Context プロバイダーをインポートする
 import { TutorialOverlay } from '@/tutorial/TutorialOverlay' // チュートリアルオーバーレイをインポートする
+import { Toaster } from 'sonner' // トースト通知をインポートする
 
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { authState } = useAuth() // 認証状態を取得する
@@ -34,6 +35,7 @@ export default function App() {
   return (
     <BrowserRouter basename="/ui">
       <TutorialProvider>
+        <Toaster position="top-right" richColors closeButton duration={5000} /> {/* トースト通知を配置する */}
         <TutorialOverlay />
         <Routes>
         {/* ログインリダイレクト */}

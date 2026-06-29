@@ -93,7 +93,7 @@ func (ingressRouteHandler *IngressRouteHandler) ApplyProject(echoCtx echo.Contex
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{"error": "IngressRoute が見つかりません"})
 		}
 		logger.PrintHandlerError("IngressRouteHandler", "ApplyProject", echoCtx.Request().URL.Path, http.StatusInternalServerError, err)
-		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{"error": "内部サーバーエラー"})
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 	return echoCtx.NoContent(http.StatusNoContent) // 204 No Content を返す
 }
