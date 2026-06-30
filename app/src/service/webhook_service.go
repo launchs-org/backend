@@ -6,23 +6,26 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
 )
 
 // WebhookService は Webhook CRUD のビジネスロジックを定義するインターフェース
 type WebhookService interface {
-	CreateWebhook(ctx context.Context, userID string, deploymentID string, req CreateWebhookRequest) (*models.DeploymentWebhook, error) // webhook を作成する
-	GetWebhook(ctx context.Context, userID string, deploymentID string) (*models.DeploymentWebhook, error)                              // webhook を取得する
-	DeleteWebhook(ctx context.Context, userID string, webhookID string) error                                                           // webhook を削除する
-	ReceiveGithubWebhook(ctx context.Context, deploymentID string, signature string, body []byte) error                                 // GitHub push イベントを受信して Apply をトリガーする
+	CreateWebhook(ctx context.Context, userID string, deploymentID string, req CreateWebhookRequest) (*models.DeploymentWebhook, error)                                         // webhook を作成する
+	GetWebhook(ctx context.Context, userID string, deploymentID string) (*models.DeploymentWebhook, error)                                                                     // webhook を取得する
+	DeleteWebhook(ctx context.Context, userID string, webhookID string) error                                                                                                  // webhook を削除する
+	TriggerBuildByWebhook(ctx context.Context, deploymentID string, secret string, commitMessage string, author string) (*models.DeploymentBuild, error)                      // シークレット認証でビルドをトリガーする
+	GetBuildByWebhook(ctx context.Context, deploymentID string, secret string, buildID string) (*models.DeploymentBuild, error)                                               // シークレット認証でビルド状態を確認する
+	ApplyByWebhook(ctx context.Context, deploymentID string, secret string) (*ApplyResult, error)                                                                             // シークレット認証で Apply を実行する
+	UpdateImageAndApplyByWebhook(ctx context.Context, deploymentID string, secret string, imageURL string) (*ApplyResult, error)                                              // シークレット認証で image_url を更新して Apply を実行する
 }
 
-// ErrInvalidSignature は HMAC 署名が不正な場合のエラー
+// ErrInvalidSignature はシークレットが不正な場合のエラー
 var ErrInvalidSignature = errors.New("invalid signature") // 署名不正エラーを定義する
+
+// ErrWebhookInactive は Webhook が無効な場合のエラー
+var ErrWebhookInactive = errors.New("webhook is inactive") // Webhook 無効エラーを定義する
 
 // CreateWebhookRequest は POST /deployments/:id/webhooks のリクエスト構造体
 type CreateWebhookRequest struct {
@@ -35,6 +38,7 @@ type webhookServiceImpl struct {
 	deploymentRepo repository.DeploymentRepository // deployment リポジトリ（認可チェックに使用する）
 	projectRepo    repository.ProjectRepository    // project リポジトリ（認可チェックに使用する）
 	applyService   ApplyServiceInterface           // apply サービス（Webhook 経由の Apply 実行に使用する）
+	buildService   BuildService                    // build サービス（Webhook 経由のビルドトリガーに使用する）
 }
 
 // NewWebhookService は WebhookService の実装を返す
@@ -43,12 +47,14 @@ func NewWebhookService(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	applyService ApplyServiceInterface,
+	buildService BuildService,
 ) WebhookService {
 	return &webhookServiceImpl{
 		webhookRepo:    webhookRepo,    // webhook リポジトリを注入する
 		deploymentRepo: deploymentRepo, // deployment リポジトリを注入する
 		projectRepo:    projectRepo,    // project リポジトリを注入する
 		applyService:   applyService,   // apply サービスを注入する
+		buildService:   buildService,   // build サービスを注入する
 	}
 }
 
@@ -66,6 +72,34 @@ func (svc *webhookServiceImpl) checkDeploymentOwner(ctx context.Context, userID 
 		return ErrForbidden // アクセス拒否エラーを返す
 	}
 	return nil // 認可チェック成功を返す
+}
+
+// getDeploymentOwner は deploymentID に対応する Project を返す
+func (svc *webhookServiceImpl) getDeploymentOwner(ctx context.Context, deploymentID string) (*models.Project, error) {
+	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // project を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	return projectData, nil // project を返す
+}
+
+// verifyWebhookSecret は deploymentID に紐づく Webhook のシークレットを検証する
+func (svc *webhookServiceImpl) verifyWebhookSecret(ctx context.Context, deploymentID string, secret string) error {
+	webhookData, err := svc.webhookRepo.FindByDeploymentID(ctx, deploymentID) // webhook を取得する
+	if err != nil {
+		return err // 取得エラーを返す
+	}
+	if !webhookData.IsActive { // Webhook が無効な場合はエラーを返す
+		return ErrWebhookInactive
+	}
+	if !hmac.Equal([]byte(secret), []byte(webhookData.Secret)) { // シークレットが一致しない場合はエラーを返す
+		return ErrInvalidSignature
+	}
+	return nil // 検証成功を返す
 }
 
 // generateSecret は 32 バイトのランダムな hex 文字列を生成する
@@ -120,60 +154,53 @@ func (svc *webhookServiceImpl) DeleteWebhook(ctx context.Context, userID string,
 	return svc.webhookRepo.Delete(ctx, webhookID) // リポジトリ経由で削除する
 }
 
-// GithubPushPayload は GitHub push イベントのペイロード構造体
-type GithubPushPayload struct {
-	Ref        string `json:"ref"`         // refs/heads/{branch} 形式のブランチ参照
-	After      string `json:"after"`       // push 後の commit SHA
-	Repository struct {
-		FullName string `json:"full_name"` // リポジトリのフルネーム（org/repo 形式）
-	} `json:"repository"`
+// TriggerBuildByWebhook はシークレット認証でビルドをトリガーする
+func (svc *webhookServiceImpl) TriggerBuildByWebhook(ctx context.Context, deploymentID string, secret string, commitMessage string, author string) (*models.DeploymentBuild, error) {
+	if err := svc.verifyWebhookSecret(ctx, deploymentID, secret); err != nil { // シークレットを検証する
+		return nil, err // 検証エラーを返す
+	}
+	projectData, err := svc.getDeploymentOwner(ctx, deploymentID) // deployment の所有者 project を取得する
+	if err != nil {
+		return nil, err // 取得エラーを返す
+	}
+	return svc.buildService.TriggerBuild(ctx, projectData.UserID, deploymentID, commitMessage, author) // ビルドをトリガーする
 }
 
-// ReceiveGithubWebhook は GitHub push イベントを受信して HMAC 署名を検証し、ブランチが一致する場合に Apply をトリガーする
-func (svc *webhookServiceImpl) ReceiveGithubWebhook(ctx context.Context, deploymentID string, signature string, body []byte) error {
-	webhookData, err := svc.webhookRepo.FindByDeploymentID(ctx, deploymentID) // deployment に紐づく webhook を取得する
+// GetBuildByWebhook はシークレット認証でビルド状態を確認する
+func (svc *webhookServiceImpl) GetBuildByWebhook(ctx context.Context, deploymentID string, secret string, buildID string) (*models.DeploymentBuild, error) {
+	if err := svc.verifyWebhookSecret(ctx, deploymentID, secret); err != nil { // シークレットを検証する
+		return nil, err // 検証エラーを返す
+	}
+	projectData, err := svc.getDeploymentOwner(ctx, deploymentID) // deployment の所有者 project を取得する
 	if err != nil {
-		return err // 取得エラーを返す
+		return nil, err // 取得エラーを返す
 	}
+	return svc.buildService.GetBuild(ctx, projectData.UserID, buildID) // ビルド情報を取得する
+}
 
-	// HMAC-SHA256 署名を検証する
-	mac := hmac.New(sha256.New, []byte(webhookData.Secret)) // HMAC を生成する
-	mac.Write(body)                                          // リクエストボディを HMAC に書き込む
-	expectedSig := fmt.Sprintf("sha256=%s", hex.EncodeToString(mac.Sum(nil))) // 期待する署名を生成する
-	if !hmac.Equal([]byte(signature), []byte(expectedSig)) { // 署名が一致しない場合は不正エラーを返す
-		return ErrInvalidSignature // 署名不正エラーを返す
+// ApplyByWebhook はシークレット認証で Apply を実行する
+func (svc *webhookServiceImpl) ApplyByWebhook(ctx context.Context, deploymentID string, secret string) (*ApplyResult, error) {
+	if err := svc.verifyWebhookSecret(ctx, deploymentID, secret); err != nil { // シークレットを検証する
+		return nil, err // 検証エラーを返す
 	}
-
-	// push ペイロードをパースする
-	var pushPayload GithubPushPayload                          // ペイロードを格納する変数を定義する
-	if err := json.Unmarshal(body, &pushPayload); err != nil { // JSON をパースする
-		return fmt.Errorf("ペイロードのパースに失敗しました: %w", err) // パースエラーを返す
-	}
-
-	// deployment の github_branch と push の ref を比較する
-	deploymentData, err := svc.deploymentRepo.FindByID(ctx, deploymentID) // deployment を取得する
+	projectData, err := svc.getDeploymentOwner(ctx, deploymentID) // deployment の所有者 project を取得する
 	if err != nil {
-		return err // 取得エラーを返す
+		return nil, err // 取得エラーを返す
 	}
-	expectedRef := fmt.Sprintf("refs/heads/%s", deploymentData.GithubBranch) // 期待する ref を生成する
-	if pushPayload.Ref != expectedRef {                                        // ブランチが一致しない場合はスキップする
-		return nil // apply をトリガーしない
-	}
+	return svc.applyService.Apply(ctx, projectData.UserID, deploymentID) // Apply を実行する
+}
 
-	// 所有者の userID を取得する
-	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, deploymentData.ProjectID) // project を取得する
+// UpdateImageAndApplyByWebhook はシークレット認証で image_url を pending に設定して Apply を実行する
+func (svc *webhookServiceImpl) UpdateImageAndApplyByWebhook(ctx context.Context, deploymentID string, secret string, imageURL string) (*ApplyResult, error) {
+	if err := svc.verifyWebhookSecret(ctx, deploymentID, secret); err != nil { // シークレットを検証する
+		return nil, err // 検証エラーを返す
+	}
+	if err := svc.deploymentRepo.UpdatePendingImageURL(ctx, deploymentID, imageURL); err != nil { // pending_image_url を更新する
+		return nil, err // 更新エラーを返す
+	}
+	projectData, err := svc.getDeploymentOwner(ctx, deploymentID) // deployment の所有者 project を取得する
 	if err != nil {
-		return fmt.Errorf("project の取得に失敗しました: %w", err) // 取得エラーを返す
+		return nil, err // 取得エラーを返す
 	}
-
-	// pending_github_commit_sha を push の commit SHA に更新する
-	if err := svc.deploymentRepo.UpdatePendingGithubCommitSHA(ctx, deploymentID, pushPayload.After); err != nil { // pending commit SHA を更新する
-		return fmt.Errorf("commit SHA の更新に失敗しました: %w", err) // 更新エラーを返す
-	}
-
-	// Apply をトリガーする
-	if _, err := svc.applyService.Apply(ctx, projectData.UserID, deploymentID); err != nil { // Apply をトリガーする
-		return fmt.Errorf("Apply の実行に失敗しました: %w", err) // Apply エラーを返す
-	}
-	return nil // 正常終了を返す
+	return svc.applyService.Apply(ctx, projectData.UserID, deploymentID) // Apply を実行する
 }

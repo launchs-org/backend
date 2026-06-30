@@ -82,8 +82,11 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.GET("/deployments/:id/webhooks", opts.WebhookHandler.GetWebhook)     // webhook 取得エンドポイント
 	apiGroup.DELETE("/webhooks/:id", opts.WebhookHandler.DeleteWebhook)           // webhook 削除エンドポイント
 
-	// 認証不要の Webhook レシーバーを登録する（GitHub からのリクエストには認証ヘッダーがないため）
-	router.POST("/webhooks/:deployment_id/github", opts.WebhookHandler.ReceiveGithubWebhook) // GitHub push イベントレシーバーエンドポイント
+	// 認証不要の Webhook エンドポイントを登録する（X-Webhook-Secret ヘッダーでデプロイメント固有のシークレット認証を行う）
+	router.POST("/webhooks/:deployment_id/build", opts.WebhookHandler.TriggerBuildByWebhook)               // ビルドトリガーエンドポイント
+	router.GET("/webhooks/:deployment_id/builds/:build_id", opts.WebhookHandler.GetBuildByWebhook)         // ビルド状態確認エンドポイント
+	router.POST("/webhooks/:deployment_id/apply", opts.WebhookHandler.ApplyByWebhook)                      // Apply 実行エンドポイント
+	router.POST("/webhooks/:deployment_id/update-image", opts.WebhookHandler.UpdateImageAndApplyByWebhook) // image_url 更新 & Apply エンドポイント（image_url タイプ用）
 
 	// ingress-route エンドポイントを登録する
 	apiGroup.GET("/projects/:id/ingress-routes", opts.IngressRouteHandler.ListIngressRoutes)                                // ingress-route 一覧取得エンドポイント

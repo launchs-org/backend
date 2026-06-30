@@ -3,10 +3,6 @@ package service
 import (
 	"app/models"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
 	"testing"
 
 	"gorm.io/gorm"
@@ -65,13 +61,6 @@ func (mock *mockApplyService) ListApplyHistories(ctx context.Context, userID str
 	return nil, nil // テストでは使用しないためデフォルト nil を返す
 }
 
-// generateTestSignature はテスト用の HMAC-SHA256 署名を生成するヘルパー
-func generateTestSignature(secret string, body []byte) string {
-	mac := hmac.New(sha256.New, []byte(secret)) // HMAC を生成する
-	mac.Write(body)                              // ボディを書き込む
-	return fmt.Sprintf("sha256=%s", hex.EncodeToString(mac.Sum(nil))) // 署名を返す
-}
-
 // TestCreateWebhook_正常にwebhookが作成される は CreateWebhook が webhook を作成することを確認する
 func TestCreateWebhook_正常にwebhookが作成される_service(t *testing.T) {
 	var capturedWebhook *models.DeploymentWebhook // キャプチャした webhook を格納する変数を定義する
@@ -94,7 +83,7 @@ func TestCreateWebhook_正常にwebhookが作成される_service(t *testing.T) 
 		},
 	}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
 
 	result, err := svc.CreateWebhook(context.Background(), "test-user-id", "dep-id-1", CreateWebhookRequest{
 		GithubRepoURL: "https://github.com/org/repo", // GitHub リポジトリ URL を設定する
@@ -130,7 +119,7 @@ func TestCreateWebhook_他ユーザーのDeploymentはErrForbiddenを返す_serv
 		},
 	}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
 
 	_, err := svc.CreateWebhook(context.Background(), "other-user-id", "dep-id-1", CreateWebhookRequest{}) // 他ユーザーとして作成する
 	if err != ErrForbidden { // ErrForbidden であることを確認する
@@ -163,7 +152,7 @@ func TestGetWebhook_正常にwebhookが取得される_service(t *testing.T) {
 		},
 	}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
 
 	result, err := svc.GetWebhook(context.Background(), "test-user-id", "dep-id-1") // webhook を取得する
 	if err != nil {
@@ -188,7 +177,7 @@ func TestGetWebhook_他ユーザーのDeploymentはErrForbiddenを返す_service
 		},
 	}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
 
 	_, err := svc.GetWebhook(context.Background(), "other-user-id", "dep-id-1") // 他ユーザーとして取得する
 	if err != ErrForbidden { // ErrForbidden であることを確認する
@@ -220,7 +209,7 @@ func TestDeleteWebhook_正常にwebhookが削除される_service(t *testing.T) 
 		},
 	}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
 
 	err := svc.DeleteWebhook(context.Background(), "test-user-id", "webhook-id-1") // webhook を削除する
 	if err != nil {
@@ -249,7 +238,7 @@ func TestDeleteWebhook_他ユーザーのWebhookはErrForbiddenを返す_service
 		},
 	}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
 
 	err := svc.DeleteWebhook(context.Background(), "other-user-id", "webhook-id-1") // 他ユーザーとして削除する
 	if err != ErrForbidden { // ErrForbidden であることを確認する
@@ -274,7 +263,7 @@ func TestCreateWebhook_シークレットが毎回異なる(t *testing.T) {
 	}
 	projectRepo := &mockProjectRepository{}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
 
 	for callIndex := 0; callIndex < 3; callIndex++ { // 3 回作成を実行する
 		_, err := svc.CreateWebhook(context.Background(), "test-user-id", "dep-id-1", CreateWebhookRequest{})
@@ -298,7 +287,7 @@ func TestCreateWebhook_存在しないDeploymentは404が返る(t *testing.T) {
 	}
 	projectRepo := &mockProjectRepository{}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
 
 	_, err := svc.CreateWebhook(context.Background(), "test-user-id", "nonexistent-dep", CreateWebhookRequest{}) // 存在しない deployment を指定する
 	if err == nil {                                                                                                // エラーが返ることを確認する
@@ -306,115 +295,3 @@ func TestCreateWebhook_存在しないDeploymentは404が返る(t *testing.T) {
 	}
 }
 
-// TestReceiveGithubWebhook_正しい署名でApplyがトリガーされる は正しい署名で Apply が呼ばれることを確認する
-func TestReceiveGithubWebhook_正しい署名でApplyがトリガーされる(t *testing.T) {
-	const secret = "test-secret"        // テスト用シークレットを定義する
-	const deploymentID = "dep-id-1"     // テスト用 deployment ID を定義する
-	const commitSHA = "abc123def456"    // テスト用 commit SHA を定義する
-
-	body := []byte(`{"ref":"refs/heads/main","after":"abc123def456","repository":{"full_name":"org/repo"}}`) // テスト用ペイロードを定義する
-	signature := generateTestSignature(secret, body)                                                          // 正しい署名を生成する
-
-	var capturedCommitSHA string  // キャプチャした commit SHA を格納する変数を定義する
-	var applyCalledUserID string  // Apply が呼ばれた時の userID を格納する変数を定義する
-
-	webhookRepo := &mockWebhookRepository{
-		findByDeploymentIDFunc: func(ctx context.Context, did string) (*models.DeploymentWebhook, error) {
-			return &models.DeploymentWebhook{DeploymentID: did, Secret: secret}, nil // シークレット付き webhook を返す
-		},
-	}
-	deploymentRepo := &mockDeploymentRepository{
-		findByIDFunc: func(ctx context.Context, did string) (*models.Deployment, error) {
-			return &models.Deployment{ID: did, ProjectID: "proj-id-1", GithubBranch: "main"}, nil // ブランチ一致の deployment を返す
-		},
-		updatePendingGithubCommitSHAFunc: func(ctx context.Context, did string, sha string) error {
-			capturedCommitSHA = sha // commit SHA をキャプチャする
-			return nil
-		},
-	}
-	projectRepo := &mockProjectRepository{
-		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
-			return &models.Project{ID: projectID, UserID: "owner-user-id"}, nil // 所有者プロジェクトを返す
-		},
-	}
-	applySvc := &mockApplyService{
-		applyFunc: func(ctx context.Context, userID string, did string) (*ApplyResult, error) {
-			applyCalledUserID = userID // Apply が呼ばれた userID をキャプチャする
-			return &ApplyResult{}, nil
-		},
-	}
-
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, applySvc) // サービスを生成する
-
-	err := svc.ReceiveGithubWebhook(context.Background(), deploymentID, signature, body) // Webhook を受信する
-	if err != nil {
-		t.Fatalf("ReceiveGithubWebhook がエラーを返しました: %v", err)
-	}
-	if capturedCommitSHA != commitSHA { // commit SHA が更新されていることを確認する
-		t.Errorf("期待する commit SHA: %s, 実際の commit SHA: %s", commitSHA, capturedCommitSHA)
-	}
-	if applyCalledUserID != "owner-user-id" { // Apply が所有者の userID で呼ばれていることを確認する
-		t.Errorf("期待する userID: owner-user-id, 実際の userID: %s", applyCalledUserID)
-	}
-}
-
-// TestReceiveGithubWebhook_不正な署名で401が返る は不正な署名で ErrInvalidSignature が返ることを確認する
-func TestReceiveGithubWebhook_不正な署名で401が返る(t *testing.T) {
-	body := []byte(`{"ref":"refs/heads/main","after":"abc123","repository":{"full_name":"org/repo"}}`) // テスト用ペイロードを定義する
-
-	webhookRepo := &mockWebhookRepository{
-		findByDeploymentIDFunc: func(ctx context.Context, did string) (*models.DeploymentWebhook, error) {
-			return &models.DeploymentWebhook{DeploymentID: did, Secret: "real-secret"}, nil // 本物のシークレット付き webhook を返す
-		},
-	}
-
-	svc := NewWebhookService(webhookRepo, &mockDeploymentRepository{}, &mockProjectRepository{}, nil) // サービスを生成する
-
-	err := svc.ReceiveGithubWebhook(context.Background(), "dep-id-1", "sha256=invalidsignature", body) // 不正な署名で受信する
-	if err != ErrInvalidSignature {                                                                      // ErrInvalidSignature であることを確認する
-		t.Errorf("期待するエラー: ErrInvalidSignature, 実際のエラー: %v", err)
-	}
-}
-
-// TestReceiveGithubWebhook_ブランチ不一致でApplyがスキップされる はブランチが一致しない場合に Apply が呼ばれないことを確認する
-func TestReceiveGithubWebhook_ブランチ不一致でApplyがスキップされる(t *testing.T) {
-	const secret = "test-secret"    // テスト用シークレットを定義する
-	const deploymentID = "dep-id-1" // テスト用 deployment ID を定義する
-
-	body := []byte(`{"ref":"refs/heads/feature-branch","after":"abc123","repository":{"full_name":"org/repo"}}`) // 別ブランチへの push ペイロードを定義する
-	signature := generateTestSignature(secret, body)                                                              // 正しい署名を生成する
-
-	applyCalled := false // Apply が呼ばれたかどうかを追跡する変数を定義する
-
-	webhookRepo := &mockWebhookRepository{
-		findByDeploymentIDFunc: func(ctx context.Context, did string) (*models.DeploymentWebhook, error) {
-			return &models.DeploymentWebhook{DeploymentID: did, Secret: secret}, nil // シークレット付き webhook を返す
-		},
-	}
-	deploymentRepo := &mockDeploymentRepository{
-		findByIDFunc: func(ctx context.Context, did string) (*models.Deployment, error) {
-			return &models.Deployment{ID: did, ProjectID: "proj-id-1", GithubBranch: "main"}, nil // main ブランチを設定した deployment を返す
-		},
-	}
-	projectRepo := &mockProjectRepository{
-		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
-			return &models.Project{ID: projectID, UserID: "owner-user-id"}, nil // 所有者プロジェクトを返す
-		},
-	}
-	applySvc := &mockApplyService{
-		applyFunc: func(ctx context.Context, userID string, did string) (*ApplyResult, error) {
-			applyCalled = true // Apply が呼ばれたことを記録する
-			return &ApplyResult{}, nil
-		},
-	}
-
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, applySvc) // サービスを生成する
-
-	err := svc.ReceiveGithubWebhook(context.Background(), deploymentID, signature, body) // ブランチ不一致の Webhook を受信する
-	if err != nil {
-		t.Fatalf("ReceiveGithubWebhook がエラーを返しました: %v", err)
-	}
-	if applyCalled { // Apply が呼ばれていないことを確認する
-		t.Error("ブランチが一致しないにもかかわらず Apply が呼ばれました")
-	}
-}

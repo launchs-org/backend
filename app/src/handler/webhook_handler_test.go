@@ -17,9 +17,12 @@ import (
 
 // mockWebhookService は WebhookService のテスト用モック実装
 type mockWebhookService struct {
-	createWebhookFunc func(ctx context.Context, userID string, deploymentID string, req service.CreateWebhookRequest) (*models.DeploymentWebhook, error)
-	getWebhookFunc    func(ctx context.Context, userID string, deploymentID string) (*models.DeploymentWebhook, error)
-	deleteWebhookFunc func(ctx context.Context, userID string, webhookID string) error
+	createWebhookFunc        func(ctx context.Context, userID string, deploymentID string, req service.CreateWebhookRequest) (*models.DeploymentWebhook, error)
+	getWebhookFunc           func(ctx context.Context, userID string, deploymentID string) (*models.DeploymentWebhook, error)
+	deleteWebhookFunc        func(ctx context.Context, userID string, webhookID string) error
+	triggerBuildByWebhookFunc func(ctx context.Context, deploymentID string, secret string, commitMessage string, author string) (*models.DeploymentBuild, error)
+	getBuildByWebhookFunc    func(ctx context.Context, deploymentID string, secret string, buildID string) (*models.DeploymentBuild, error)
+	applyByWebhookFunc       func(ctx context.Context, deploymentID string, secret string) (*service.ApplyResult, error)
 }
 
 func (mock *mockWebhookService) CreateWebhook(ctx context.Context, userID string, deploymentID string, req service.CreateWebhookRequest) (*models.DeploymentWebhook, error) {
@@ -34,8 +37,29 @@ func (mock *mockWebhookService) DeleteWebhook(ctx context.Context, userID string
 	return mock.deleteWebhookFunc(ctx, userID, webhookID) // モック関数を呼び出す
 }
 
-func (mock *mockWebhookService) ReceiveGithubWebhook(ctx context.Context, deploymentID string, signature string, body []byte) error {
-	return nil // テストでは使用しないためデフォルト nil を返す
+func (mock *mockWebhookService) TriggerBuildByWebhook(ctx context.Context, deploymentID string, secret string, commitMessage string, author string) (*models.DeploymentBuild, error) {
+	if mock.triggerBuildByWebhookFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.triggerBuildByWebhookFunc(ctx, deploymentID, secret, commitMessage, author)
+	}
+	return &models.DeploymentBuild{ID: "build-id-1"}, nil // デフォルトはビルドレコードを返す
+}
+
+func (mock *mockWebhookService) GetBuildByWebhook(ctx context.Context, deploymentID string, secret string, buildID string) (*models.DeploymentBuild, error) {
+	if mock.getBuildByWebhookFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.getBuildByWebhookFunc(ctx, deploymentID, secret, buildID)
+	}
+	return &models.DeploymentBuild{ID: buildID}, nil // デフォルトはビルドレコードを返す
+}
+
+func (mock *mockWebhookService) ApplyByWebhook(ctx context.Context, deploymentID string, secret string) (*service.ApplyResult, error) {
+	if mock.applyByWebhookFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.applyByWebhookFunc(ctx, deploymentID, secret)
+	}
+	return &service.ApplyResult{}, nil // デフォルトは正常終了を返す
+}
+
+func (mock *mockWebhookService) UpdateImageAndApplyByWebhook(ctx context.Context, deploymentID string, secret string, imageURL string) (*service.ApplyResult, error) {
+	return &service.ApplyResult{}, nil // テストでは使用しないためデフォルト正常終了を返す
 }
 
 // setupWebhookEchoContext はテスト用の Echo コンテキストを生成するヘルパー関数

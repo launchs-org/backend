@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Play, Trash2, GitBranch, Container, Package, ExternalLink, Clock, CheckCircle2, XCircle, AlertCircle, Ban, GitCommit, X, Hammer } from 'lucide-react'
+import { Play, Trash2, GitBranch, Container, Package, ExternalLink, Clock, CheckCircle2, XCircle, AlertCircle, Ban, GitCommit, X, Hammer, Copy, Eye, EyeOff, Webhook as WebhookIcon } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { StatusBadge } from '@/components/StatusBadge'
 import { LogViewer } from '@/components/LogViewer'
@@ -22,6 +22,7 @@ import type {
   EnvVarMount,
   DeploymentTemplate,
   DeploymentMetrics,
+  Webhook,
 } from '@/lib/types'
 import {
   POLL_INTERVAL_NORMAL,
@@ -39,7 +40,7 @@ import { useTutorialContext } from '@/tutorial/TutorialContext' // チュート�
 import { toast } from 'sonner' // トースト通知をインポートする
 import { ConfirmDialog } from '@/components/ui/confirm-dialog' // 確認ダイアログをインポートする
 
-type Tab = 'overview' | 'logs' | 'builds' | 'settings' | 'networking' | 'env-vars' | 'volumes' | 'history' | 'metrics'
+type Tab = 'overview' | 'logs' | 'builds' | 'settings' | 'networking' | 'env-vars' | 'volumes' | 'history' | 'metrics' | 'webhook'
 
 // pending 項目の種類と redo 操作を保持する型
 type PendingItem = {
@@ -216,6 +217,7 @@ export function DeploymentDetailPage() {
         'volumes',
         'history',
         'metrics',
+        'webhook' as Tab,
       ]
     : ['overview']
 
@@ -410,7 +412,7 @@ export function DeploymentDetailPage() {
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                {{ overview: '概要', logs: 'ログ', builds: 'ビルド', settings: '設定', networking: 'ネットワーク', 'env-vars': '環境変数', volumes: 'ボリューム', history: '履歴', metrics: 'メトリクス' }[tab]}
+                {{ overview: '概要', logs: 'ログ', builds: 'ビルド', settings: '設定', networking: 'ネットワーク', 'env-vars': '環境変数', volumes: 'ボリューム', history: '履歴', metrics: 'メトリクス', webhook: 'Webhook' }[tab]}
               </button>
             ))}
           </nav>
@@ -427,6 +429,7 @@ export function DeploymentDetailPage() {
           {activeTab === 'volumes' && <VolumesTab deploymentId={deploymentId!} projectId={projectId!} onUpdated={fetchAllPending} />}
           {activeTab === 'history' && <HistoryTab deploymentId={deploymentId!} />}
           {activeTab === 'metrics' && <MetricsTab deploymentId={deploymentId!} />}
+          {activeTab === 'webhook' && <WebhookTab deploymentId={deploymentId!} deploymentType={deployment?.type ?? 'image_url'} />}
         </div>
       </div>
       <ConfirmDialog
@@ -2118,6 +2121,240 @@ function MetricsTab({ deploymentId }: { deploymentId: string }) {
       ) : (
         <MetricsCharts metrics={displayMetrics} />  // ダウンサンプリング済みデータをグラフに渡す
       )}
+    </div>
+  )
+}
+
+// ── Webhook タブ ──────────────────────────────────────────────
+
+function WebhookTab({ deploymentId, deploymentType }: { deploymentId: string; deploymentType: string }) {
+  const [webhook, setWebhook] = useState<Webhook | null>(null) // Webhook 情報を管理する
+  const [loading, setLoading] = useState(true) // ローディング状態を管理する
+  const [creating, setCreating] = useState(false) // 作成中フラグ
+  const [deleting, setDeleting] = useState(false) // 削除中フラグ
+  const [secretVisible, setSecretVisible] = useState(false) // シークレット表示フラグ
+
+  const baseUrl = window.location.origin // ベース URL を取得する
+
+  const fetchWebhook = useCallback(async () => {
+    try {
+      const data = await get<Webhook>(`/deployments/${deploymentId}/webhooks`) // Webhook を取得する
+      setWebhook(data)
+    } catch (fetchError) {
+      if (fetchError instanceof ApiError && fetchError.status === 404) {
+        setWebhook(null) // 未作成の場合は null にする
+      } else {
+        console.error(fetchError)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [deploymentId])
+
+  useEffect(() => {
+    void fetchWebhook() // 初回取得
+  }, [fetchWebhook])
+
+  const handleCreate = async () => {
+    setCreating(true)
+    try {
+      const data = await post<Webhook>(`/deployments/${deploymentId}/webhooks`, { github_repo_url: '' }) // Webhook を作成する
+      setWebhook(data)
+      toast.success('Webhook を作成しました')
+    } catch (createError) {
+      console.error(createError)
+      toast.error(createError instanceof Error ? createError.message : 'Webhook の作成に失敗しました')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!webhook) return
+    setDeleting(true)
+    try {
+      await del(`/webhooks/${webhook.id}`) // Webhook を削除する
+      setWebhook(null)
+      toast.success('Webhook を削除しました')
+    } catch (deleteError) {
+      console.error(deleteError)
+      toast.error(deleteError instanceof Error ? deleteError.message : 'Webhook の削除に失敗しました')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  const copyToClipboard = (text: string, label: string) => {
+    void navigator.clipboard.writeText(text).then(() => {
+      toast.success(`${label}をコピーしました`)
+    })
+  }
+
+  if (loading) {
+    return (
+      <div className="h-48 flex items-center justify-center text-sm text-gray-400">読み込み中...</div>
+    )
+  }
+
+  if (!webhook) {
+    return (
+      <div className="p-6">
+        <div className="max-w-xl">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-lg bg-[#00C2D1]/10 flex items-center justify-center">
+              <WebhookIcon className="w-5 h-5 text-[#00C2D1]" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[#111827]">Webhook</h3>
+              <p className="text-xs text-gray-500">GitHub Actions からビルド・Deploy を自動化する</p>
+            </div>
+          </div>
+          <p className="text-sm text-gray-600 mb-6">
+            Webhook を作成すると、デプロイメント固有のシークレットが発行されます。<br />
+            GitHub Actions からそのシークレットを使ってビルドと Apply を呼び出せます。
+          </p>
+          <button
+            onClick={() => void handleCreate()}
+            disabled={creating}
+            className="px-4 py-2 text-sm font-medium bg-[#00C2D1] text-white rounded-md hover:bg-[#00aab8] disabled:opacity-50 transition-colors"
+          >
+            {creating ? '作成中...' : 'Webhook を作成する'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const isImageType = deploymentType === 'image_url' // image_url タイプかどうかを判定する
+
+  const updateImageEndpoint = `${baseUrl}/webhooks/${deploymentId}/update-image`
+  const buildEndpoint = `${baseUrl}/webhooks/${deploymentId}/build`
+  const buildStatusEndpoint = `${baseUrl}/webhooks/${deploymentId}/builds/{build_id}`
+  const applyEndpoint = `${baseUrl}/webhooks/${deploymentId}/apply`
+
+  const endpointList = isImageType
+    ? [{ label: 'イメージ更新 & Apply', method: 'POST', url: updateImageEndpoint }]
+    : [
+        { label: 'ビルドトリガー', method: 'POST', url: buildEndpoint },
+        { label: 'ビルド状態確認', method: 'GET', url: buildStatusEndpoint },
+        { label: 'Apply', method: 'POST', url: applyEndpoint },
+      ]
+
+  const actionsExample = isImageType
+    ? `- name: Deploy
+  run: |
+    curl -s -X POST \\
+      -H "X-Webhook-Secret: \${{ secrets.DEPLOY_SECRET }}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"image_url": "your-registry/image:\${{ github.sha }}"}' \\
+      ${updateImageEndpoint}`
+    : `- name: Build
+  run: |
+    RESULT=$(curl -s -X POST \\
+      -H "X-Webhook-Secret: \${{ secrets.DEPLOY_SECRET }}" \\
+      -H "Content-Type: application/json" \\
+      -d '{"commit_message": "\${{ github.event.head_commit.message }}", "author": "\${{ github.actor }}"}' \\
+      ${buildEndpoint})
+    echo "BUILD_ID=$(echo \$RESULT | jq -r '.id')" >> \$GITHUB_ENV
+
+- name: Wait for build
+  run: |
+    for i in \$(seq 1 60); do
+      STATUS=$(curl -s -H "X-Webhook-Secret: \${{ secrets.DEPLOY_SECRET }}" \\
+        ${baseUrl}/webhooks/${deploymentId}/builds/\$BUILD_ID | jq -r '.status')
+      echo "status: \$STATUS"
+      if [ "\$STATUS" = "succeeded" ]; then exit 0; fi
+      if [ "\$STATUS" = "failed" ] || [ "\$STATUS" = "cancelled" ]; then exit 1; fi
+      sleep 10
+    done
+    exit 1
+
+- name: Apply
+  run: |
+    curl -s -X POST \\
+      -H "X-Webhook-Secret: \${{ secrets.DEPLOY_SECRET }}" \\
+      ${applyEndpoint}`
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* シークレット */}
+      <div className="border border-gray-200 rounded-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-semibold text-[#111827]">シークレット</h4>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSecretVisible(prev => !prev)}
+              className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+            >
+              {secretVisible ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              {secretVisible ? '隠す' : '表示'}
+            </button>
+            <button
+              onClick={() => copyToClipboard(webhook.secret, 'シークレット')}
+              className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+            >
+              <Copy className="w-3.5 h-3.5" />
+              コピー
+            </button>
+          </div>
+        </div>
+        <code className="block text-xs font-mono bg-gray-50 border border-gray-200 rounded px-3 py-2 text-gray-800 break-all">
+          {secretVisible ? webhook.secret : '•'.repeat(32)}
+        </code>
+        <p className="text-xs text-gray-400 mt-2">GitHub Actions の Secrets に <code className="bg-gray-100 px-1 rounded">DEPLOY_SECRET</code> として登録してください。</p>
+      </div>
+
+      {/* エンドポイント一覧 */}
+      <div className="border border-gray-200 rounded-lg p-4">
+        <h4 className="text-sm font-semibold text-[#111827] mb-3">エンドポイント</h4>
+        <div className="space-y-3">
+          {endpointList.map(({ label, method, url }) => (
+            <div key={label} className="flex items-center gap-2">
+              <span className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded ${method === 'GET' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                {method}
+              </span>
+              <code className="flex-1 text-xs font-mono text-gray-700 truncate">{url}</code>
+              <button
+                onClick={() => copyToClipboard(url, label)}
+                className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-gray-400 mt-3">全エンドポイントに <code className="bg-gray-100 px-1 rounded">X-Webhook-Secret</code> ヘッダーでシークレットを付与してください。</p>
+      </div>
+
+      {/* GitHub Actions 使用例 */}
+      <div className="border border-gray-200 rounded-lg p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-semibold text-[#111827]">GitHub Actions 使用例</h4>
+          <button
+            onClick={() => copyToClipboard(actionsExample, 'GitHub Actions 使用例')}
+            className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            コピー
+          </button>
+        </div>
+        <pre className="text-xs font-mono bg-[#111827] text-gray-200 rounded-md p-3 overflow-x-auto whitespace-pre">
+          {actionsExample}
+        </pre>
+      </div>
+
+      {/* 削除 */}
+      <div className="border border-red-100 rounded-lg p-4">
+        <h4 className="text-sm font-semibold text-red-700 mb-2">Webhook を削除する</h4>
+        <p className="text-xs text-gray-500 mb-3">削除するとシークレットが無効になります。再作成すると新しいシークレットが発行されます。</p>
+        <button
+          onClick={() => void handleDelete()}
+          disabled={deleting}
+          className="px-4 py-2 text-sm font-medium bg-red-50 text-red-600 border border-red-200 rounded-md hover:bg-red-100 disabled:opacity-50 transition-colors"
+        >
+          {deleting ? '削除中...' : 'Webhook を削除する'}
+        </button>
+      </div>
     </div>
   )
 }

@@ -119,7 +119,7 @@ func main() {
 
 	// webhook ハンドラーを DI 組み立てする
 	webhookRepo := repository.NewWebhookRepository(repository.Database)                                                                              // webhook リポジトリを生成する
-	webhookServiceImpl := service.NewWebhookService(webhookRepo, deploymentRepo, projectRepo, applyServiceImpl)                                       // webhook サービスを生成する
+	webhookServiceImpl := service.NewWebhookService(webhookRepo, deploymentRepo, projectRepo, applyServiceImpl, buildServiceImpl)                      // webhook サービスを生成する
 	webhookHandler := handler.NewWebhookHandler(webhookServiceImpl)                                                                                  // webhook ハンドラーを生成する
 
 	// deployment-template ハンドラーを DI 組み立てする

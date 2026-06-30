@@ -288,6 +288,8 @@ export type Webhook = {
   id: string
   deployment_id: string
   secret: string
+  github_repo_url: string
+  is_active: boolean
   created_at: string
   updated_at: string
 }
