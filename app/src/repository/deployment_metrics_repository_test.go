@@ -178,3 +178,57 @@ func TestDeploymentMetricsRepository_DeleteOlderThan_古いレコードが削除
 		t.Errorf("新しいレコードが誤って削除されました（id=%s）", recentRecord.ID)
 	}
 }
+
+// TestDeploymentMetricsRepository_DeleteOlderThan_3日前の基準で削除される は3日前の日時を基準として古いレコードのみ削除されることを確認する
+func TestDeploymentMetricsRepository_DeleteOlderThan_3日前の基準で削除される(t *testing.T) {
+	db := setupTestDB(t) // テスト用 DB を準備する
+
+	// DeploymentMetrics テーブルをマイグレーションする
+	if err := db.AutoMigrate(&models.DeploymentMetrics{}); err != nil {
+		t.Fatalf("DeploymentMetrics マイグレーションに失敗しました: %v", err)
+	}
+
+	projectData := createTestProject(t, db)                               // テスト用 Project を作成する
+	deploymentData := createTestDeploymentForMetrics(t, db, projectData.ID) // テスト用 Deployment を作成する
+
+	now := time.Now().Truncate(time.Second)      // 現在時刻を取得する
+	cutoff := now.Add(-3 * 24 * time.Hour)       // 3 日前の日時を設定する（ISSUE-065 の保持期間）
+
+	// 3 日より前のレコード（削除対象）と 3 日以内のレコード（保持対象）を作成する
+	oldRecord := &models.DeploymentMetrics{
+		DeploymentID: deploymentData.ID, PodName: "pod-old-3days",
+		CPUMillicores: 100, MemoryBytes: 100, ReadyReplicas: 1, TotalReplicas: 1,
+		RecordedAt: cutoff.Add(-1 * time.Second), // 3 日前より 1 秒古いレコード（削除対象）
+	}
+	recentRecord := &models.DeploymentMetrics{
+		DeploymentID: deploymentData.ID, PodName: "pod-recent-3days",
+		CPUMillicores: 200, MemoryBytes: 200, ReadyReplicas: 1, TotalReplicas: 1,
+		RecordedAt: cutoff.Add(1 * time.Second), // 3 日前より 1 秒新しいレコード（保持対象）
+	}
+	db.Create(oldRecord)    // 削除対象レコードを作成する
+	db.Create(recentRecord) // 保持対象レコードを作成する
+	t.Cleanup(func() {      // テスト終了後に残存レコードを削除する
+		db.Unscoped().Delete(oldRecord)
+		db.Unscoped().Delete(recentRecord)
+	})
+
+	repo := NewDeploymentMetricsRepository(db)                  // リポジトリを生成する
+	err := repo.DeleteOlderThan(context.Background(), cutoff)   // 3 日前より古いレコードを削除する
+	if err != nil {
+		t.Fatalf("DeleteOlderThan がエラーを返しました: %v", err)
+	}
+
+	// 削除対象レコード（3日より前）が存在しないことを確認する
+	var oldCount int64
+	db.Model(&models.DeploymentMetrics{}).Where("id = ?", oldRecord.ID).Count(&oldCount) // 削除対象レコードを確認する
+	if oldCount != 0 { // 0 件であることを確認する
+		t.Errorf("3日より古いレコードが削除されていません（id=%s）", oldRecord.ID)
+	}
+
+	// 保持対象レコード（3日以内）が残っていることを確認する
+	var recentCount int64
+	db.Model(&models.DeploymentMetrics{}).Where("id = ?", recentRecord.ID).Count(&recentCount) // 保持対象レコードを確認する
+	if recentCount != 1 { // 1 件残っていることを確認する
+		t.Errorf("3日以内のレコードが誤って削除されました（id=%s）", recentRecord.ID)
+	}
+}

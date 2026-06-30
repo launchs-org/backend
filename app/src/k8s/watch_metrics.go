@@ -10,7 +10,7 @@ import (
 	metricsv1beta1 "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
-// PollMetrics は 5 秒ごとに running 状態の全 Deployment のメトリクスを収集して DB に保存する
+// PollMetrics は 30 秒ごとに running 状態の全 Deployment のメトリクスを収集して DB に保存する
 func PollMetrics(
 	ctx context.Context,
 	k8sClient kubernetes.Interface,
@@ -21,15 +21,15 @@ func PollMetrics(
 ) {
 	logger.Println("メトリクスポーリングを開始します") // 起動ログを出す
 
-	ticker := time.NewTicker(5 * time.Second) // 5 秒ごとにポーリングするタイマーを生成する
-	defer ticker.Stop()                        // 関数終了時にタイマーを停止する
+	ticker := time.NewTicker(30 * time.Second) // 30 秒ごとにポーリングするタイマーを生成する
+	defer ticker.Stop()                         // 関数終了時にタイマーを停止する
 
 	for {
 		select {
 		case <-ctx.Done(): // コンテキストがキャンセルされた場合
 			logger.Println("メトリクスポーリングを停止します") // 停止ログを出す
 			return
-		case <-ticker.C: // 5 秒ごとに実行する
+		case <-ticker.C: // 30 秒ごとに実行する
 			collectAllMetrics(ctx, k8sClient, metricsClient, deploymentRepo, projectRepo, metricsRepo) // メトリクスを収集する
 		}
 	}
@@ -86,8 +86,8 @@ func collectAllMetrics(
 		}
 	}
 
-	// 7 日以上古いメトリクスを削除する
-	retentionLimit := time.Now().AddDate(0, 0, -7)                       // 7 日前の日時を計算する
+	// 3 日以上古いメトリクスを削除する
+	retentionLimit := time.Now().AddDate(0, 0, -3)                       // 3 日前の日時を計算する
 	if deleteErr := metricsRepo.DeleteOlderThan(ctx, retentionLimit); deleteErr != nil { // 古いメトリクスを削除する
 		logger.PrintErr("メトリクス収集: 古いメトリクスの削除に失敗しました: " + deleteErr.Error()) // エラーをログ出力する
 	}

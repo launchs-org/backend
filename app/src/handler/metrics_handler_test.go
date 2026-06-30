@@ -208,3 +208,63 @@ func TestGetDeploymentMetrics_不正なlimitパラメータ(t *testing.T) {
 		t.Errorf("期待するステータス: 400, 実際のステータス: %d", responseRecorder.Code)
 	}
 }
+
+// TestGetDeploymentMetrics_limitが上限を超えた場合は8640に丸められる は limit=99999 指定時に 8640 に丸められることを確認する
+func TestGetDeploymentMetrics_limitが上限を超えた場合は8640に丸められる(t *testing.T) {
+	receivedLimit := 0 // サービスに渡された limit を記録する変数
+	mockSvc := &mockMetricsService{
+		getDeploymentMetricsFunc: func(ctx context.Context, userID string, deploymentID string, limit int) ([]*models.DeploymentMetrics, error) {
+			receivedLimit = limit // 受け取った limit を記録する
+			return []*models.DeploymentMetrics{}, nil
+		},
+	}
+
+	metricsHandler := NewMetricsHandler(mockSvc) // ハンドラーを生成する
+	echoCtx, responseRecorder := setupMetricsEchoContext(
+		http.MethodGet,
+		"/api/v1/deployments/deployment-id-1/metrics",
+		map[string]string{"id": "deployment-id-1"},
+		map[string]string{"limit": "99999"}, // 上限を超える limit を指定する
+	)
+
+	err := metricsHandler.GetDeploymentMetrics(echoCtx) // ハンドラーを実行する
+	if err != nil {
+		t.Fatalf("GetDeploymentMetrics がエラーを返しました: %v", err)
+	}
+	if responseRecorder.Code != http.StatusOK { // 200 OK を確認する
+		t.Errorf("期待するステータス: 200, 実際のステータス: %d", responseRecorder.Code)
+	}
+	if receivedLimit != maxMetricsLimit { // 上限値 8640 に丸められることを確認する
+		t.Errorf("期待する limit: %d, 実際の limit: %d", maxMetricsLimit, receivedLimit)
+	}
+}
+
+// TestGetDeploymentMetrics_limit未指定時はデフォルト値720が使用される は limit 未指定時にデフォルト値 720 が使われることを確認する
+func TestGetDeploymentMetrics_limit未指定時はデフォルト値720が使用される(t *testing.T) {
+	receivedLimit := 0 // サービスに渡された limit を記録する変数
+	mockSvc := &mockMetricsService{
+		getDeploymentMetricsFunc: func(ctx context.Context, userID string, deploymentID string, limit int) ([]*models.DeploymentMetrics, error) {
+			receivedLimit = limit // 受け取った limit を記録する
+			return []*models.DeploymentMetrics{}, nil
+		},
+	}
+
+	metricsHandler := NewMetricsHandler(mockSvc) // ハンドラーを生成する
+	echoCtx, responseRecorder := setupMetricsEchoContext(
+		http.MethodGet,
+		"/api/v1/deployments/deployment-id-1/metrics",
+		map[string]string{"id": "deployment-id-1"},
+		nil, // limit を指定しない
+	)
+
+	err := metricsHandler.GetDeploymentMetrics(echoCtx) // ハンドラーを実行する
+	if err != nil {
+		t.Fatalf("GetDeploymentMetrics がエラーを返しました: %v", err)
+	}
+	if responseRecorder.Code != http.StatusOK { // 200 OK を確認する
+		t.Errorf("期待するステータス: 200, 実際のステータス: %d", responseRecorder.Code)
+	}
+	if receivedLimit != defaultMetricsLimit { // デフォルト値 720 が使われることを確認する
+		t.Errorf("期待する limit: %d, 実際の limit: %d", defaultMetricsLimit, receivedLimit)
+	}
+}

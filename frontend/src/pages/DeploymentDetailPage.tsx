@@ -5,6 +5,8 @@ import { Layout } from '@/components/Layout'
 import { StatusBadge } from '@/components/StatusBadge'
 import { LogViewer } from '@/components/LogViewer'
 import { MetricsCharts } from '@/components/MetricsCharts'
+import { MetricsDownloadButton } from '@/components/MetricsDownloadButton'
+import { downsampleMetrics } from '@/lib/metricsDownsample'
 import { get, post, put, del, ApiError } from '@/lib/api'
 import type {
   Deployment,
@@ -2031,14 +2033,14 @@ function NotInitScreen({
 
 // ── Metrics タブ ──────────────────────────────────────────────
 
-const METRICS_POLL_INTERVAL = 5_000  // 5 秒ごとにポーリングする（バックエンドの収集間隔に合わせる）
+const METRICS_POLL_INTERVAL = 30_000  // 30 秒ごとにポーリングする（バックエンドの収集間隔に合わせる）
 
-// 表示範囲の選択肢（5 秒ポーリング換算の limit と表示ラベルを保持する）
+// 表示範囲の選択肢（30 秒ポーリング換算の limit と表示ラベルを保持する）
 const METRICS_RANGE_OPTIONS = [
-  { label: '1時間',  limit: 720    },
-  { label: '3時間',  limit: 2160   },
-  { label: '24時間', limit: 17280  },
-  { label: '1週間',  limit: 120960 },
+  { label: '1時間',  limit: 120  },  // 30秒×120 = 1時間分
+  { label: '3時間',  limit: 360  },  // 30秒×360 = 3時間分
+  { label: '24時間', limit: 2880 },  // 30秒×2880 = 24時間分
+  { label: '3日',    limit: 8640 },  // 30秒×8640 = 3日分（バックエンドの保持期間上限）
 ] as const
 
 type MetricsRangeOption = typeof METRICS_RANGE_OPTIONS[number]
@@ -2071,9 +2073,12 @@ function MetricsTab({ deploymentId }: { deploymentId: string }) {
     return () => clearInterval(intervalId)                                               // クリーンアップ
   }, [fetchMetrics])
 
+  // 表示期間に応じてダウンサンプリングしたメトリクスを生成する（グラフ描画用）
+  const displayMetrics = downsampleMetrics(metrics, selectedRange.label)
+
   return (
     <div className="space-y-3">
-      {/* ヘッダー: 範囲セレクタ + 更新ボタン */}
+      {/* ヘッダー: 範囲セレクタ + ダウンロードボタン + 更新ボタン */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1">
           {METRICS_RANGE_OPTIONS.map((rangeOption) => (
@@ -2090,12 +2095,15 @@ function MetricsTab({ deploymentId }: { deploymentId: string }) {
             </button>
           ))}
         </div>
-        <button
-          onClick={() => void fetchMetrics()}
-          className="text-xs text-gray-400 hover:text-gray-600 underline"
-        >
-          更新
-        </button>
+        <div className="flex items-center gap-2">
+          <MetricsDownloadButton metrics={metrics} deploymentId={deploymentId} />  {/* 生データ（間引きなし）をダウンロードする */}
+          <button
+            onClick={() => void fetchMetrics()}
+            className="text-xs text-gray-400 hover:text-gray-600 underline"
+          >
+            更新
+          </button>
+        </div>
       </div>
 
       {/* コンテンツエリア */}
@@ -2108,7 +2116,7 @@ function MetricsTab({ deploymentId }: { deploymentId: string }) {
           {metricsError}
         </div>
       ) : (
-        <MetricsCharts metrics={metrics} />
+        <MetricsCharts metrics={displayMetrics} />  // ダウンサンプリング済みデータをグラフに渡す
       )}
     </div>
   )
