@@ -1,0 +1,22 @@
+FROM golang:1.26-bookworm as Develop
+
+WORKDIR /app/src
+
+RUN apt update \
+    && apt install -y wget curl git
+
+RUN go install github.com/air-verse/air@latest
+
+CMD [ "air","-c","./.air.toml" ]
+
+FROM golang:1.26 as build
+
+WORKDIR /go/src/app
+COPY ./src .
+
+RUN go mod download
+RUN CGO_ENABLED=0 go build -o /go/bin/app
+
+FROM gcr.io/distroless/static-debian12 as release
+COPY --from=build /go/bin/app /
+CMD ["/app"]
