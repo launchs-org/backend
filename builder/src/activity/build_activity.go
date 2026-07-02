@@ -10,6 +10,7 @@ import (
 	"app/shared/logger"
 	"app/shared/models"
 	"app/shared/repository"
+	"builder/k8s"
 	"builder/railpack"
 
 	"go.temporal.io/sdk/activity"
@@ -29,6 +30,8 @@ type BuildActivities struct {
 	HarborCredentialRepo repository.HarborCredentialRepository // harbor credential リポジトリ
 	LogChunkRepo         repository.BuildLogChunkRepository    // ビルドログチャンクリポジトリ
 	RegistryHost         string                                // ビルドジョブが使う Harbor ホスト名（クラスタ内 DNS 名）
+	HarborClient         *k8s.HarborClient                    // Harbor API クライアント（イメージサイズ取得用）
+	HarborEndpoint       string                                // Harbor API エンドポイント URL
 }
 
 // BuildWorkflowInput は BuildWorkflow への入力
@@ -209,8 +212,28 @@ func (act *BuildActivities) UpdateBuildStatusActivity(ctx context.Context, input
 		return fmt.Errorf("ビルドレコードの取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
-	finishedAt := time.Now()                                                                                              // 完了時刻を取得する
-	if err := act.BuildRepo.UpdateBuildResult(ctx, input.BuildID, buildStatus, builtImageURL, 0, finishedAt); err != nil { // ビルド結果を更新する（成功時のみ builtImageURL に値が入る）
+	// ビルド成功時のみ Harbor からイメージサイズを取得する
+	var imageSizeBytes int64
+	if buildStatus == models.BuildStatusSucceeded && act.HarborClient != nil && builtImageURL != "" {
+		credentialData, credErr := act.HarborCredentialRepo.FindByProjectIDNoTx(ctx, buildData.ProjectID) // Harbor 認証情報を取得する
+		if credErr != nil {
+			logger.PrintErr("UpdateBuildStatusActivity: harbor credential の取得に失敗しました（projectID=" + buildData.ProjectID + "）: " + credErr.Error()) // エラーをログ出力する
+		} else {
+			repositoryName := buildData.ID // デフォルトはビルド ID を使う
+			if buildData.DeploymentID != nil {
+				repositoryName = *buildData.DeploymentID // Deployment ID が存在する場合はそれをリポジトリ名として使う
+			}
+			sizeBytes, sizeErr := act.HarborClient.GetArtifactSize(ctx, buildData.ProjectID, repositoryName, credentialData.RobotName, credentialData.RobotSecret) // Harbor からイメージサイズを取得する
+			if sizeErr != nil {
+				logger.PrintErr("UpdateBuildStatusActivity: イメージサイズの取得に失敗しました（buildID=" + buildData.ID + "）: " + sizeErr.Error()) // エラーをログ出力する
+			} else {
+				imageSizeBytes = sizeBytes // 取得したサイズをセットする
+			}
+		}
+	}
+
+	finishedAt := time.Now()                                                                                                             // 完了時刻を取得する
+	if err := act.BuildRepo.UpdateBuildResult(ctx, input.BuildID, buildStatus, builtImageURL, imageSizeBytes, finishedAt); err != nil { // ビルド結果を更新する
 		return fmt.Errorf("ビルド結果の更新に失敗しました: %w", err) // 更新エラーを返す
 	}
 

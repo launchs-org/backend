@@ -4,7 +4,7 @@ import (
 	"app/shared/config"
 	"app/shared/repository"
 	"builder/activity"
-	"builder/k8s"
+	builderk8s "builder/k8s"
 	"builder/workflow"
 	"log"
 	"os"
@@ -27,10 +27,14 @@ func main() {
 	}
 
 	// k8s クライアント初期化
-	k8sClient, err := k8s.NewClient() // k8s クライアントを生成する
+	k8sClient, err := builderk8s.NewClient() // k8s クライアントを生成する
 	if err != nil {
 		log.Fatalf("k8s クライアントの作成に失敗しました: %v", err) // kubeconfig が存在しない場合などにエラーを出す
 	}
+
+	// Harbor クライアント初期化（イメージサイズ取得用）
+	harborEndpoint := cfg.GetHarborEndpoint()                              // Harbor エンドポイントを取得する
+	harborClient := builderk8s.NewHarborClient(harborEndpoint) // Harbor クライアントを生成する
 
 	// リポジトリを生成する
 	deploymentRepo := repository.NewDeploymentRepository(repository.Database)             // deployment リポジトリを生成する
@@ -48,6 +52,8 @@ func main() {
 		HarborCredentialRepo: harborCredentialRepo,  // harbor credential リポジトリを注入する
 		LogChunkRepo:         logChunkRepo,          // ビルドログチャンクリポジトリを注入する
 		RegistryHost:         cfg.GetRegistryHost(), // Harbor ホスト名を設定する
+		HarborClient:         harborClient,          // Harbor クライアントを注入する
+		HarborEndpoint:       harborEndpoint,        // Harbor エンドポイントを注入する
 	}
 	cancelBuildActivities := &activity.CancelBuildActivities{ // CancelBuild Activity を生成する
 		K8sClient: k8sClient, // k8s クライアントを注入する
