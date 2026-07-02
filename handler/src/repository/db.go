@@ -248,6 +248,7 @@ func AutoMigrate() error {
 		&models.HarborCredential{},
 		&models.Deployment{},
 		&models.DeploymentBuild{},
+		&models.Image{}, // ビルド成果物（イメージ）を保存するテーブル
 		&models.BuildLogChunk{}, // ビルドログをchunk単位で保存するテーブル
 		&models.PodLogChunk{},   // 稼働中Podのログをchunk単位で保存するテーブル
 		&models.ApplyHistory{},
