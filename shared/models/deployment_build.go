@@ -28,9 +28,6 @@ type DeploymentBuild struct {
 
 	K8sJobName string `gorm:"type:varchar(63)" json:"k8s_job_name"` // k8s Job 名。キャンセル時に Job を削除するために使用
 
-	BuiltImageURL    string `gorm:"type:text"    json:"built_image_url"`    // ビルド成功時の push 先 URL
-	ImageSizeBytes   int64  `gorm:"default:0"    json:"image_size_bytes"`   // Harbor に格納されたイメージサイズ（バイト単位）
-
 	// ビルド時点のソーススナップショット（HEAD は解決済みの実 SHA）
 	GithubRepoURL  string `gorm:"type:text"          json:"github_repo_url"`  // GitHub リポジトリ URL スナップショット
 	CommitSHA      string `gorm:"type:varchar(40)"   json:"commit_sha"`
