@@ -8,7 +8,7 @@ vars:
 tasks:
   default:
     cmds:
-      - cmd: 'echo "使用可能なタスク: setup, reset, up, down, logs, logs:frontend, logs:backend, release, test-all"'
+      - cmd: 'echo "使用可能なタスク: setup, reset, up, down, logs, logs:frontend, logs:backend, release, test-all, test:handler, test:builder, test:watcher, test:controller"'
     silent: true
 
   # リセットコマンド
@@ -100,4 +100,32 @@ tasks:
       # controller サービスのテストを実行する
       - docker compose -f docker-compose-test.yaml up --abort-on-container-exit --exit-code-from controller-test controller-test
       # テスト終了後にコンテナとボリュームを削除する
+      - docker compose -f docker-compose-test.yaml down -v
+
+  # handler サービス単体のテストを実行するコマンド
+  test:handler:
+    cmds:
+      - docker compose -f docker-compose-test.yaml build handler-test
+      - docker compose -f docker-compose-test.yaml up --abort-on-container-exit --exit-code-from handler-test handler-test postgres-test
+      - docker compose -f docker-compose-test.yaml down -v
+
+  # builder サービス単体のテストを実行するコマンド
+  test:builder:
+    cmds:
+      - docker compose -f docker-compose-test.yaml build builder-test
+      - docker compose -f docker-compose-test.yaml up --abort-on-container-exit --exit-code-from builder-test builder-test
+      - docker compose -f docker-compose-test.yaml down -v
+
+  # watcher サービス単体のテストを実行するコマンド
+  test:watcher:
+    cmds:
+      - docker compose -f docker-compose-test.yaml build watcher-test
+      - docker compose -f docker-compose-test.yaml up --abort-on-container-exit --exit-code-from watcher-test watcher-test
+      - docker compose -f docker-compose-test.yaml down -v
+
+  # controller サービス単体のテストを実行するコマンド
+  test:controller:
+    cmds:
+      - docker compose -f docker-compose-test.yaml build controller-test
+      - docker compose -f docker-compose-test.yaml up --abort-on-container-exit --exit-code-from controller-test controller-test
       - docker compose -f docker-compose-test.yaml down -v

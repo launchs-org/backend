@@ -1,29 +1,36 @@
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
-name: Test
+name: Test Handler
 
 on:
   push:
     branches:
       - "**"
+    paths:
+      - "handler/**"
+      - "database/**"
   pull_request:
     branches:
       - "**"
+    paths:
+      - "handler/**"
+      - "database/**"
 
 jobs:
   test:
-    name: Go Test
+    name: handler テスト
     runs-on: ubuntu-latest
 
     steps:
       - name: リポジトリをチェックアウト
         uses: actions/checkout@v4
 
-      - name: テスト用コンテナをビルドして実行
-        run: |
-          docker compose -f docker-compose-test.yaml up \
-            --build \
-            --abort-on-container-exit \
-            --exit-code-from app-test
+      - name: Task をインストール
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+
+      - name: handler サービスのテストを実行
+        run: task test:handler
 
       - name: テスト用コンテナを削除
         if: always()
