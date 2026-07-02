@@ -115,12 +115,7 @@ func (act *BuildActivities) StreamBuildLogsActivity(ctx context.Context, input B
 		return fmt.Errorf("ビルドレコードの取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
-	projectData, err := act.ProjectRepo.FindByIDNoTx(ctx, buildData.ProjectID) // project を取得する
-	if err != nil {
-		return fmt.Errorf("プロジェクトの取得に失敗しました: %w", err) // 取得エラーを返す
-	}
-
-	logCh := collectJobLogs(ctx, act.K8sClient, projectData.Namespace, buildData.ID) // ジョブのログをチャンネルで取得する
+	logCh := collectJobLogs(ctx, act.K8sClient, buildkitNamespace, buildData.ID) // ビルドジョブは buildkit namespace に作成されるためそちらを使う
 
 	ticker := time.NewTicker(3 * time.Second) // 3秒ごとにバッファをフラッシュするタイマーを生成する
 	defer ticker.Stop()                       // 終了時にタイマーを停止する
