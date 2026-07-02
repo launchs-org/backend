@@ -65,7 +65,7 @@ func (mock *mockDeploymentRepository) UpdateDeleteProgress(ctx context.Context, 
 	}
 	return nil
 }
-func (mock *mockDeploymentRepository) UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error { return nil }
+func (mock *mockDeploymentRepository) UpdatePendingImageID(ctx context.Context, deploymentID string, imageID string) error { return nil }
 func (mock *mockDeploymentRepository) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error { return nil }
 func (mock *mockDeploymentRepository) UpdatePendingGithubBuildFields(ctx context.Context, deploymentID string, repoURL string, branch string, commitSHA string, directory string) error { return nil }
 func (mock *mockDeploymentRepository) UpdateDeploymentStatus(ctx context.Context, deploymentID string, status models.DeploymentStatus) error { return nil }

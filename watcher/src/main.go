@@ -49,6 +49,7 @@ func main() {
 	applyHistoryRepo := repository.NewApplyHistoryRepository(repository.Database)                 // apply_history リポジトリを生成する
 	podLogChunkRepo := repository.NewPodLogChunkRepository(repository.Database)                   // pod ログチャンクリポジトリを生成する
 	deploymentMetricsRepo := repository.NewDeploymentMetricsRepository(repository.Database)       // deployment metrics リポジトリを生成する
+	imageRepo := repository.NewImageRepository(repository.Database)                               // image リポジトリを生成する
 
 	// Harbor クライアントを初期化する（ビルドログ収集に使用）
 	harborClient := k8s.NewHarborClient(
@@ -63,7 +64,7 @@ func main() {
 		go k8s.WatchIngressRoutes(ctx, dynamicClient, ingressRouteRepo)                      // Traefik IngressRoute の状態変化を監視して DB を自動更新する
 		go k8s.WatchPVCs(ctx, k8sClient, volumeRepo)                                         // PVC の Bound 状態を監視して DB を自動更新する
 		go k8s.WatchNamespaces(ctx, k8sClient, projectRepo)                                  // Namespace の削除イベントを監視して DB の Project レコードを削除する
-		go k8s.WatchBuildJobs(ctx, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, harborClient, "harbor.main-harbor") // Build Job の完了・失敗を監視して DB を自動更新する
+		go k8s.WatchBuildJobs(ctx, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, imageRepo, harborClient, "harbor.main-harbor") // Build Job の完了・失敗を監視して DB を自動更新する
 		go k8s.PollMetrics(ctx, k8sClient, metricsClient, deploymentRepo, projectRepo, deploymentMetricsRepo) // 30 秒ごとに Pod メトリクスを収集して DB に保存する
 		k8s.WatchDeployments(ctx, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, podLogChunkRepo, projectRepo) // k8s Deployment の状態変化を監視して DB を自動更新する
 	})
