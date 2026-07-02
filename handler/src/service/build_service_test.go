@@ -57,7 +57,7 @@ func (mock *mockDeploymentBuildRepository) FindAllBuilding(ctx context.Context) 
 	return nil, nil // テストでは使用しないためデフォルト nil を返す
 }
 
-func (mock *mockDeploymentBuildRepository) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, imageSizeBytes int64, finishedAt time.Time) error {
+func (mock *mockDeploymentBuildRepository) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, finishedAt time.Time) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
@@ -184,7 +184,7 @@ func TestTriggerBuild_正常系(t *testing.T) {
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, nil, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
 
 	resultBuild, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "") // ビルドをトリガーする
 	if err != nil {
@@ -234,7 +234,7 @@ func TestTriggerBuild_403_他ユーザー(t *testing.T) {
 	harborCredRepo := &mockHarborCredentialRepository{}     // harbor credential リポジトリのモックを生成する
 	k8sClient := fake.NewSimpleClientset()                  // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, nil, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
 
 	_, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "") // ビルドをトリガーする
 	if err == nil {                                                  // エラーが返ることを確認する
@@ -283,7 +283,7 @@ func TestTriggerBuild_409_ビルド中(t *testing.T) {
 	harborCredRepo := &mockHarborCredentialRepository{}     // harbor credential リポジトリのモックを生成する
 	k8sClient := fake.NewSimpleClientset()                  // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, nil, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
 
 	_, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "") // ビルドをトリガーする
 	if err == nil {                                                  // エラーが返ることを確認する
@@ -358,7 +358,7 @@ func TestCancelBuild_正常系(t *testing.T) {
 		},
 	}
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, nil, "", workflowStarter) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", workflowStarter) // サービスを生成する
 
 	err := buildSvc.CancelBuild(ctx, "user-1", "build-1") // ビルドをキャンセルする
 	if err != nil {                                        // エラーが返った場合はテスト失敗
@@ -405,7 +405,7 @@ func TestCancelBuild_完了済みビルドはキャンセル不可(t *testing.T)
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, nil, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
 
 	err := buildSvc.CancelBuild(ctx, "user-1", "build-1") // 完了済みビルドをキャンセルする
 	if err != ErrBuildNotCancellable {                     // ErrBuildNotCancellable が返ることを確認する
@@ -449,7 +449,7 @@ func TestCancelBuild_403_他ユーザー(t *testing.T) {
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, nil, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
 
 	err := buildSvc.CancelBuild(ctx, "user-1", "build-1") // 他ユーザーのビルドをキャンセルする
 	if err != ErrForbidden {                               // ErrForbidden が返ることを確認する
@@ -495,7 +495,7 @@ func TestGetBuildLogs_正常系(t *testing.T) {
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, nil, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
 
 	logs, _, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", nil) // ログを取得する
 	if err != nil {                                                        // エラーが返った場合はテスト失敗
@@ -548,7 +548,7 @@ func TestGetBuildLogs_since指定(t *testing.T) {
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, nil, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
 
 	logs, _, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", &sinceTime) // since を指定してログを取得する
 	if err != nil {                                                              // エラーが返った場合はテスト失敗
@@ -597,7 +597,7 @@ func TestGetBuildLogs_チャンクなし(t *testing.T) {
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, nil, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
 
 	logs, _, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", nil) // ログを取得する
 	if err != nil {                                                       // エラーが返った場合はテスト失敗
@@ -637,7 +637,7 @@ func TestGetBuildLogs_403_他ユーザー(t *testing.T) {
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, &mockBuildLogChunkRepository{}, k8sClient, nil, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
 
 	_, _, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", nil) // 他ユーザーのログを取得しようとする
 	if err != ErrForbidden {                                          // ErrForbidden が返ることを確認する
@@ -671,7 +671,7 @@ func TestListBuildsByProject_正常系(t *testing.T) {
 		},
 	}
 
-	buildSvc := NewBuildService(&mockDeploymentRepository{}, buildRepo, projectRepo, &mockHarborCredentialRepository{findByProjectIDNoTxFunc: func(ctx context.Context, projectID string) (*models.HarborCredential, error) { return nil, nil }}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), nil, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(&mockDeploymentRepository{}, buildRepo, projectRepo, &mockHarborCredentialRepository{findByProjectIDNoTxFunc: func(ctx context.Context, projectID string) (*models.HarborCredential, error) { return nil, nil }}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}) // サービスを生成する
 
 	builds, err := buildSvc.ListBuildsByProject(ctx, "user-1", "project-1") // ビルド一覧を取得する
 	if err != nil {                                                           // エラーが返った場合はテスト失敗
@@ -700,7 +700,7 @@ func TestListBuildsByProject_403_他ユーザー(t *testing.T) {
 		},
 	}
 
-	buildSvc := NewBuildService(&mockDeploymentRepository{}, &mockDeploymentBuildRepository{}, projectRepo, &mockHarborCredentialRepository{findByProjectIDNoTxFunc: func(ctx context.Context, projectID string) (*models.HarborCredential, error) { return nil, nil }}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), nil, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(&mockDeploymentRepository{}, &mockDeploymentBuildRepository{}, projectRepo, &mockHarborCredentialRepository{findByProjectIDNoTxFunc: func(ctx context.Context, projectID string) (*models.HarborCredential, error) { return nil, nil }}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}) // サービスを生成する
 
 	_, err := buildSvc.ListBuildsByProject(ctx, "user-1", "project-1") // 他ユーザーのプロジェクトのビルドを取得しようとする
 	if err != ErrForbidden {                                            // ErrForbidden が返ることを確認する

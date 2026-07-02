@@ -83,6 +83,7 @@ type deploymentServiceImpl struct {
 	volumeMountRepo  repository.VolumeMountRepository     // volume_mount リポジトリ
 	applyHistoryRepo repository.ApplyHistoryRepository    // apply_history リポジトリ（not_init 削除時の DB クリーンアップ用）
 	buildRepo        repository.DeploymentBuildRepository // build リポジトリ（not_init 削除時の DB クリーンアップ用）
+	imageRepo        repository.ImageRepository            // image リポジトリ（image_url 直接指定時の Image レコード作成用）
 	userQuotaRepo    repository.UserQuotaRepository       // user_quota リポジトリ（Quotaチェック用）
 	k8sClient        k8sclient.Interface                  // k8s クライアント（リソース存在確認用）
 	temporalClient   WorkflowStarter                     // Temporal クライアント（DeleteDeployment Workflow 起動用）
@@ -97,6 +98,7 @@ func NewDeploymentService(
 	volumeMountRepo repository.VolumeMountRepository,
 	applyHistoryRepo repository.ApplyHistoryRepository,
 	buildRepo repository.DeploymentBuildRepository,
+	imageRepo repository.ImageRepository,
 	userQuotaRepo repository.UserQuotaRepository,
 	k8sClient k8sclient.Interface,
 	temporalClient WorkflowStarter,
@@ -109,6 +111,7 @@ func NewDeploymentService(
 		volumeMountRepo: volumeMountRepo,  // volume_mount リポジトリを注入する
 		applyHistoryRepo: applyHistoryRepo, // apply_history リポジトリを注入する
 		buildRepo:       buildRepo,        // build リポジトリを注入する
+		imageRepo:       imageRepo,        // image リポジトリを注入する
 		userQuotaRepo:   userQuotaRepo,    // user_quota リポジトリを注入する
 		k8sClient:       k8sClient,        // k8s クライアントを注入する
 		temporalClient:  temporalClient,   // Temporal クライアントを注入する
@@ -157,7 +160,6 @@ func (svc *deploymentServiceImpl) CreateDeployment(ctx context.Context, req Crea
 		Type:                       models.DeploymentType(req.Type),             // デプロイメントタイプを設定する
 		Status:                     initialStatus,                               // 初期ステータスを設定する
 		AppStatus:                  models.AppStatusPending,                     // 初期アプリステータスを設定する
-		PendingImageURL:            req.ImageURL,                                // pending に設定する
 		GithubRepoURL:              req.GithubRepoURL,                           // 作成時点の値を確定フィールドにも保持する
 		PendingGithubRepoURL:       req.GithubRepoURL,                          // pending に設定する
 		GithubBranch:               req.GithubBranch,                            // 作成時点の値を確定フィールドにも保持する
@@ -173,6 +175,21 @@ func (svc *deploymentServiceImpl) CreateDeployment(ctx context.Context, req Crea
 
 	if err := svc.deploymentRepo.Create(ctx, deploymentData); err != nil { // リポジトリ経由で Deployment レコードを作成する
 		return nil, err // 作成エラーを返す
+	}
+
+	if req.ImageURL != "" { // 外部イメージURL直接指定の場合は Image レコードを作成する
+		imageData := &models.Image{
+			ProjectID: req.ProjectID, // プロジェクト ID を設定する
+			BuildID:   nil,           // ビルドを経由しない直接指定のため nil
+			ImageURL:  req.ImageURL,  // 指定された URL を設定する
+		}
+		if err := svc.imageRepo.Create(ctx, imageData); err != nil { // Image レコードを作成する
+			return nil, err // 作成エラーを返す
+		}
+		if err := svc.deploymentRepo.UpdatePendingImageID(ctx, deploymentData.ID, imageData.ID); err != nil { // pending_image_id を更新する
+			return nil, err // 更新エラーを返す
+		}
+		deploymentData.PendingImageID = &imageData.ID // 呼び出し元に返す値にも反映する
 	}
 
 	return deploymentData, nil // 作成した deployment を返す
@@ -211,8 +228,16 @@ func (svc *deploymentServiceImpl) UpdateDeployment(ctx context.Context, userID s
 	}
 
 	// 送られてきたフィールドのみ pending_*** に書き込む
-	if req.ImageURL != nil {
-		deploymentData.PendingImageURL = *req.ImageURL // pending image_url を更新する
+	if req.ImageURL != nil { // 外部イメージURL直接指定の場合は Image レコードを作成してから pending_image_id を更新する
+		imageData := &models.Image{
+			ProjectID: deploymentData.ProjectID, // プロジェクト ID を設定する
+			BuildID:   nil,                      // ビルドを経由しない直接指定のため nil
+			ImageURL:  *req.ImageURL,             // 指定された URL を設定する
+		}
+		if err := svc.imageRepo.Create(ctx, imageData); err != nil { // Image レコードを作成する
+			return nil, err // 作成エラーを返す
+		}
+		deploymentData.PendingImageID = &imageData.ID // pending_image_id を更新する
 	}
 	if req.GithubRepoURL != nil {
 		deploymentData.PendingGithubRepoURL = *req.GithubRepoURL // pending github_repo_url を更新する
@@ -263,7 +288,7 @@ func (svc *deploymentServiceImpl) DiscardPending(ctx context.Context, userID str
 	}
 
 	// pending フィールドを現在の適用済み値で上書きしてクリアする
-	deploymentData.PendingImageURL            = deploymentData.ImageURL            // pending_image_url を現在値に戻す
+	deploymentData.PendingImageID             = deploymentData.ImageID             // pending_image_id を現在値に戻す
 	deploymentData.PendingGithubRepoURL       = deploymentData.GithubRepoURL       // pending_github_repo_url を現在値に戻す
 	deploymentData.PendingGithubBranch        = deploymentData.GithubBranch        // pending_github_branch を現在値に戻す
 	deploymentData.PendingGithubCommitSHA     = deploymentData.GithubCommitSHA     // pending_github_commit_sha を現在値に戻す

@@ -89,6 +89,7 @@ type deploymentTemplateServiceImpl struct {
 	volumeRepo          repository.VolumeRepository               // ボリュームリポジトリ
 	volumeMountRepo     repository.VolumeMountRepository          // ボリュームマウントリポジトリ
 	projectRepo         repository.ProjectRepository              // プロジェクトリポジトリ（所有権チェック用）
+	imageRepo           repository.ImageRepository                 // イメージリポジトリ
 	userQuotaRepo       repository.UserQuotaRepository            // クォータリポジトリ
 }
 
@@ -103,6 +104,7 @@ func NewDeploymentTemplateService(
 	volumeRepo repository.VolumeRepository,
 	volumeMountRepo repository.VolumeMountRepository,
 	projectRepo repository.ProjectRepository,
+	imageRepo repository.ImageRepository,
 	userQuotaRepo repository.UserQuotaRepository,
 ) DeploymentTemplateService {
 	return &deploymentTemplateServiceImpl{
@@ -115,6 +117,7 @@ func NewDeploymentTemplateService(
 		volumeRepo:      volumeRepo,      // ボリュームリポジトリを注入する
 		volumeMountRepo: volumeMountRepo, // ボリュームマウントリポジトリを注入する
 		projectRepo:     projectRepo,     // プロジェクトリポジトリを注入する
+		imageRepo:       imageRepo,       // イメージリポジトリを注入する
 		userQuotaRepo:   userQuotaRepo,   // クォータリポジトリを注入する
 	}
 }
@@ -283,20 +286,34 @@ func (svc *deploymentTemplateServiceImpl) CreateDeploymentFromTemplate(ctx conte
 	var deploymentData *models.Deployment                                                                   // 作成したデプロイメントを格納する変数
 	err = svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {                                    // トランザクションを開始する
 		deploymentData = &models.Deployment{                                                               // デプロイメントレコードを構築する
-			ProjectID:       req.ProjectID,                     // プロジェクト ID を設定する
-			Name:            req.Name,                          // デプロイメント名を設定する
-			Type:            models.DeploymentTypeImageURL,     // image_url タイプ固定
-			Status:          models.DeploymentStatusPending,    // pending ステータスで作成する
-			AppStatus:       models.AppStatusPending,           // 初期アプリステータスを設定する
-			PendingImageURL: imageURL,                          // イメージ URL を pending に設定する
-			InstanceSize:    instanceSize,                      // インスタンスサイズを設定する
-			Replicas:        replicas,                          // レプリカ数を設定する
-			Command:         templateData.Command,              // コマンドをテンプレートから引き継ぐ
-			Args:            templateData.Args,                 // 引数をテンプレートから引き継ぐ
+			ProjectID:    req.ProjectID,                     // プロジェクト ID を設定する
+			Name:         req.Name,                          // デプロイメント名を設定する
+			Type:         models.DeploymentTypeImageURL,     // image_url タイプ固定
+			Status:       models.DeploymentStatusPending,    // pending ステータスで作成する
+			AppStatus:    models.AppStatusPending,           // 初期アプリステータスを設定する
+			InstanceSize: instanceSize,                      // インスタンスサイズを設定する
+			Replicas:     replicas,                          // レプリカ数を設定する
+			Command:      templateData.Command,              // コマンドをテンプレートから引き継ぐ
+			Args:         templateData.Args,                 // 引数をテンプレートから引き継ぐ
 		}
 		if err := svc.deploymentRepo.CreateWithTx(ctx, tx, deploymentData); err != nil { // デプロイメントをトランザクション内で作成する
 			return err // 作成エラーを返してロールバックする
 		}
+
+		imageData := &models.Image{ // イメージレコードを構築する（テンプレートからの外部URL直接指定のため BuildID は nil）
+			ProjectID: req.ProjectID, // プロジェクト ID を設定する
+			BuildID:   nil,           // ビルドを経由しない直接指定のため nil
+			ImageURL:  imageURL,      // 解決したイメージ URL を設定する
+		}
+		if err := svc.imageRepo.CreateWithTx(ctx, tx, imageData); err != nil { // イメージをトランザクション内で作成する
+			return err // 作成エラーを返してロールバックする
+		}
+		if err := svc.deploymentRepo.Updates(ctx, tx, deploymentData, map[string]interface{}{ // pending_image_id を更新する
+			"pending_image_id": imageData.ID,
+		}); err != nil {
+			return err // 更新エラーを返してロールバックする
+		}
+		deploymentData.PendingImageID = &imageData.ID // 呼び出し元に返す値にも反映する
 
 		if templateData.ServicePort != 0 { // サービスポートが設定されている場合はサービスを作成する
 			serviceData := &models.Service{

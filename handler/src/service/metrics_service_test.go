@@ -77,7 +77,7 @@ func (mock *mockDeploymentRepoForMetrics) UpdateAppStatus(ctx context.Context, d
 func (mock *mockDeploymentRepoForMetrics) UpdateK8sStatus(ctx context.Context, deploymentID string, k8sStatus datatypes.JSON) error {
 	return nil
 }
-func (mock *mockDeploymentRepoForMetrics) UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error {
+func (mock *mockDeploymentRepoForMetrics) UpdatePendingImageID(ctx context.Context, deploymentID string, imageID string) error {
 	return nil
 }
 func (mock *mockDeploymentRepoForMetrics) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error {

@@ -53,6 +53,7 @@ func setupApplyTestDB(t *testing.T) *gorm.DB {
 			&models.HarborCredential{},
 			&models.Deployment{},
 			&models.DeploymentBuild{},
+			&models.Image{},
 			&models.ApplyHistory{},
 			&models.DeploymentWebhook{},
 			&models.Service{},
@@ -101,13 +102,24 @@ func createApplyTestProject(t *testing.T, db *gorm.DB, namespace string) *models
 // createApplyTestDeployment はテスト用の Deployment レコードを作成するヘルパー関数
 func createApplyTestDeployment(t *testing.T, db *gorm.DB, projectID string, name string) *models.Deployment {
 	t.Helper()
+
+	// テスト用 Image レコードを作成する（pending_image_id が参照する image_url を保持する）
+	imageData := &models.Image{
+		ProjectID: projectID,      // プロジェクト ID を設定する
+		ImageURL:  "nginx:latest", // イメージ URL を設定する
+	}
+	if err := db.Create(imageData).Error; err != nil {
+		t.Fatalf("テスト用 Image の作成に失敗しました: %v", err) // 作成失敗時はテスト失敗とする
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(imageData) }) // テスト終了後にレコードを削除する
+
 	deploymentData := &models.Deployment{
 		ProjectID:           projectID,                     // プロジェクト ID を設定する
 		Name:                name,                          // デプロイメント名を設定する
 		Type:                models.DeploymentTypeImageURL, // タイプを設定する
 		Status:              models.DeploymentStatusPending, // ステータスを pending に設定する
 		AppStatus:           models.AppStatusPending,       // アプリステータスを pending に設定する
-		PendingImageURL:     "nginx:latest",                // pending image_url を設定する
+		PendingImageID:      &imageData.ID,                 // pending image_id を設定する
 		PendingInstanceSize: "small",                       // pending instance_size を設定する
 		PendingReplicas:     1,                             // pending replicas を設定する
 	}
