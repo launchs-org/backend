@@ -1,7 +1,7 @@
 name: launchs-org-backend-mini-test
 
 services:
-  # テスト用 PostgreSQL
+  # テスト用 PostgreSQL（handler サービスのリポジトリテスト用）
   postgres-test:
     hostname: db-test
     image: postgres:18-alpine
@@ -16,26 +16,71 @@ services:
       timeout: 5s
       retries: 10
 
-  # テスト実行コンテナ
-  app-test:
-    hostname: app-test
+  # handler サービスのテスト
+  handler-test:
+    hostname: handler-test
     build:
-      context: ./app
+      context: ./handler
       dockerfile: dockerfile
       target: Develop
     volumes:
-      - ./app/src:/app/src
+      - ./handler/src:/app/src
     environment:
-      # テスト用 DB 接続情報
       DB_HOST: db-test
       DB_USER: testuser
       DB_PASSWORD: testpass
       DB_NAME: testdb
       DB_PORT: 5432
-      # JWT 公開鍵（テスト用ダミー値）
       JWT_PUBLIC_KEY: ""
     depends_on:
       postgres-test:
         condition: service_healthy
-    # テスト実行して終了する
+    command: ["go", "test", "./...", "-v", "-count=1"]
+
+  # builder サービスのテスト（DB 不要・モックのみ）
+  builder-test:
+    hostname: builder-test
+    build:
+      context: ./builder
+      dockerfile: dockerfile
+      target: Develop
+    volumes:
+      - ./builder/src:/app/src
+      - ./shared:/shared
+    environment:
+      DB_HOST: ""
+      DB_USER: ""
+      DB_PASSWORD: ""
+      DB_NAME: ""
+      DB_PORT: "5432"
+      REGISTRY_HOST: ""
+      HARBOR_ENDPOINT: ""
+    command: ["go", "test", "./...", "-v", "-count=1"]
+
+  # watcher サービスのテスト（DB 不要・モックのみ）
+  watcher-test:
+    hostname: watcher-test
+    build:
+      context: ./watcher
+      dockerfile: dockerfile
+      target: Develop
+    volumes:
+      - ./watcher/src:/app/src
+      - ./shared:/shared
+    environment:
+      DB_HOST: ""
+    command: ["go", "test", "./...", "-v", "-count=1"]
+
+  # controller サービスのテスト（DB 不要・モックのみ）
+  controller-test:
+    hostname: controller-test
+    build:
+      context: ./controller
+      dockerfile: dockerfile
+      target: Develop
+    volumes:
+      - ./controller/src:/app/src
+      - ./shared:/shared
+    environment:
+      DB_HOST: ""
     command: ["go", "test", "./...", "-v", "-count=1"]

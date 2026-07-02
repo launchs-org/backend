@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/datatypes"
 	"gorm.io/gorm"
+	temporalclient "go.temporal.io/sdk/client"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 )
 
@@ -247,17 +248,14 @@ func TestDeleteVolume_mounted状態のマウントが存在する場合はErrVol
 	}
 }
 
-// TestDeleteVolume_pendingのみのマウントは削除成功してPVCも削除される はガード通過と PVC 削除を確認する
+// TestDeleteVolume_pendingのみのマウントは削除成功してWorkflowが起動される はガード通過と Workflow 起動を確認する
+// DeleteVolume は volumeRepo.Delete を直接呼ばず、controller の DeleteVolumeWorkflow を起動して終了する
 func TestDeleteVolume_pendingのみのマウントは削除成功してPVCも削除される_service(t *testing.T) {
-	deleteCalled := false // リポジトリの Delete が呼ばれたか記録する
+	workflowStarted := false // Workflow が起動されたか記録する
 
 	volumeRepo := &mockVolumeRepository{
 		findByIDFunc: func(ctx context.Context, volumeID string) (*models.Volume, error) {
 			return &models.Volume{ID: "volume-id-1", ProjectID: "project-id-1"}, nil // volume を返す
-		},
-		deleteFunc: func(ctx context.Context, tx *gorm.DB, volume *models.Volume) error {
-			deleteCalled = true // 呼ばれたことを記録する
-			return nil
 		},
 	}
 	projectRepo := &mockProjectRepository{
@@ -272,31 +270,32 @@ func TestDeleteVolume_pendingのみのマウントは削除成功してPVCも削
 			}, nil
 		},
 	}
+	workflowMock := &mockWorkflowStarter{
+		executeWorkflowFunc: func(ctx context.Context, options temporalclient.StartWorkflowOptions, workflow interface{}, args ...interface{}) (temporalclient.WorkflowRun, error) {
+			workflowStarted = true // Workflow 起動を記録する
+			return nil, nil
+		},
+	}
 
-	db := setupApplyTestDB(t)                   // テスト用 DB を準備する
-	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
-	svc := NewVolumeService(db, volumeRepo, volumeMountRepo, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}, fakeK8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
+	svc := NewVolumeService(nil, volumeRepo, volumeMountRepo, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}, nil, "", workflowMock) // サービスを生成する
 
 	err := svc.DeleteVolume(context.Background(), "test-user-id", "volume-id-1") // 削除を実行する
 	if err != nil {                                                                // エラーが発生した場合は失敗する
 		t.Fatalf("DeleteVolume がエラーを返しました: %v", err)
 	}
-	if !deleteCalled { // リポジトリの Delete が呼ばれていない場合は失敗する
-		t.Error("volumeRepo.Delete が呼ばれていません")
+	if !workflowStarted { // Workflow が起動されていない場合は失敗する
+		t.Error("DeleteVolumeWorkflow が起動されていません")
 	}
 }
 
-// TestDeleteVolume_マウントなしは削除成功してPVCも削除される はマウントが存在しない場合の正常系を確認する
+// TestDeleteVolume_マウントなしは削除成功してWorkflowが起動される はマウントが存在しない場合の正常系を確認する
+// DeleteVolume は volumeRepo.Delete を直接呼ばず、controller の DeleteVolumeWorkflow を起動して終了する
 func TestDeleteVolume_マウントなしは削除成功してPVCも削除される_service(t *testing.T) {
-	deleteCalled := false // リポジトリの Delete が呼ばれたか記録する
+	workflowStarted := false // Workflow が起動されたか記録する
 
 	volumeRepo := &mockVolumeRepository{
 		findByIDFunc: func(ctx context.Context, volumeID string) (*models.Volume, error) {
 			return &models.Volume{ID: "volume-id-1", ProjectID: "project-id-1"}, nil // volume を返す
-		},
-		deleteFunc: func(ctx context.Context, tx *gorm.DB, volume *models.Volume) error {
-			deleteCalled = true // 呼ばれたことを記録する
-			return nil
 		},
 	}
 	projectRepo := &mockProjectRepository{
@@ -304,20 +303,21 @@ func TestDeleteVolume_マウントなしは削除成功してPVCも削除され�
 			return &models.Project{ID: projectID, UserID: "test-user-id", Namespace: "ns-test"}, nil // 所有者として返す
 		},
 	}
+	workflowMock := &mockWorkflowStarter{
+		executeWorkflowFunc: func(ctx context.Context, options temporalclient.StartWorkflowOptions, workflow interface{}, args ...interface{}) (temporalclient.WorkflowRun, error) {
+			workflowStarted = true // Workflow 起動を記録する
+			return nil, nil
+		},
+	}
 
-	db := setupApplyTestDB(t)                   // テスト用 DB を準備する
-	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
-	svc := NewVolumeService(db, &mockVolumeRepository{
-		findByIDFunc: volumeRepo.findByIDFunc,
-		deleteFunc:   volumeRepo.deleteFunc,
-	}, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}, fakeK8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
+	svc := NewVolumeService(nil, volumeRepo, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}, nil, "", workflowMock) // サービスを生成する
 
 	err := svc.DeleteVolume(context.Background(), "test-user-id", "volume-id-1") // 削除を実行する
 	if err != nil {                                                                // エラーが発生した場合は失敗する
 		t.Fatalf("DeleteVolume がエラーを返しました: %v", err)
 	}
-	if !deleteCalled { // リポジトリの Delete が呼ばれていない場合は失敗する
-		t.Error("volumeRepo.Delete が呼ばれていません")
+	if !workflowStarted { // Workflow が起動されていない場合は失敗する
+		t.Error("DeleteVolumeWorkflow が起動されていません")
 	}
 }
 

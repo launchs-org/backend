@@ -11,6 +11,7 @@ import (
 	"handler/models"
 	"handler/repository"
 
+	"gorm.io/datatypes"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"k8s.io/client-go/kubernetes/fake"
@@ -271,8 +272,9 @@ func TestApplyService_ListApplyHistories_正常に履歴一覧が取得できる
 
 	// ApplyHistory レコードを作成する
 	historyData := &models.ApplyHistory{
-		DeploymentID: deploymentData.ID,         // deployment ID を設定する
-		Status:       models.ApplyStatusApplied, // ステータスを applied に設定する
+		DeploymentID: deploymentData.ID,                      // deployment ID を設定する
+		Status:       models.ApplyStatusApplied,              // ステータスを applied に設定する
+		Manifests:    datatypes.JSON([]byte(`{}`)),            // not null 制約を満たすためダミー JSON を設定する
 	}
 	if err := db.Create(historyData).Error; err != nil {
 		t.Fatalf("テスト用 ApplyHistory の作成に失敗しました: %v", err) // 作成失敗時はテスト失敗とする

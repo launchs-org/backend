@@ -86,10 +86,18 @@ tasks:
     cmds:
       - "{{.COMPOSE}} logs -f handler"
 
-  # テストを実行するコマンド
+  # テストを実行するコマンド（マイクロサービスごとに順次実行する）
   test-all:
     cmds:
-      # テスト用コンテナをビルドして起動し、テストを実行する
-      - docker compose -f docker-compose-test.yaml up --build --abort-on-container-exit --exit-code-from app-test
+      # イメージをビルドする
+      - docker compose -f docker-compose-test.yaml build
+      # handler サービスのテストを実行する
+      - docker compose -f docker-compose-test.yaml up --abort-on-container-exit --exit-code-from handler-test handler-test postgres-test
+      # builder サービスのテストを実行する
+      - docker compose -f docker-compose-test.yaml up --abort-on-container-exit --exit-code-from builder-test builder-test
+      # watcher サービスのテストを実行する
+      - docker compose -f docker-compose-test.yaml up --abort-on-container-exit --exit-code-from watcher-test watcher-test
+      # controller サービスのテストを実行する
+      - docker compose -f docker-compose-test.yaml up --abort-on-container-exit --exit-code-from controller-test controller-test
       # テスト終了後にコンテナとボリュームを削除する
       - docker compose -f docker-compose-test.yaml down -v
