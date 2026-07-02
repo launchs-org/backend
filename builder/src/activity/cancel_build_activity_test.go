@@ -41,7 +41,7 @@ func (mock *mockDeploymentBuildRepository) UpdateK8sJobName(ctx context.Context,
 	}
 	return nil
 }
-func (mock *mockDeploymentBuildRepository) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, imageSizeBytes int64, finishedAt time.Time) error { return nil }
+func (mock *mockDeploymentBuildRepository) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, finishedAt time.Time) error { return nil }
 func (mock *mockDeploymentBuildRepository) Delete(ctx context.Context, build *models.DeploymentBuild) error { return nil }
 func (mock *mockDeploymentBuildRepository) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error { return nil }
 func (mock *mockDeploymentBuildRepository) DeleteAllByProjectID(ctx context.Context, db *gorm.DB, projectID string) error { return nil }

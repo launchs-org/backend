@@ -29,6 +29,7 @@ type BuildActivities struct {
 	ProjectRepo          repository.ProjectRepository          // project リポジトリ
 	HarborCredentialRepo repository.HarborCredentialRepository // harbor credential リポジトリ
 	LogChunkRepo         repository.BuildLogChunkRepository    // ビルドログチャンクリポジトリ
+	ImageRepo            repository.ImageRepository             // image リポジトリ（ビルド成果物の記録用）
 	RegistryHost         string                                // ビルドジョブが使う Harbor ホスト名（クラスタ内 DNS 名）
 	HarborClient         *k8s.HarborClient                    // Harbor API クライアント（イメージサイズ取得用）
 	HarborEndpoint       string                                // Harbor API エンドポイント URL
@@ -163,8 +164,8 @@ func (act *BuildActivities) StreamBuildLogsActivity(ctx context.Context, input B
 	}
 }
 
-// SetPendingImageURLActivity はビルド成功時に pending_image_url と pending_github_* フィールドを更新し、組み立てたイメージ URL を返す
-func (act *BuildActivities) SetPendingImageURLActivity(ctx context.Context, input BuildWorkflowInput) (string, error) {
+// SetPendingImageActivity はビルド成功時に Image レコードを作成し、pending_image_id と pending_github_* フィールドを更新して imageID を返す
+func (act *BuildActivities) SetPendingImageActivity(ctx context.Context, input BuildWorkflowInput) (string, error) {
 	buildData, err := act.BuildRepo.FindByID(ctx, input.BuildID) // ビルドレコードを取得する
 	if err != nil {
 		return "", fmt.Errorf("ビルドレコードの取得に失敗しました: %w", err) // 取得エラーを返す
@@ -187,9 +188,18 @@ func (act *BuildActivities) SetPendingImageURLActivity(ctx context.Context, inpu
 		buildData.ID,     // ビルド ID をタグに使用する
 	) // イメージURLを組み立てる
 
-	deploymentIDValue := *buildData.DeploymentID                                                              // pointer をデリファレンスする
-	if err := act.DeploymentRepo.UpdatePendingImageURL(ctx, deploymentIDValue, builtImageURL); err != nil { // pending_image_url を更新する
-		return "", fmt.Errorf("pending_image_url の更新に失敗しました: %w", err) // 更新エラーを返す
+	imageData := &models.Image{ // Image レコードを生成する
+		ProjectID: buildData.ProjectID, // 親プロジェクトIDを設定する
+		BuildID:   &buildData.ID,       // 成果物を生んだビルドIDを設定する
+		ImageURL:  builtImageURL,       // 組み立てたイメージURLを設定する
+	}
+	if err := act.ImageRepo.Create(ctx, imageData); err != nil { // Image レコードを作成する
+		return "", fmt.Errorf("Image レコードの作成に失敗しました: %w", err) // 作成エラーを返す
+	}
+
+	deploymentIDValue := *buildData.DeploymentID                                                        // pointer をデリファレンスする
+	if err := act.DeploymentRepo.UpdatePendingImageID(ctx, deploymentIDValue, imageData.ID); err != nil { // pending_image_id を更新する
+		return "", fmt.Errorf("pending_image_id の更新に失敗しました: %w", err) // 更新エラーを返す
 	}
 
 	deploymentData, err := act.DeploymentRepo.FindByID(ctx, deploymentIDValue) // pending_github_* 更新用に deployment を取得する
@@ -201,20 +211,19 @@ func (act *BuildActivities) SetPendingImageURLActivity(ctx context.Context, inpu
 		return "", fmt.Errorf("pending_github_* フィールドの更新に失敗しました: %w", err) // 更新エラーを返す
 	}
 
-	return builtImageURL, nil // イメージ URL を返す
+	return imageData.ID, nil // Image ID を返す
 }
 
 // UpdateBuildStatusActivity はビルド結果のステータスと Deployment の状態を更新する
-// builtImageURL はビルド成功時のみ値が入り、失敗時は空文字を渡す
-func (act *BuildActivities) UpdateBuildStatusActivity(ctx context.Context, input BuildWorkflowInput, buildStatus models.BuildStatus, builtImageURL string) error {
+// imageID はビルド成功時のみ値が入り、失敗時は空文字を渡す
+func (act *BuildActivities) UpdateBuildStatusActivity(ctx context.Context, input BuildWorkflowInput, buildStatus models.BuildStatus, imageID string) error {
 	buildData, err := act.BuildRepo.FindByID(ctx, input.BuildID) // ビルドレコードを取得する
 	if err != nil {
 		return fmt.Errorf("ビルドレコードの取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
-	// ビルド成功時のみ Harbor からイメージサイズを取得する
-	var imageSizeBytes int64
-	if buildStatus == models.BuildStatusSucceeded && act.HarborClient != nil && builtImageURL != "" {
+	// ビルド成功時のみ Harbor からイメージサイズを取得して Image レコードに反映する
+	if buildStatus == models.BuildStatusSucceeded && act.HarborClient != nil && imageID != "" {
 		credentialData, credErr := act.HarborCredentialRepo.FindByProjectIDNoTx(ctx, buildData.ProjectID) // Harbor 認証情報を取得する
 		if credErr != nil {
 			logger.PrintErr("UpdateBuildStatusActivity: harbor credential の取得に失敗しました（projectID=" + buildData.ProjectID + "）: " + credErr.Error()) // エラーをログ出力する
@@ -223,17 +232,17 @@ func (act *BuildActivities) UpdateBuildStatusActivity(ctx context.Context, input
 			if buildData.DeploymentID != nil {
 				repositoryName = *buildData.DeploymentID // Deployment ID が存在する場合はそれをリポジトリ名として使う
 			}
-			sizeBytes, sizeErr := act.HarborClient.GetArtifactSize(ctx, buildData.ProjectID, repositoryName, credentialData.RobotName, credentialData.RobotSecret) // Harbor からイメージサイズを取得する
+			sizeBytes, sizeErr := act.HarborClient.GetArtifactSize(ctx, buildData.ProjectID, repositoryName, buildData.ID, credentialData.RobotName, credentialData.RobotSecret) // Harbor からタグ単位でイメージサイズを取得する
 			if sizeErr != nil {
 				logger.PrintErr("UpdateBuildStatusActivity: イメージサイズの取得に失敗しました（buildID=" + buildData.ID + "）: " + sizeErr.Error()) // エラーをログ出力する
-			} else {
-				imageSizeBytes = sizeBytes // 取得したサイズをセットする
+			} else if err := act.ImageRepo.UpdateSizeBytes(ctx, imageID, sizeBytes); err != nil { // Image レコードのサイズを更新する
+				logger.PrintErr("UpdateBuildStatusActivity: Image サイズの更新に失敗しました（imageID=" + imageID + "）: " + err.Error()) // エラーをログ出力する
 			}
 		}
 	}
 
-	finishedAt := time.Now()                                                                                                             // 完了時刻を取得する
-	if err := act.BuildRepo.UpdateBuildResult(ctx, input.BuildID, buildStatus, builtImageURL, imageSizeBytes, finishedAt); err != nil { // ビルド結果を更新する
+	finishedAt := time.Now()                                                                     // 完了時刻を取得する
+	if err := act.BuildRepo.UpdateBuildResult(ctx, input.BuildID, buildStatus, finishedAt); err != nil { // ビルド結果を更新する
 		return fmt.Errorf("ビルド結果の更新に失敗しました: %w", err) // 更新エラーを返す
 	}
 

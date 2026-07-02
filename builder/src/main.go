@@ -42,6 +42,7 @@ func main() {
 	buildRepo := repository.NewDeploymentBuildRepository(repository.Database)             // build リポジトリを生成する
 	harborCredentialRepo := repository.NewHarborCredentialRepository(repository.Database) // harbor credential リポジトリを生成する
 	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)            // ビルドログチャンクリポジトリを生成する
+	imageRepo := repository.NewImageRepository(repository.Database)                       // image リポジトリを生成する
 
 	// Activity を生成する
 	buildActivities := &activity.BuildActivities{ // Build Activity を生成する
@@ -51,6 +52,7 @@ func main() {
 		ProjectRepo:          projectRepo,           // project リポジトリを注入する
 		HarborCredentialRepo: harborCredentialRepo,  // harbor credential リポジトリを注入する
 		LogChunkRepo:         logChunkRepo,          // ビルドログチャンクリポジトリを注入する
+		ImageRepo:            imageRepo,             // image リポジトリを注入する
 		RegistryHost:         cfg.GetRegistryHost(), // Harbor ホスト名を設定する
 		HarborClient:         harborClient,          // Harbor クライアントを注入する
 		HarborEndpoint:       harborEndpoint,        // Harbor エンドポイントを注入する

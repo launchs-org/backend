@@ -9,7 +9,7 @@ import (
 )
 
 // BuildWorkflow はビルド処理を担う Temporal Workflow
-// Activity 連鎖: VerifyHarborCredential → CreateBuildJob → StreamBuildLogs → SetPendingImageURL → UpdateBuildStatus
+// Activity 連鎖: VerifyHarborCredential → CreateBuildJob → StreamBuildLogs → SetPendingImage → UpdateBuildStatus
 func BuildWorkflow(ctx workflow.Context, input activity.BuildWorkflowInput) error {
 	activityOptions := workflow.ActivityOptions{
 		StartToCloseTimeout: buildActivityTimeout, // Activity タイムアウトを設定する
@@ -42,14 +42,14 @@ func BuildWorkflow(ctx workflow.Context, input activity.BuildWorkflowInput) erro
 		return updateBuildStatusOnError(ctx, input) // エラー時にビルドステータスを failed に更新する
 	}
 
-	// 4. ビルド成功時: pending_image_url と pending_github_* フィールドを更新し、イメージ URL を受け取る
-	var builtImageURL string                                                                                      // ビルド済みイメージ URL を格納する変数
-	if err := workflow.ExecuteActivity(ctx, "SetPendingImageURLActivity", input).Get(ctx, &builtImageURL); err != nil { // イメージ URL を戻り値として受け取る
+	// 4. ビルド成功時: Image レコードを作成し pending_image_id と pending_github_* フィールドを更新し、imageID を受け取る
+	var imageID string                                                                                      // 作成した Image ID を格納する変数
+	if err := workflow.ExecuteActivity(ctx, "SetPendingImageActivity", input).Get(ctx, &imageID); err != nil { // imageID を戻り値として受け取る
 		return updateBuildStatusOnError(ctx, input) // エラー時にビルドステータスを failed に更新する
 	}
 
-	// 5. ビルドステータスを succeeded に更新し Deployment ステータスを pending に遷移する（成功時のみ builtImageURL を渡す）
-	if err := workflow.ExecuteActivity(ctx, "UpdateBuildStatusActivity", input, models.BuildStatusSucceeded, builtImageURL).Get(ctx, nil); err != nil {
+	// 5. ビルドステータスを succeeded に更新し Deployment ステータスを pending に遷移する（成功時のみ imageID を渡す）
+	if err := workflow.ExecuteActivity(ctx, "UpdateBuildStatusActivity", input, models.BuildStatusSucceeded, imageID).Get(ctx, nil); err != nil {
 		return err // 更新エラーを返す
 	}
 

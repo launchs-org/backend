@@ -42,8 +42,8 @@ func (testSuite *BuildWorkflowTestSuite) TestBuildWorkflow_正常に5Activity連
 	testSuite.testEnv.OnActivity("VerifyHarborCredentialActivity", mock.Anything, input).Return(nil)          // 1. Harbor 認証確認
 	testSuite.testEnv.OnActivity("CreateBuildJobActivity", mock.Anything, input).Return(nil)                  // 2. Job 作成
 	testSuite.testEnv.OnActivity("StreamBuildLogsActivity", mock.Anything, input).Return(nil)                 // 3. ログストリーム
-	testSuite.testEnv.OnActivity("SetPendingImageURLActivity", mock.Anything, input).Return("registry.example.com/proj/img:tag", nil) // 4. pending_image_url 更新（イメージ URL を返す）
-	testSuite.testEnv.OnActivity("UpdateBuildStatusActivity", mock.Anything, input, models.BuildStatusSucceeded, "registry.example.com/proj/img:tag").Return(nil) // 5. succeeded 更新（builtImageURL を渡す）
+	testSuite.testEnv.OnActivity("SetPendingImageActivity", mock.Anything, input).Return("image-1", nil) // 4. pending_image_id 更新（イメージ ID を返す）
+	testSuite.testEnv.OnActivity("UpdateBuildStatusActivity", mock.Anything, input, models.BuildStatusSucceeded, "image-1").Return(nil) // 5. succeeded 更新（imageID を渡す）
 
 	testSuite.testEnv.ExecuteWorkflow(BuildWorkflow, input)
 
