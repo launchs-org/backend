@@ -93,6 +93,7 @@ func setupDeploymentEchoContext(method, path, body string, params map[string]str
 
 // TestCreateDeployment_正常にdeploymentが作成される は POST で status=pending、全フィールドが pending_*** に入ることを確認する
 func TestCreateDeployment_正常にdeploymentが作成される(t *testing.T) {
+	pendingImageID := "image-id-1" // pending_image_id に設定する ID を定義する
 	expectedDeployment := &models.Deployment{
 		ID:                  "deployment-id-1",           // deployment ID を設定する
 		ProjectID:           "project-id-1",              // project ID を設定する
@@ -100,7 +101,7 @@ func TestCreateDeployment_正常にdeploymentが作成される(t *testing.T) {
 		Type:                models.DeploymentTypeImageURL, // deployment タイプを設定する
 		Status:              models.DeploymentStatusPending, // ステータスを pending に設定する
 		AppStatus:           models.AppStatusPending,     // アプリステータスを pending に設定する
-		PendingImageURL:     "nginx:latest",              // pending image_url を設定する
+		PendingImageID:      &pendingImageID,             // pending image_id を設定する
 		PendingInstanceSize: "small",                     // pending instance_size を設定する
 		PendingReplicas:     1,                           // pending replicas を設定する
 	}
@@ -133,8 +134,8 @@ func TestCreateDeployment_正常にdeploymentが作成される(t *testing.T) {
 	if actualDeployment.AppStatus != models.AppStatusPending { // app_status が pending であることを確認する
 		t.Errorf("期待する app_status: pending, 実際の app_status: %s", actualDeployment.AppStatus)
 	}
-	if actualDeployment.PendingImageURL != "nginx:latest" { // pending_image_url が設定されていることを確認する
-		t.Errorf("期待する pending_image_url: nginx:latest, 実際の pending_image_url: %s", actualDeployment.PendingImageURL)
+	if actualDeployment.PendingImageID == nil || *actualDeployment.PendingImageID != "image-id-1" { // pending_image_id が設定されていることを確認する
+		t.Errorf("期待する pending_image_id: image-id-1, 実際の pending_image_id: %v", actualDeployment.PendingImageID)
 	}
 }
 
@@ -161,9 +162,10 @@ func TestCreateDeployment_サービスエラーで500になる(t *testing.T) {
 // TestUpdateDeployment_送ったフィールドのみpendingが更新される は PUT で送ったフィールドのみ更新されることを確認する
 func TestUpdateDeployment_送ったフィールドのみpendingが更新される(t *testing.T) {
 	updatedImageURL := "nginx:1.25"
+	updatedImageID := "image-id-updated"
 	expectedDeployment := &models.Deployment{
 		ID:              "deployment-id-1",            // deployment ID を設定する
-		PendingImageURL: updatedImageURL,              // 更新後の pending_image_url を設定する
+		PendingImageID:  &updatedImageID,              // 更新後の pending_image_id を設定する
 		PendingReplicas: 0,                            // replicas は送っていないので変化しない
 	}
 

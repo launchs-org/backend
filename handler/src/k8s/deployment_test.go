@@ -142,7 +142,7 @@ func (mock *mockDeploymentRepo) UpdateK8sStatus(ctx context.Context, deploymentI
 	mock.updatedK8sStatus = k8sStatus // 更新された k8s_status を記録する
 	return nil
 }
-func (mock *mockDeploymentRepo) UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error {
+func (mock *mockDeploymentRepo) UpdatePendingImageID(ctx context.Context, deploymentID string, imageID string) error {
 	return nil // 使用しない
 }
 func (mock *mockDeploymentRepo) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error {
@@ -273,7 +273,7 @@ func (mock *mockBuildRepoForDeployment) UpdateStatus(ctx context.Context, buildI
 func (mock *mockBuildRepoForDeployment) UpdateK8sJobName(ctx context.Context, buildID string, jobName string) error {
 	return nil // 使用しない
 }
-func (mock *mockBuildRepoForDeployment) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, imageSizeBytes int64, finishedAt time.Time) error {
+func (mock *mockBuildRepoForDeployment) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, finishedAt time.Time) error {
 	return nil // 使用しない
 }
 func (mock *mockBuildRepoForDeployment) Delete(ctx context.Context, build *models.DeploymentBuild) error {

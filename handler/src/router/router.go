@@ -18,6 +18,7 @@ type RouterOptions struct {
 	EnvVarHandler              *handler.EnvVarHandler              // env_var ハンドラー
 	VolumeHandler              *handler.VolumeHandler              // volume ハンドラー
 	BuildHandler               *handler.BuildHandler               // build ハンドラー
+	ImageHandler               *handler.ImageHandler               // image ハンドラー
 	WebhookHandler             *handler.WebhookHandler             // webhook ハンドラー
 	LogHandler                 *handler.LogHandler                 // log ハンドラー
 	MetricsHandler             *handler.MetricsHandler             // metrics ハンドラー
@@ -48,7 +49,8 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.DELETE("/projects/:id", opts.ProjectHandler.DeleteProject)           // project 削除エンドポイント
 	apiGroup.GET("/projects/:id/quota", opts.ProjectHandler.GetProjectQuota)      // project クォータ取得エンドポイント
 	apiGroup.GET("/projects/:id/builds", opts.BuildHandler.ListBuildsByProject)              // project 単位ビルド一覧取得エンドポイント
-	apiGroup.DELETE("/projects/:id/builds/:buildId", opts.BuildHandler.DeleteBuild)        // project 単位ビルド削除エンドポイント
+	apiGroup.GET("/projects/:id/images", opts.ImageHandler.ListImagesByProject)              // project 単位イメージ一覧取得エンドポイント
+	apiGroup.DELETE("/projects/:id/images/:imageId", opts.ImageHandler.DeleteImage)        // project 単位イメージ削除エンドポイント
 
 	// deployment エンドポイントを登録する
 	apiGroup.GET("/projects/:id/deployments", opts.DeploymentHandler.ListDeployments)    // deployment 一覧取得エンドポイント
@@ -70,6 +72,9 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.GET("/builds/:id", opts.BuildHandler.GetBuild)                  // ビルド取得エンドポイント
 	apiGroup.DELETE("/builds/:id", opts.BuildHandler.CancelBuild)           // ビルドキャンセルエンドポイント
 	apiGroup.GET("/builds/:id/logs", opts.BuildHandler.GetBuildLogs)        // ビルドログ取得エンドポイント
+
+	// image エンドポイントを登録する
+	apiGroup.GET("/images/:imageId", opts.ImageHandler.GetImage) // イメージ取得エンドポイント
 
 	// log エンドポイントを登録する
 	apiGroup.GET("/deployments/:id/logs", opts.LogHandler.GetPodLogs) // Pod ログ取得エンドポイント

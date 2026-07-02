@@ -39,6 +39,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		&models.HarborCredential{},
 		&models.Deployment{},
 		&models.DeploymentBuild{},
+		&models.Image{},
 		&models.ApplyHistory{},
 		&models.DeploymentWebhook{},
 		&models.Service{},
@@ -85,13 +86,14 @@ func TestDeploymentRepository_Create_正常に作成される(t *testing.T) {
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	repo := NewDeploymentRepository(db) // リポジトリを生成する
+	pendingImageID := "image-id-create" // pending_image_id に設定する ID を定義する
 	deploymentData := &models.Deployment{
 		ProjectID:           projectData.ID,                // プロジェクト ID を設定する
 		Name:                "test-app",                    // デプロイメント名を設定する
 		Type:                models.DeploymentTypeImageURL, // タイプを設定する
 		Status:              models.DeploymentStatusPending, // ステータスを設定する
 		AppStatus:           models.AppStatusPending,       // アプリステータスを設定する
-		PendingImageURL:     "nginx:latest",                // pending image_url を設定する
+		PendingImageID:      &pendingImageID,               // pending image_id を設定する
 		PendingInstanceSize: "small",                       // pending instance_size を設定する
 		PendingReplicas:     1,                             // pending replicas を設定する
 	}
@@ -111,8 +113,8 @@ func TestDeploymentRepository_Create_正常に作成される(t *testing.T) {
 	if fetched.Status != models.DeploymentStatusPending { // status が pending であることを確認する
 		t.Errorf("期待する status: pending, 実際の status: %s", fetched.Status)
 	}
-	if fetched.PendingImageURL != "nginx:latest" { // pending_image_url が設定されていることを確認する
-		t.Errorf("期待する pending_image_url: nginx:latest, 実際の pending_image_url: %s", fetched.PendingImageURL)
+	if fetched.PendingImageID == nil || *fetched.PendingImageID != "image-id-create" { // pending_image_id が設定されていることを確認する
+		t.Errorf("期待する pending_image_id: image-id-create, 実際の pending_image_id: %v", fetched.PendingImageID)
 	}
 }
 
@@ -187,19 +189,21 @@ func TestDeploymentRepository_Save_正常に更新される(t *testing.T) {
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	// テスト用 Deployment を作成する
+	oldImageID := "image-id-old" // 更新前の値を定義する
 	deploymentData := &models.Deployment{
-		ProjectID:       projectData.ID,
-		Name:            "test-app",
-		Type:            models.DeploymentTypeImageURL,
-		Status:          models.DeploymentStatusPending,
-		AppStatus:       models.AppStatusPending,
-		PendingImageURL: "nginx:1.24", // 更新前の値を設定する
+		ProjectID:      projectData.ID,
+		Name:           "test-app",
+		Type:           models.DeploymentTypeImageURL,
+		Status:         models.DeploymentStatusPending,
+		AppStatus:      models.AppStatusPending,
+		PendingImageID: &oldImageID, // 更新前の値を設定する
 	}
 	db.Create(deploymentData)                                          // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
 
-	repo := NewDeploymentRepository(db)            // リポジトリを生成する
-	deploymentData.PendingImageURL = "nginx:1.25" // pending_image_url を更新する
+	repo := NewDeploymentRepository(db) // リポジトリを生成する
+	newImageID := "image-id-new"        // 更新後の値を定義する
+	deploymentData.PendingImageID = &newImageID // pending_image_id を更新する
 	err := repo.Save(context.Background(), deploymentData) // リポジトリを実行する
 	if err != nil {
 		t.Fatalf("Save がエラーを返しました: %v", err)
@@ -208,8 +212,8 @@ func TestDeploymentRepository_Save_正常に更新される(t *testing.T) {
 	// DB から取得して更新を確認する
 	var fetched models.Deployment
 	db.First(&fetched, "id = ?", deploymentData.ID) // 更新後のレコードを取得する
-	if fetched.PendingImageURL != "nginx:1.25" {    // 更新されていることを確認する
-		t.Errorf("期待する pending_image_url: nginx:1.25, 実際の pending_image_url: %s", fetched.PendingImageURL)
+	if fetched.PendingImageID == nil || *fetched.PendingImageID != "image-id-new" { // 更新されていることを確認する
+		t.Errorf("期待する pending_image_id: image-id-new, 実際の pending_image_id: %v", fetched.PendingImageID)
 	}
 }
 
