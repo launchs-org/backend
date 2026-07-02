@@ -1,0 +1,35 @@
+name: code-server
+description: "ブラウザで動作する VS Code 開発環境テンプレート"
+image_url: lscr.io/linuxserver/code-server:latest
+instance_size: large
+replicas: 1
+command: []
+args: []
+
+service:
+  port: 8443
+  target_port: 8443
+  type: ClusterIP
+
+env_vars:
+  - key: PUID
+    value: "1000"
+    is_secret: false
+  - key: PGID
+    value: "1000"
+    is_secret: false
+  - key: TZ
+    value: Asia/Tokyo
+    is_secret: false
+  - key: PASSWORD
+    auto_generate: true
+    length: 64
+    is_secret: true
+  - key: SUDO_PASSWORD
+    value: "password"
+    is_secret: false
+
+volumes:
+  - name: code-server-config
+    size_mb: 1024
+    mount_path: /config
