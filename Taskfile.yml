@@ -3,37 +3,43 @@
 version: '3'
 
 vars:
-  GREETING: Hello, World!
+  COMPOSE: docker compose -f docker-compose.yaml -f docker-compose-temporal.yaml
 
 tasks:
   default:
     cmds:
-      - echo "{{.GREETING}}"
+      - cmd: 'echo "使用可能なタスク: setup, reset, up, down, logs, logs:frontend, logs:backend, release, test-all"'
     silent: true
-  
+
   # リセットコマンド
   reset:
     cmds:
       - echo "コンテナを削除します"
-      # コンテナを削除
-      - cmd: docker compose down -v --rmi all
-      # コンテナを立ち上げる
+      - "{{.COMPOSE}} down -v --rmi all"
       - task: setup
     silent: true
 
   # セットアップするコマンド
   setup:
-    # envファイルを生成する
-    - echo "configファイルを生成します"
-    - task: config
+    cmds:
+      - echo "configファイルを生成します"
+      - task: config
 
-    # カギを生成する
-    - echo "各種カギを生成します"
-    - task: genkey
+      - echo "各種カギを生成します"
+      - task: genkey
 
-    # コンテナを立ち上げます
-    - echo "コンテナを立ち上げます"
-    - docker compose up -d
+      - echo "コンテナを立ち上げます"
+      - "{{.COMPOSE}} up -d"
+
+  # コンテナを起動するコマンド
+  up:
+    cmds:
+      - "{{.COMPOSE}} up -d"
+
+  # コンテナを停止するコマンド
+  down:
+    cmds:
+      - "{{.COMPOSE}} down"
 
   # カギを生成するコマンド
   genkey:
@@ -46,7 +52,7 @@ tasks:
       Build_Image:
         sh: docker build -q ./openssl
 
-    # 設定を更新するコマンド
+  # 設定を更新するコマンド
   config:
     cmds:
       - cmd: docker run --rm -it -v .\\config:/config/data {{.Build_Image}}
@@ -63,22 +69,22 @@ tasks:
   release:
     cmds:
       - echo "releaseビルドで起動します"
-      - cmd: docker compose -f docker-compose-build.yaml up -d --remove-orphans --build
+      - docker compose -f docker-compose-build.yaml up -d --remove-orphans --build
 
   # 全サービスのログを表示
   logs:
     cmds:
-      - docker compose logs -f
+      - "{{.COMPOSE}} logs -f"
 
   # フロントエンドのログを表示
   logs:frontend:
     cmds:
-      - docker compose logs -f frontend
+      - "{{.COMPOSE}} logs -f frontend"
 
   # バックエンドのログを表示
   logs:backend:
     cmds:
-      - docker compose logs -f app
+      - "{{.COMPOSE}} logs -f handler"
 
   # テストを実行するコマンド
   test-all:
