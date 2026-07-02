@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Play, Trash2, GitBranch, Container, Package, ExternalLink, Clock, CheckCircle2, XCircle, AlertCircle, Ban, GitCommit, X, Hammer, Copy, Eye, EyeOff, Webhook as WebhookIcon } from 'lucide-react'
+import { Play, Trash2, GitBranch, Container, Package, ExternalLink, Clock, CheckCircle2, XCircle, AlertCircle, Ban, GitCommit, X, Hammer, Copy, Eye, EyeOff, Webhook as WebhookIcon, Rocket, FolderOpen } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { StatusBadge } from '@/components/StatusBadge'
 import { LogViewer } from '@/components/LogViewer'
@@ -652,6 +652,7 @@ function BuildsTab({
   const [building, setBuilding] = useState(false) // ビルド中フラグ
   const [buildList, setBuildList] = useState<Build[]>([]) // ビルド一覧を管理する
   const [cancellingId, setCancellingId] = useState<string | null>(null) // キャンセル中のビルドIDを管理する
+  const [deployingId, setDeployingId] = useState<string | null>(null) // デプロイ中のビルドIDを管理する
 
   const fetchBuilds = useCallback(async () => {
     try {
@@ -717,12 +718,31 @@ function BuildsTab({
     }
   }
 
+  // 成功ビルドのイメージを pending_image_url にセットして即 Apply する
+  const handleDeploy = async (buildItem: Build, event: React.MouseEvent) => {
+    event.preventDefault() // Link のナビゲーションを阻止する
+    event.stopPropagation()
+    if (!buildItem.built_image_url) return // built_image_url がない場合はスキップする
+    setDeployingId(buildItem.id)
+    try {
+      await put(`/deployments/${deploymentId}`, { image_url: buildItem.built_image_url }) // イメージURLを pending にセットする
+      await post(`/deployments/${deploymentId}/apply`) // 即座に Apply してデプロイする
+      toast.success(`ビルド #${buildItem.id.slice(0, 8)} をデプロイしました`) // 成功通知を表示する
+    } catch (deployError) {
+      console.error(deployError)
+      toast.error(deployError instanceof Error ? deployError.message : 'デプロイに失敗しました') // エラーをトーストで表示する
+    } finally {
+      setDeployingId(null)
+    }
+  }
+
   const hasPendingOrBuilding = buildList.some(
     buildItem => buildItem.status === 'pending' || buildItem.status === 'building'
   ) // 進行中のビルドが存在するか確認する
 
   return (
     <div className="space-y-4">
+      {/* ヘッダーアクション */}
       <div className="flex justify-end">
         <button
           onClick={() => void handleBuild()}
@@ -730,6 +750,7 @@ function BuildsTab({
           title={hasPendingOrBuilding ? 'ビルドが進行中です。完了またはキャンセル後に再試行してください' : undefined}
           className="flex items-center gap-1.5 bg-[#111827] text-white text-sm px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
+          <Hammer className="w-3.5 h-3.5" />
           {building ? 'ビルド開始中...' : 'ビルド'}
         </button>
       </div>
@@ -739,72 +760,110 @@ function BuildsTab({
           <p className="text-sm text-gray-400">ビルド履歴がありません</p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100 text-xs font-medium text-gray-400 uppercase tracking-wider">
-            ビルド履歴
-          </div>
-          <div className="divide-y divide-gray-100">
-            {buildList.map(buildItem => {
-              const statusMeta = BUILD_STATUS_META[buildItem.status] // ステータスメタデータを取得する
-              const isCancellable = buildItem.status === 'pending' || buildItem.status === 'building' // キャンセル可能か判定する
-              return (
-                <div key={buildItem.id} className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors">
-                  {/* クリック可能なリンク部分 */}
-                  <Link
-                    to={`/builds/${buildItem.id}/logs`}
-                    className="flex items-center gap-3 min-w-0 flex-1"
-                  >
-                    {/* ステータスバッジ */}
-                    <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border ${statusMeta?.badge ?? 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+        <div className="grid gap-3">
+          {buildList.map(buildItem => {
+            const statusMeta = BUILD_STATUS_META[buildItem.status] // ステータスメタデータを取得する
+            const isCancellable = buildItem.status === 'pending' || buildItem.status === 'building' // キャンセル可能か判定する
+            const isDeployable = buildItem.status === 'succeeded' && !!buildItem.built_image_url // 成功かつイメージURLあり
+
+            // ステータスに応じた左ボーダー色を決定する
+            const borderAccent =
+              buildItem.status === 'succeeded' ? 'border-l-green-400' :
+              buildItem.status === 'building'  ? 'border-l-blue-400'  :
+              buildItem.status === 'failed'    ? 'border-l-red-400'   :
+              buildItem.status === 'cancelled' ? 'border-l-gray-300'  :
+              'border-l-yellow-400'
+
+            return (
+              <div key={buildItem.id} className={`bg-white rounded-xl border border-gray-200 border-l-4 ${borderAccent} shadow-sm hover:shadow-md transition-shadow`}>
+                {/* 上段: ステータス + 日時 + ログリンク */}
+                <div className="flex items-center justify-between px-4 pt-3 pb-2">
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full border ${statusMeta?.badge ?? 'bg-gray-100 text-gray-500 border-gray-200'}`}>
                       {statusMeta?.icon}
                       {statusMeta?.label ?? buildItem.status}
                     </span>
-                    {/* ビルドID */}
-                    <span className="font-mono text-xs text-[#111827] shrink-0">#{buildItem.id.slice(0, 8)}</span>
-                    {/* ブランチ */}
-                    {buildItem.branch && (
-                      <span className="flex items-center gap-1 text-xs text-gray-500 shrink-0">
-                        <GitBranch className="w-3 h-3" />
-                        {buildItem.branch}
-                      </span>
-                    )}
-                    {/* コミットSHA + メッセージ */}
-                    {buildItem.commit_sha && (
-                      <span className="flex items-center gap-1 text-xs text-gray-400 truncate min-w-0">
-                        <GitCommit className="w-3 h-3 shrink-0" />
-                        <span className="font-mono shrink-0">{buildItem.commit_sha.slice(0, 7)}</span>
-                        {buildItem.commit_message && (
-                          <span className="truncate text-gray-500">{buildItem.commit_message}</span>
-                        )}
-                      </span>
-                    )}
-                  </Link>
-                  {/* 右側: 日時・キャンセルボタン・ログリンク */}
-                  <div className="flex items-center gap-2 shrink-0 ml-3">
+                    <span className="font-mono text-xs text-gray-400">#{buildItem.id.slice(0, 8)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
                     {buildItem.created_at && (
                       <span className="text-xs text-gray-400">
                         {new Date(buildItem.created_at).toLocaleString('ja-JP')}
                       </span>
                     )}
-                    {/* キャンセルボタン（pending/building のみ表示）*/}
-                    {isCancellable && (
-                      <button
-                        onClick={(event) => void handleCancel(buildItem.id, event)}
-                        disabled={cancellingId === buildItem.id}
-                        className="flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-red-200 text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
-                      >
-                        <X className="w-3 h-3" />
-                        {cancellingId === buildItem.id ? 'キャンセル中...' : 'キャンセル'}
-                      </button>
-                    )}
-                    <Link to={`/builds/${buildItem.id}/logs`} onClick={(event) => event.stopPropagation()}>
-                      <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
+                    <Link
+                      to={`/builds/${buildItem.id}/logs`}
+                      className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                      title="ログを表示"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
                     </Link>
                   </div>
                 </div>
-              )
-            })}
-          </div>
+
+                {/* 中段: ブランチ + コミット + ディレクトリ */}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 pb-3 border-b border-gray-100">
+                  {buildItem.branch && (
+                    <span className="flex items-center gap-1 text-xs text-gray-600 font-medium">
+                      <GitBranch className="w-3.5 h-3.5 text-gray-400" />
+                      {buildItem.branch}
+                    </span>
+                  )}
+                  {buildItem.commit_sha && (
+                    <span className="flex items-center gap-1 text-xs text-gray-500 font-mono">
+                      <GitCommit className="w-3.5 h-3.5 text-gray-400" />
+                      {buildItem.commit_sha.slice(0, 7)}
+                    </span>
+                  )}
+                  {buildItem.commit_message && (
+                    <span className="text-xs text-gray-500 truncate max-w-xs">{buildItem.commit_message.split('\n')[0]}</span>
+                  )}
+                  {buildItem.directory && buildItem.directory !== './' && (
+                    <span className="flex items-center gap-1 text-xs text-gray-400">
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      {buildItem.directory}
+                    </span>
+                  )}
+                </div>
+
+                {/* 下段: アクションボタン */}
+                <div className="flex items-center justify-end gap-2 px-4 py-2">
+                  {/* キャンセルボタン（pending/building のみ）*/}
+                  {isCancellable && (
+                    <button
+                      onClick={(event) => void handleCancel(buildItem.id, event)}
+                      disabled={cancellingId === buildItem.id}
+                      className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
+                    >
+                      <X className="w-3 h-3" />
+                      {cancellingId === buildItem.id ? 'キャンセル中...' : 'キャンセル'}
+                    </button>
+                  )}
+                  {/* デプロイボタン（成功ビルドのみ）*/}
+                  {isDeployable && (
+                    <button
+                      onClick={(event) => void handleDeploy(buildItem, event)}
+                      disabled={deployingId === buildItem.id}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[#00C2D1] text-white hover:bg-[#00adb9] transition-colors disabled:opacity-50 font-medium"
+                    >
+                      <Rocket className="w-3.5 h-3.5" />
+                      {deployingId === buildItem.id ? 'デプロイ中...' : 'このビルドをデプロイ'}
+                    </button>
+                  )}
+                  {/* ログリンク（スマホ向けのみ表示、デスクトップは上段のアイコンを使う）*/}
+                  {!isCancellable && !isDeployable && (
+                    <Link
+                      to={`/builds/${buildItem.id}/logs`}
+                      className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      ログを見る
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
