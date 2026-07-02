@@ -392,23 +392,23 @@ func (client *HarborClient) GetProjectQuota(ctx context.Context, projectName str
 	}, nil
 }
 
-// harborArtifact は Harbor アーティファクト一覧レスポンスの要素（サイズ取得用）
+// harborArtifact は Harbor アーティファクト取得レスポンス（サイズ取得用）
 type harborArtifact struct {
 	Size int64 `json:"size"` // アーティファクトのバイトサイズ
 }
 
-// GetArtifactSize は Harbor 上のイメージリポジトリに含まれるアーティファクトの合計サイズをバイト単位で返す
-func (client *HarborClient) GetArtifactSize(ctx context.Context, projectName string, repositoryName string, credential HarborRobotCredential) (int64, error) {
-	artifactURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page_size=100", client.endpoint, projectName, repositoryName) // アーティファクト一覧 API の URL を組み立てる
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, artifactURL, nil)                                                            // GET リクエストを生成する
+// GetArtifactSize は Harbor 上の特定タグのアーティファクト1件のサイズをバイト単位で返す
+func (client *HarborClient) GetArtifactSize(ctx context.Context, projectName string, repositoryName string, tag string, credential HarborRobotCredential) (int64, error) {
+	artifactURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts/%s", client.endpoint, projectName, repositoryName, tag) // タグ指定のアーティファクト取得URLを組み立てる
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, artifactURL, nil)                                                     // GET リクエストを生成する
 	if err != nil {
-		return 0, fmt.Errorf("harbor アーティファクト一覧リクエストの生成に失敗しました: %w", err)
+		return 0, fmt.Errorf("harbor アーティファクト取得リクエストの生成に失敗しました: %w", err)
 	}
 	request.SetBasicAuth(credential.Name, credential.Secret) // robot 認証情報で Basic 認証を設定する
 
 	response, err := client.httpClient.Do(request) // リクエストを送信する
 	if err != nil {
-		return 0, fmt.Errorf("harbor アーティファクト一覧リクエストの送信に失敗しました: %w", err)
+		return 0, fmt.Errorf("harbor アーティファクト取得リクエストの送信に失敗しました: %w", err)
 	}
 	defer response.Body.Close() // レスポンスボディを閉じる
 
@@ -416,23 +416,19 @@ func (client *HarborClient) GetArtifactSize(ctx context.Context, projectName str
 		return 0, nil // サイズ取得失敗は非致命的なため 0 を返す
 	}
 
-	var artifactList []harborArtifact                                                      // レスポンスをパースする
-	if err := json.NewDecoder(response.Body).Decode(&artifactList); err != nil {           // JSON デコードする
+	var artifactData harborArtifact                                                      // レスポンスをパースする
+	if err := json.NewDecoder(response.Body).Decode(&artifactData); err != nil {         // JSON デコードする
 		return 0, nil // デコード失敗は非致命的なため 0 を返す
 	}
 
-	var totalSize int64                                         // 合計サイズを格納する変数を宣言する
-	for _, artifactData := range artifactList {                 // 各アーティファクトのサイズを合計する
-		totalSize += artifactData.Size // サイズを加算する
-	}
-	return totalSize, nil // 合計サイズを返す
+	return artifactData.Size, nil // アーティファクトのサイズを返す
 }
 
-// DeleteHarborImage は Harbor 上のイメージリポジトリ（1 ビルドに対応するリポジトリ）を削除する
-// repositoryName には deploymentID を指定する（Harbor API の URL エンコーディング要件に注意）
-func (client *HarborClient) DeleteHarborImage(ctx context.Context, projectName string, repositoryName string, credential HarborRobotCredential) error {
-	deleteURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s", client.endpoint, projectName, repositoryName) // リポジトリ削除 API の URL を組み立てる
-	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, deleteURL, nil)                                // DELETE リクエストを生成する
+// DeleteHarborImage は Harbor 上の特定タグのアーティファクト1件を削除する
+// repositoryName には deploymentID を、tag にはビルドID（buildID）を指定する（同一リポジトリの他タグに影響を与えないため）
+func (client *HarborClient) DeleteHarborImage(ctx context.Context, projectName string, repositoryName string, tag string, credential HarborRobotCredential) error {
+	deleteURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts/%s", client.endpoint, projectName, repositoryName, tag) // タグ指定のアーティファクト削除URLを組み立てる
+	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, deleteURL, nil)                                                  // DELETE リクエストを生成する
 	if err != nil {
 		return fmt.Errorf("harbor イメージ削除リクエストの生成に失敗しました: %w", err)
 	}
