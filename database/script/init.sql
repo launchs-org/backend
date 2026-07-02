@@ -20,8 +20,8 @@ CREATE USER main WITH PASSWORD 'main';
 GRANT ALL PRIVILEGES ON DATABASE authdb TO main;
 GRANT ALL PRIVILEGES ON DATABASE maindb TO main;
 
--- Temporal 専用ユーザー
-CREATE USER temporal WITH PASSWORD 'temporal';
+-- Temporal 専用ユーザー（auto-setup が DB 作成を試みるため CREATEDB が必要）
+CREATE USER temporal WITH PASSWORD 'temporal' CREATEDB;
 GRANT ALL PRIVILEGES ON DATABASE temporal TO temporal;
 GRANT ALL PRIVILEGES ON DATABASE temporal_visibility TO temporal;
 
@@ -37,8 +37,6 @@ GRANT ALL ON SCHEMA public TO main;
 
 \c temporal
 GRANT ALL ON SCHEMA public TO temporal;
--- temporal-admin-tools がスキーマを作成できるよう CREATEDB 権限を付与
-ALTER USER temporal WITH CREATEDB;
 
 \c temporal_visibility
 GRANT ALL ON SCHEMA public TO temporal;
