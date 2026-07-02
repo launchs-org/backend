@@ -42,8 +42,8 @@ func (testSuite *BuildWorkflowTestSuite) TestBuildWorkflow_正常に5Activity連
 	testSuite.testEnv.OnActivity("VerifyHarborCredentialActivity", mock.Anything, input).Return(nil)          // 1. Harbor 認証確認
 	testSuite.testEnv.OnActivity("CreateBuildJobActivity", mock.Anything, input).Return(nil)                  // 2. Job 作成
 	testSuite.testEnv.OnActivity("StreamBuildLogsActivity", mock.Anything, input).Return(nil)                 // 3. ログストリーム
-	testSuite.testEnv.OnActivity("SetPendingImageURLActivity", mock.Anything, input).Return(nil)              // 4. pending_image_url 更新
-	testSuite.testEnv.OnActivity("UpdateBuildStatusActivity", mock.Anything, input, models.BuildStatusSucceeded).Return(nil) // 5. succeeded 更新
+	testSuite.testEnv.OnActivity("SetPendingImageURLActivity", mock.Anything, input).Return("registry.example.com/proj/img:tag", nil) // 4. pending_image_url 更新（イメージ URL を返す）
+	testSuite.testEnv.OnActivity("UpdateBuildStatusActivity", mock.Anything, input, models.BuildStatusSucceeded, "registry.example.com/proj/img:tag").Return(nil) // 5. succeeded 更新（builtImageURL を渡す）
 
 	testSuite.testEnv.ExecuteWorkflow(BuildWorkflow, input)
 
@@ -59,8 +59,8 @@ func (testSuite *BuildWorkflowTestSuite) TestBuildWorkflow_VerifyHarborエラー
 	testSuite.testEnv.OnActivity("VerifyHarborCredentialActivity", mock.Anything, input).
 		Return(temporal.NewApplicationError("harbor error", "HarborError")) // エラーを返す
 
-	// failed 更新のために UpdateBuildStatusActivity が呼ばれることを期待する
-	testSuite.testEnv.OnActivity("UpdateBuildStatusActivity", mock.Anything, input, models.BuildStatusFailed).Return(nil)
+	// failed 更新のために UpdateBuildStatusActivity が呼ばれることを期待する（builtImageURL は空文字）
+	testSuite.testEnv.OnActivity("UpdateBuildStatusActivity", mock.Anything, input, models.BuildStatusFailed, "").Return(nil)
 
 	testSuite.testEnv.ExecuteWorkflow(BuildWorkflow, input)
 
@@ -76,7 +76,7 @@ func (testSuite *BuildWorkflowTestSuite) TestBuildWorkflow_StreamBuildLogsエラ
 	testSuite.testEnv.OnActivity("CreateBuildJobActivity", mock.Anything, input).Return(nil)
 	testSuite.testEnv.OnActivity("StreamBuildLogsActivity", mock.Anything, input).
 		Return(temporal.NewApplicationError("log stream failed", "StreamError")) // ログストリームがエラーを返す
-	testSuite.testEnv.OnActivity("UpdateBuildStatusActivity", mock.Anything, input, models.BuildStatusFailed).Return(nil)
+	testSuite.testEnv.OnActivity("UpdateBuildStatusActivity", mock.Anything, input, models.BuildStatusFailed, "").Return(nil) // builtImageURL は空文字
 
 	testSuite.testEnv.ExecuteWorkflow(BuildWorkflow, input)
 

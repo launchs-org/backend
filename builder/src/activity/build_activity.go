@@ -160,56 +160,57 @@ func (act *BuildActivities) StreamBuildLogsActivity(ctx context.Context, input B
 	}
 }
 
-// SetPendingImageURLActivity はビルド成功時に pending_image_url と pending_github_* フィールドを更新する
-func (act *BuildActivities) SetPendingImageURLActivity(ctx context.Context, input BuildWorkflowInput) error {
+// SetPendingImageURLActivity はビルド成功時に pending_image_url と pending_github_* フィールドを更新し、組み立てたイメージ URL を返す
+func (act *BuildActivities) SetPendingImageURLActivity(ctx context.Context, input BuildWorkflowInput) (string, error) {
 	buildData, err := act.BuildRepo.FindByID(ctx, input.BuildID) // ビルドレコードを取得する
 	if err != nil {
-		return fmt.Errorf("ビルドレコードの取得に失敗しました: %w", err) // 取得エラーを返す
+		return "", fmt.Errorf("ビルドレコードの取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
 	if buildData.DeploymentID == nil { // DeploymentID が nil の場合（Deployment 削除済み）はスキップする
-		return nil // スキップして正常終了を返す
+		return "", nil // スキップして正常終了を返す
 	}
 
 	projectData, err := act.ProjectRepo.FindByIDNoTx(ctx, buildData.ProjectID) // project を取得する
 	if err != nil {
-		return fmt.Errorf("プロジェクトの取得に失敗しました: %w", err) // 取得エラーを返す
+		return "", fmt.Errorf("プロジェクトの取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
-	imageName := *buildData.DeploymentID                                        // イメージ名に Deployment ID を使う
+	imageName := *buildData.DeploymentID // イメージ名に Deployment ID を使う
 	builtImageURL := fmt.Sprintf("%s/%s/%s:%s",
-		act.RegistryHost,  // クラスタ内 DNS 名を使用する
-		projectData.ID,    // Harbor プロジェクト名にプロジェクト ID を使う
-		imageName,         // イメージ名を設定する
-		buildData.ID,      // ビルド ID をタグに使用する
+		act.RegistryHost, // クラスタ内 DNS 名を使用する
+		projectData.ID,   // Harbor プロジェクト名にプロジェクト ID を使う
+		imageName,        // イメージ名を設定する
+		buildData.ID,     // ビルド ID をタグに使用する
 	) // イメージURLを組み立てる
 
-	deploymentIDValue := *buildData.DeploymentID                                               // pointer をデリファレンスする
+	deploymentIDValue := *buildData.DeploymentID                                                              // pointer をデリファレンスする
 	if err := act.DeploymentRepo.UpdatePendingImageURL(ctx, deploymentIDValue, builtImageURL); err != nil { // pending_image_url を更新する
-		return fmt.Errorf("pending_image_url の更新に失敗しました: %w", err) // 更新エラーを返す
+		return "", fmt.Errorf("pending_image_url の更新に失敗しました: %w", err) // 更新エラーを返す
 	}
 
 	deploymentData, err := act.DeploymentRepo.FindByID(ctx, deploymentIDValue) // pending_github_* 更新用に deployment を取得する
 	if err != nil {
-		return fmt.Errorf("Deployment の取得に失敗しました: %w", err) // 取得エラーを返す
+		return "", fmt.Errorf("Deployment の取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
 	if err := act.DeploymentRepo.UpdatePendingGithubBuildFields(ctx, deploymentIDValue, deploymentData.GithubRepoURL, buildData.Branch, buildData.CommitSHA, buildData.Directory); err != nil { // pending_github_* フィールドを更新する
-		return fmt.Errorf("pending_github_* フィールドの更新に失敗しました: %w", err) // 更新エラーを返す
+		return "", fmt.Errorf("pending_github_* フィールドの更新に失敗しました: %w", err) // 更新エラーを返す
 	}
 
-	return nil // 更新成功を返す
+	return builtImageURL, nil // イメージ URL を返す
 }
 
 // UpdateBuildStatusActivity はビルド結果のステータスと Deployment の状態を更新する
-func (act *BuildActivities) UpdateBuildStatusActivity(ctx context.Context, input BuildWorkflowInput, buildStatus models.BuildStatus) error {
+// builtImageURL はビルド成功時のみ値が入り、失敗時は空文字を渡す
+func (act *BuildActivities) UpdateBuildStatusActivity(ctx context.Context, input BuildWorkflowInput, buildStatus models.BuildStatus, builtImageURL string) error {
 	buildData, err := act.BuildRepo.FindByID(ctx, input.BuildID) // ビルドレコードを取得する
 	if err != nil {
 		return fmt.Errorf("ビルドレコードの取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
-	finishedAt := time.Now()                                                                                  // 完了時刻を取得する
-	if err := act.BuildRepo.UpdateBuildResult(ctx, input.BuildID, buildStatus, "", 0, finishedAt); err != nil { // ビルド結果を更新する
+	finishedAt := time.Now()                                                                                              // 完了時刻を取得する
+	if err := act.BuildRepo.UpdateBuildResult(ctx, input.BuildID, buildStatus, builtImageURL, 0, finishedAt); err != nil { // ビルド結果を更新する（成功時のみ builtImageURL に値が入る）
 		return fmt.Errorf("ビルド結果の更新に失敗しました: %w", err) // 更新エラーを返す
 	}
 

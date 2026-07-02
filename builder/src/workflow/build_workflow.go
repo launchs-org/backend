@@ -42,13 +42,14 @@ func BuildWorkflow(ctx workflow.Context, input activity.BuildWorkflowInput) erro
 		return updateBuildStatusOnError(ctx, input) // エラー時にビルドステータスを failed に更新する
 	}
 
-	// 4. ビルド成功時: pending_image_url と pending_github_* フィールドを更新する
-	if err := workflow.ExecuteActivity(ctx, "SetPendingImageURLActivity", input).Get(ctx, nil); err != nil {
+	// 4. ビルド成功時: pending_image_url と pending_github_* フィールドを更新し、イメージ URL を受け取る
+	var builtImageURL string                                                                                      // ビルド済みイメージ URL を格納する変数
+	if err := workflow.ExecuteActivity(ctx, "SetPendingImageURLActivity", input).Get(ctx, &builtImageURL); err != nil { // イメージ URL を戻り値として受け取る
 		return updateBuildStatusOnError(ctx, input) // エラー時にビルドステータスを failed に更新する
 	}
 
-	// 5. ビルドステータスを succeeded に更新し Deployment ステータスを pending に遷移する
-	if err := workflow.ExecuteActivity(ctx, "UpdateBuildStatusActivity", input, models.BuildStatusSucceeded).Get(ctx, nil); err != nil {
+	// 5. ビルドステータスを succeeded に更新し Deployment ステータスを pending に遷移する（成功時のみ builtImageURL を渡す）
+	if err := workflow.ExecuteActivity(ctx, "UpdateBuildStatusActivity", input, models.BuildStatusSucceeded, builtImageURL).Get(ctx, nil); err != nil {
 		return err // 更新エラーを返す
 	}
 
@@ -57,6 +58,6 @@ func BuildWorkflow(ctx workflow.Context, input activity.BuildWorkflowInput) erro
 
 // updateBuildStatusOnError はビルド失敗時にステータスを failed に更新する（ベストエフォート）
 func updateBuildStatusOnError(ctx workflow.Context, input activity.BuildWorkflowInput) error {
-	_ = workflow.ExecuteActivity(ctx, "UpdateBuildStatusActivity", input, models.BuildStatusFailed).Get(ctx, nil) // failed に更新する（エラーは無視する）
-	return temporal.NewApplicationError("ビルドに失敗しました", "BuildFailed")                                          // ビルド失敗エラーを返す
+	_ = workflow.ExecuteActivity(ctx, "UpdateBuildStatusActivity", input, models.BuildStatusFailed, "").Get(ctx, nil) // failed に更新する（builtImageURL は空文字、エラーは無視する）
+	return temporal.NewApplicationError("ビルドに失敗しました", "BuildFailed")                                               // ビルド失敗エラーを返す
 }
