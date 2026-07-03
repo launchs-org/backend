@@ -1,24 +1,71 @@
 openapi: 3.0.3
 info:
   title: backend-mini API
-  version: "1.0.0"
+  version: "2.0.0"
   description: |
-    Go 製 PaaS バックエンド API。ユーザーがプロジェクト・デプロイメントを管理し、
-    `apply` 操作で Kubernetes リソースへ同期するアーキテクチャ。
+    Go 製 PaaS バックエンド API（`handler` サービス）。ユーザーがプロジェクト・デプロイメントを
+    定義し、Kubernetes / Harbor / Temporal Workflow と連携してコンテナアプリケーションを稼働させる
+    アーキテクチャです。
+
+    このドキュメントは `handler/src` 配下の実装（router.go・handler・service・models）を元に
+    生成されています。`app/src` 以下の旧アーキテクチャ（CLAUDE.md 記載のサンプル）とはディレクトリ
+    構成が異なりますが、実際に稼働している HTTP API はすべてこの `handler` サービスが提供します。
+
+    ## サービス構成
+
+    本リポジトリは複数の Go サービスで構成されるマイクロサービス群です。このドキュメントが扱うのは
+    そのうち HTTP API を公開する **handler** サービスのみです。
+
+    | サービス | 役割 |
+    |---|---|
+    | `handler` | 本 API を提供する Echo サーバー。DB 読み書き・Temporal Workflow 起動を担当 |
+    | `controller` | Temporal Worker。Apply/Project/Deployment/Volume の Workflow 実処理（k8s 操作）を実行 |
+    | `builder` | Temporal Worker。Build Workflow（Dockerfile/Railpack ビルド・Harbor push）を実行 |
+    | `watcher` | k8s リソースの状態を監視し DB に同期するデーモン |
+
+    `handler` はバリデーションと所有権チェックを行った後、実際の Kubernetes 操作を Temporal
+    Workflow に委譲する非同期アーキテクチャを取っています。そのため多くの更新系 API は
+    「DB へ変更を保存し Workflow を起動した」時点でレスポンスを返し、実際の反映は非同期に進行します。
 
     ## 認証
 
-    ほぼすべてのエンドポイントは **Bearer JWT** 認証が必要です。
+    ほぼすべてのエンドポイントは **JWT トークン**による認証が必要です。
 
     ```
-    Authorization: Bearer <JWT_TOKEN>
+    Authorization: <JWT_TOKEN>
     ```
 
-    JWT は別途認証サービスから取得してください。
-    トークンには `UserID` クレームが含まれており、リソースの所有権チェックに使用されます。
+    **注意**: 一般的な `Bearer <token>` 形式ではなく、`Authorization` ヘッダーに JWT 文字列を
+    そのまま設定します（`handler/src/middlewares/auth.go` 参照）。
 
-    唯一の例外は GitHub Webhook 受信エンドポイント (`POST /webhooks/:deployment_id/github`) で、
-    認証不要ですが HMAC-SHA256 シグネチャ検証があります。
+    JWT は EdDSA で署名され、以下のクレームを含みます（`handler/src/middlewares/jwt.go`）。
+
+    | クレーム | 型 | 説明 |
+    |---|---|---|
+    | `userID` | string | ユーザー ID。リソースの所有権チェックに使用 |
+    | `labels` | string[] | ユーザーのラベル一覧。`"admin"` を含む場合は管理者専用 API にアクセス可能 |
+    | `provCode` | string | 認証プロバイダーコード |
+    | `provUid` | string | 認証プロバイダー上のユーザー UID |
+
+    トークン検証に失敗した場合、または `Authorization` ヘッダーが存在しない場合は
+    `401 Unauthorized` が返ります。
+
+    ### 管理者専用エンドポイント
+
+    Deployment Template の作成・更新・削除は `labels` に `"admin"` を含むユーザーのみ実行できます
+    （`RequireAdmin` ミドルウェア）。`admin` ラベルを持たないユーザーがアクセスすると
+    `403 Forbidden` が返ります。
+
+    ### Webhook シークレット認証（JWT 不要）
+
+    `POST /webhooks/{deployment_id}/*` の 4 エンドポイントは JWT 認証を通らず、代わりに
+    `X-Webhook-Secret` ヘッダーでデプロイメント固有のシークレットを検証します。
+    シークレットは `POST /api/v1/deployments/{id}/webhooks` で Webhook を作成した際に
+    レスポンスの `secret` フィールドとして払い出されます。
+
+    ```
+    X-Webhook-Secret: <secret>
+    ```
 
     ## ベース URL
 
@@ -26,36 +73,70 @@ info:
     http://localhost:8080
     ```
 
-    ## リソースライフサイクル
+    ## リソースライフサイクルと `pending_*` フィールドパターン
 
-    多くのリソースは **`pending_*` フィールドパターン** を採用しています。
-    更新操作は `pending_*` フィールドに書き込まれ、`POST /deployments/:id/apply` 実行時に
-    本フィールドへ昇格して Kubernetes に反映されます。
+    Deployment・Service・EnvVarMount・VolumeMount など多くのリソースは **`pending_*` フィールド
+    パターン**を採用しています。更新系 API（`PUT`）は本フィールドを直接書き換えず `pending_*`
+    フィールドに変更内容を書き込みます。その後 `POST /api/v1/deployments/{id}/apply` を実行すると
+    Temporal `ApplyWorkflow` が非同期に起動し、`pending_*` の値が本フィールドへ昇格して
+    Kubernetes へ実際に反映されます。
 
-    ### デプロイメントの典型的なフロー
+    - `PUT` で `pending_*` に書き込む → `POST .../apply` で昇格・反映
+    - `POST /api/v1/deployments/{id}/discard-pending` で pending の変更を破棄できます
 
-    1. `POST /api/v1/projects` — プロジェクト（k8s namespace）を作成
-    2. `POST /api/v1/projects/:id/deployments` — デプロイメント定義を作成
-    3. `POST /api/v1/deployments/:id/apply` — Kubernetes にリソースを同期
-    4. `GET /api/v1/deployments/:id/logs` — Pod ログを確認
+    ### デプロイメントの典型的なフロー（image_url タイプ）
+
+    1. `POST /api/v1/projects` — プロジェクト（k8s Namespace + Harbor プロジェクト）を作成
+    2. `POST /api/v1/projects/{id}/deployments` — `type: image_url` でデプロイメントを作成
+    3. `POST /api/v1/deployments/{id}/service` — 公開ポートを設定（任意）
+    4. `POST /api/v1/projects/{id}/ingress-routes` と `POST /api/v1/ingress-routes/{id}/path-rules` — 外部公開ルーティングを設定（任意）
+    5. `POST /api/v1/deployments/{id}/apply` — Temporal `ApplyWorkflow` を起動し Kubernetes に反映
+    6. `GET /api/v1/deployments/{id}/logs` — Pod ログを確認
+    7. `GET /api/v1/deployments/{id}/metrics` — CPU/メモリメトリクスを確認
 
     ### ビルドが必要なデプロイメント（dockerfile / railpack）のフロー
 
+    現時点で `dockerfile` タイプのビルドはサポートされていません
+    （`TriggerBuild` は `ErrDockerfileNotSupported` を返します）。`railpack` タイプのみビルド可能です。
+
     1. `POST /api/v1/projects` — プロジェクトを作成
-    2. `POST /api/v1/projects/:id/deployments` — `type: dockerfile` または `type: railpack` でデプロイメントを作成
-    3. `POST /api/v1/deployments/:id/build` — ビルドをトリガー
-    4. `GET /api/v1/builds/:id/logs` — ビルドログを確認
-    5. `POST /api/v1/deployments/:id/apply` — ビルド成功後に apply
+    2. `POST /api/v1/projects/{id}/deployments` — `type: railpack` でデプロイメントを作成（`status` は `not_init`）
+    3. `POST /api/v1/deployments/{id}/build` — Temporal `BuildWorkflow` を起動しビルド
+    4. `GET /api/v1/builds/{id}/logs` — ビルドログを確認（`since` で差分ポーリング可能）
+    5. ビルド成功後、Image レコードが自動生成され `pending_image_id` に設定される
+    6. `POST /api/v1/deployments/{id}/apply` — ビルド成功後に apply（`not_init` のままだと `400` エラー）
+
+    ### GitHub push → 自動ビルド・自動デプロイのフロー（Webhook）
+
+    1. `POST /api/v1/deployments/{id}/webhooks` — Webhook を作成しシークレットを取得
+    2. 外部 CI/CD や GitHub Actions などから、取得したシークレットを使って以下を呼び出す：
+       - `POST /webhooks/{deployment_id}/build` — シークレット認証でビルドをトリガー
+       - `POST /webhooks/{deployment_id}/apply` — シークレット認証で apply を実行
+       - `POST /webhooks/{deployment_id}/update-image` — image_url タイプ専用。イメージ URL を更新して即 apply
+       - `GET /webhooks/{deployment_id}/builds/{build_id}` — シークレット認証でビルド状態を確認
+
+    ## デプロイメントテンプレート
+
+    管理者が事前定義した `DeploymentTemplate`（image_url・インスタンスサイズ・環境変数・ボリューム構成
+    のプリセット）を使って、一般ユーザーがワンステップでデプロイメントを作成できます。
+
+    ```
+    POST /api/v1/projects/{id}/deployments/from-template
+    ```
+
+    テンプレートの環境変数は `auto_generate: true` の場合、指定した `length` のランダム値が
+    自動生成されます（パスワードやシークレットキーの初期値生成などに利用）。
 
     ## ステータス値
 
     ### DeploymentStatus
     | 値 | 説明 |
     |---|---|
-    | `pending` | 初回作成・未 apply |
+    | `not_init` | ビルドが必要なタイプ（railpack）で初回ビルド未完了。apply 不可 |
+    | `pending` | 作成済み・未 apply |
     | `running` | apply 済みで稼働中 |
     | `failed` | apply または実行が失敗 |
-    | `deleting` | 削除中 |
+    | `deleting` | 削除中（Temporal `DeleteDeploymentWorkflow` 実行中） |
 
     ### AppStatus
     | 値 | 説明 |
@@ -75,26 +156,74 @@ info:
     | `failed` | ビルド失敗 |
     | `cancelled` | キャンセル済み |
 
-    ## クォータ制限
+    ### ProjectStatus
+    | 値 | 説明 |
+    |---|---|
+    | `provisioning` | Namespace / Harbor プロジェクト作成中（`CreateProjectWorkflow` 実行中） |
+    | `active` | 稼働中 |
+    | `deleting` | 削除中（`DeleteProjectWorkflow` 実行中） |
 
-    ユーザーにはリソース上限 (UserQuota) が設定されています。
-    上限超過時は `400 Bad Request` が返ります。
-    デフォルト上限: プロジェクト 5 個 / デプロイメント 20 個 / レプリカ 5 個 / ボリューム 10240 MB
+    ### Service / IngressRoute / PathRule / Volume / VolumeMount / EnvVarMount の共通ステータス
+    | 値 | 説明 |
+    |---|---|
+    | `pending` | 作成済み・未 apply |
+    | `active` / `bound` / `mounted` / `applied` | apply 済みで k8s に反映済み |
+    | `deleting` | 削除中（次回 apply または Workflow 完了で実際に削除） |
+
+    ## クォータ制限（プランベース）
+
+    ユーザーには `Plan`（`free` / `pro` / `enterprise` など）に基づく実効クォータ
+    (`ResolvedQuota`) が設定されます。管理者は `UserQuota` の `override_*` フィールドで
+    ユーザー個別に上限を上書きできます。
+
+    上限超過時は多くの場合 `403 Forbidden` で以下の形式のエラーが返ります。
+
+    ```json
+    {
+      "error": "quota_exceeded",
+      "resource": "projects",
+      "current": 5,
+      "limit": 5
+    }
+    ```
+
+    `resource` には `projects` / `deployments` / `replicas` / `volumes` / `volume_size_mb` /
+    `total_volume_mb` / `instance:<size>`（例: `instance:small`）のいずれかが入ります。
+
+    ## エラーレスポンスの形式について
+
+    実装上、エンドポイントによってレスポンス形式に以下のような非対称性があります。
+
+    - 多くの `DELETE` は `204 No Content` を返しますが、`DeleteDeployment`（`200` + 更新後の
+      Deployment）、`DeleteWebhook`／`CancelBuild`（`200` + `{"message": "..."}`）は例外です。
+    - `POST /deployments/{id}/apply` は Workflow を非同期起動するため `202 Accepted` を返します。
+    - `POST /projects/{id}/apply`（IngressRoute の apply）は `204 No Content` を返します。
+    - 一部エンドポイント（`ApplyDeployment`, `ApplyProject`）は 500 エラー時にラップされていない
+      生のエラーメッセージをそのまま `error` フィールドに返すことがあります。
+    - `GET/PUT/DELETE /api/v1/projects/{id}` は実装上ユーザー所有権チェックを行っていません
+      （認証は必須ですが、他ユーザーのプロジェクトにもアクセスできてしまう既知の実装上の注意点）。
 
 servers:
   - url: http://localhost:8080
     description: ローカル開発環境
 
 security:
-  - bearerAuth: []
+  - jwtAuth: []
 
 components:
   securitySchemes:
-    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-      description: JWT トークン（認証サービスから取得）
+    jwtAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: |
+        JWT トークンを `Bearer` プレフィックスなしでそのまま設定します。
+        例: `Authorization: eyJhbGciOiJFZERTQSJ9...`
+    webhookSecret:
+      type: apiKey
+      in: header
+      name: X-Webhook-Secret
+      description: デプロイメント作成時に発行された Webhook シークレット
 
   schemas:
     # ─── 共通エラー ──────────────────────────────────────────────────────────
@@ -105,6 +234,31 @@ components:
           type: string
           example: "リソースが見つかりません"
 
+    QuotaExceededResponse:
+      type: object
+      description: クォータ超過時のエラーレスポンス
+      properties:
+        error:
+          type: string
+          example: "quota_exceeded"
+        resource:
+          type: string
+          description: 超過したリソース種別
+          example: "projects"
+        current:
+          type: integer
+          description: 現在の使用量
+        limit:
+          type: integer
+          description: 上限値
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: "削除しました"
+
     # ─── Project ─────────────────────────────────────────────────────────────
     Project:
       type: object
@@ -112,30 +266,24 @@ components:
         id:
           type: string
           format: uuid
-          description: プロジェクト UUID
         user_id:
           type: string
-          description: オーナーユーザー ID
+          description: オーナーユーザー ID（JWT の userID クレーム）
         name:
           type: string
           maxLength: 63
-          description: プロジェクト名（k8s Namespace 名としても使用）
+          description: プロジェクト名（一意）。k8s Namespace 名としても使用
         namespace:
           type: string
           maxLength: 63
-          description: k8s Namespace 名（name と同値）
+          description: k8s Namespace 名（一意、name と同値）
         status:
           type: string
           enum: [provisioning, active, deleting]
-          description: |
-            プロジェクトのステータス
-            - `provisioning`: Namespace 作成中
-            - `active`: 稼働中
-            - `deleting`: 削除中
         k8s_status:
           type: object
           nullable: true
-          description: Kubernetes から取得した生ステータス（null = 未同期）
+          description: k8s から取得した生ステータス（jsonb、null = 未同期）
         created_at:
           type: string
           format: date-time
@@ -150,7 +298,7 @@ components:
         name:
           type: string
           maxLength: 63
-          description: プロジェクト名（k8s Namespace に使用されるため DNS-1123 ラベル形式推奨）
+          description: プロジェクト名（k8s Namespace に使用されるため DNS-1123 ラベル形式推奨）。空文字は 400 エラー
           example: "my-project"
 
     UpdateProjectRequest:
@@ -158,11 +306,51 @@ components:
       properties:
         name:
           type: string
-          maxLength: 63
           nullable: true
           description: 新しいプロジェクト名（null または省略で変更なし）
 
+    HarborProjectQuota:
+      type: object
+      description: GET /projects/{id}/quota のレスポンス（Harbor プロジェクトのストレージ使用量）
+      properties:
+        used_bytes:
+          type: integer
+          format: int64
+          description: 使用済みバイト数
+        limit_bytes:
+          type: integer
+          format: int64
+          description: 上限バイト数（-1 = 無制限）
+
     # ─── Deployment ──────────────────────────────────────────────────────────
+    Image:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        build_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: このイメージを生成したビルドの ID（image_url タイプ・webhook 経由更新の場合は null）
+        build:
+          type: object
+          nullable: true
+          description: build_id が展開された DeploymentBuild（Preload 時のみ）
+        image_url:
+          type: string
+          description: Harbor またはユーザー指定の Docker イメージ URL
+        size_bytes:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
+
     Deployment:
       type: object
       properties:
@@ -181,14 +369,22 @@ components:
           description: |
             デプロイメントタイプ（作成後変更不可）
             - `image_url`: 既存の Docker イメージを直接デプロイ
-            - `dockerfile`: リポジトリ内の Dockerfile でビルドしてデプロイ
+            - `dockerfile`: リポジトリ内の Dockerfile でビルド（現在ビルド未サポート）
             - `railpack`: Railpack でビルドしてデプロイ
-        image_url:
+        image_id:
           type: string
-          description: 現在適用中のイメージ URL（image_url タイプ専用）
-        pending_image_url:
+          format: uuid
+          nullable: true
+          description: 現在適用中の Image レコード ID
+        image:
+          $ref: "#/components/schemas/Image"
+        pending_image_id:
           type: string
-          description: 次回 apply 時に反映されるイメージ URL
+          format: uuid
+          nullable: true
+          description: 次回 apply 時に反映される Image レコード ID
+        pending_image:
+          $ref: "#/components/schemas/Image"
         github_repo_url:
           type: string
           description: GitHub リポジトリ URL（dockerfile/railpack タイプ）
@@ -197,13 +393,11 @@ components:
         github_branch:
           type: string
           maxLength: 255
-          description: ビルド対象ブランチ名
         pending_github_branch:
           type: string
         github_commit_sha:
           type: string
           maxLength: 40
-          description: ビルド対象コミット SHA（"HEAD" 指定時は apply で最新 SHA に解決）
         pending_github_commit_sha:
           type: string
         github_repo_directory:
@@ -215,7 +409,7 @@ components:
         dockerfile_path:
           type: string
           maxLength: 255
-          description: Dockerfile のパス（dockerfile タイプ専用、デフォルト "./Dockerfile"）
+          description: Dockerfile のパス（デフォルト "./Dockerfile"）
         pending_dockerfile_path:
           type: string
         current_build_id:
@@ -226,14 +420,12 @@ components:
         instance_size:
           type: string
           maxLength: 16
-          description: インスタンスサイズ（例 "small", "medium", "large"）
           example: "small"
         pending_instance_size:
           type: string
         replicas:
           type: integer
           format: int32
-          description: 希望レプリカ数
         pending_replicas:
           type: integer
           format: int32
@@ -257,14 +449,16 @@ components:
             type: string
         status:
           type: string
-          enum: [pending, running, failed, deleting]
+          enum: [not_init, pending, running, failed, deleting]
         app_status:
           type: string
           enum: [pending, building, deploying, running, error]
         k8s_status:
           type: object
           nullable: true
-          description: Kubernetes から取得した生ステータス
+        delete_progress:
+          type: string
+          description: 削除処理の進捗ステップ名（DeleteDeploymentWorkflow が更新）
         applied_at:
           type: string
           format: date-time
@@ -279,6 +473,10 @@ components:
     CreateDeploymentRequest:
       type: object
       required: [name, type]
+      description: |
+        `type` によって使用するフィールドが異なります。ハンドラー自体は必須フィールドの明示チェックを
+        行わないため、不足フィールドがあっても `201` で作成される場合があります（後続の apply 時に
+        エラーとなる可能性があります）。
       properties:
         name:
           type: string
@@ -290,19 +488,17 @@ components:
           example: "image_url"
         image_url:
           type: string
-          description: Docker イメージ URL（type=image_url 時に必須）
+          description: Docker イメージ URL（type=image_url 用）
           example: "nginx:latest"
         github_repo_url:
           type: string
-          description: GitHub リポジトリ URL（type=dockerfile/railpack 時に必須）
+          description: GitHub リポジトリ URL（type=dockerfile/railpack 用）
           example: "https://github.com/org/repo"
         github_branch:
           type: string
-          description: ビルド対象ブランチ（type=dockerfile/railpack 時）
           example: "main"
         github_commit_sha:
           type: string
-          description: ビルド対象コミット SHA。"HEAD" で最新コミットを使用
           example: "HEAD"
         build_directory:
           type: string
@@ -310,21 +506,19 @@ components:
           example: "./"
         dockerfile_path:
           type: string
-          description: Dockerfile パス（type=dockerfile 時、デフォルト "./Dockerfile"）
+          description: Dockerfile パス（デフォルト "./Dockerfile"）
           example: "./Dockerfile"
         instance_size:
           type: string
-          description: インスタンスサイズ
           example: "small"
         replicas:
           type: integer
           format: int32
-          description: 初期レプリカ数（デフォルト 1）
           example: 1
 
     UpdateDeploymentRequest:
       type: object
-      description: 指定したフィールドのみ更新（null/省略は変更なし）。変更は `pending_*` フィールドに書き込まれ、apply 後に反映される。
+      description: 指定したフィールドのみ更新（null/省略は変更なし）。変更は `pending_*` フィールドに書き込まれ、apply 後に反映される。`type` は変更不可。
       properties:
         image_url:
           type: string
@@ -356,7 +550,6 @@ components:
           items:
             type: string
           nullable: true
-          description: 空配列で上書き解除
         args:
           type: array
           items:
@@ -366,20 +559,10 @@ components:
     ApplyResult:
       type: object
       properties:
-        apply_history_id:
+        WorkflowID:
           type: string
-          format: uuid
-          description: 作成された ApplyHistory の ID
-        status:
-          type: string
-          enum: [applied, failed]
-        build_id:
-          type: string
-          format: uuid
-          nullable: true
-          description: apply によってトリガーされたビルドの ID（ビルドが不要な場合は null）
+          description: 起動された Temporal Workflow ID（"apply-{deployment_id}" 形式、冪等キー）
 
-    # ─── ApplyHistory ─────────────────────────────────────────────────────────
     ApplyHistory:
       type: object
       properties:
@@ -391,13 +574,12 @@ components:
           format: uuid
         manifests:
           type: object
-          description: apply 時に生成された Kubernetes マニフェストのスナップショット
+          description: apply 時に生成された Kubernetes マニフェストのスナップショット（jsonb）
         status:
           type: string
           enum: [applied, failed]
         error_message:
           type: string
-          description: apply 失敗時のエラーメッセージ
         applied_at:
           type: string
           format: date-time
@@ -414,7 +596,7 @@ components:
           format: uuid
         port:
           type: integer
-          description: 現在適用中のポート番号（k8s Service port）
+          description: 現在適用中の公開ポート番号
         target_port:
           type: integer
           description: 現在適用中のターゲットポート番号（コンテナ側ポート）
@@ -423,19 +605,29 @@ components:
           enum: [ClusterIP, NodePort, LoadBalancer]
         pending_port:
           type: integer
-          description: 次回 apply 時に反映されるポート番号
         pending_target_port:
           type: integer
         ports:
-          type: object
+          type: array
           nullable: true
-          description: 現在稼働中のポート一覧（jsonb）
+          description: 現在稼働中のポート一覧（jsonb、[{protocol, port}]）
+          items:
+            type: object
+            properties:
+              protocol:
+                type: string
+              port:
+                type: integer
         pending_ports:
-          type: object
+          type: array
           nullable: true
+          items:
+            type: object
         status:
           type: string
           enum: [pending, active, deleting]
+        cluster_ip:
+          type: string
         k8s_status:
           type: object
           nullable: true
@@ -449,18 +641,17 @@ components:
     CreateServiceRequest:
       type: object
       required: [port, target_port]
-      description: Service 作成リクエスト（ポート設定は pending に書き込まれ apply で反映される）
       properties:
         port:
           type: integer
-          description: k8s Service port
+          description: 公開ポート番号
         target_port:
           type: integer
           description: コンテナ側ポート
         type:
           type: string
           enum: [ClusterIP, NodePort, LoadBalancer]
-          description: Service タイプ（省略時は ClusterIP）
+          description: Service タイプ
 
     UpdateServiceRequest:
       type: object
@@ -469,51 +660,32 @@ components:
         port:
           type: integer
           nullable: true
-          description: k8s Service port（null で変更なし）
         target_port:
           type: integer
           nullable: true
-          description: コンテナ側ポート（null で変更なし）
 
-    # ─── IngressRoute ────────────────────────────────────────────────────────
+    # ─── IngressRoute / PathRule ─────────────────────────────────────────────
     IngressRoute:
       type: object
+      description: プロジェクト単位で作成する Traefik IngressRoute。実際のパスルーティングは PathRule で定義する
       properties:
         id:
           type: string
           format: uuid
-        deployment_id:
+        project_id:
           type: string
           format: uuid
+        name:
+          type: string
+          maxLength: 20
+          description: IngressRoute 名（英小文字・数字・ハイフンのみ、最大20文字、プロジェクト内で一意）
+        pending_name:
+          type: string
+          maxLength: 20
         host:
           type: string
           maxLength: 253
-          description: ホスト名（自動生成例: "web-app-ab12cd34.launchs.org"）
-        path_prefix:
-          type: string
-          maxLength: 255
-          description: パスプレフィックス（例 "/"）
-        tls_enabled:
-          type: boolean
-          description: TLS/HTTPS を有効にするか
-        certificate_resolver:
-          type: string
-          maxLength: 255
-          description: Traefik 証明書リゾルバー名（TLS 有効時）
-        port:
-          type: integer
-          description: 転送先の TCP ポート
-        pending_host:
-          type: string
-        pending_path_prefix:
-          type: string
-        pending_port:
-          type: integer
-        pending_tls_enabled:
-          type: boolean
-          nullable: true
-        pending_certificate_resolver:
-          type: string
+          description: 割り当てられたホスト名
         status:
           type: string
           enum: [pending, active, deleting]
@@ -529,48 +701,69 @@ components:
 
     CreateIngressRouteRequest:
       type: object
-      required: [host, path_prefix, port]
       properties:
-        host:
+        name:
           type: string
-          maxLength: 253
-          description: ホスト名
-          example: "web-app-ab12cd34.launchs.org"
-        path_prefix:
-          type: string
-          maxLength: 255
-          description: パスプレフィックス
-          example: "/"
-        port:
-          type: integer
-          description: 転送先ポート
-          example: 8080
-        tls_enabled:
-          type: boolean
-          description: TLS を有効にするか（デフォルト false）
-          example: true
-        certificate_resolver:
-          type: string
-          maxLength: 255
-          description: 証明書リゾルバー名（tls_enabled=true 時）
-          example: "letsencrypt"
+          maxLength: 20
+          description: IngressRoute の名前。省略時はプロジェクト名から自動生成される
+          example: "web"
 
-    UpdateIngressRouteRequest:
+    UpdateIngressRouteNameRequest:
       type: object
-      description: 指定フィールドのみ更新（null/省略は変更なし）
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 20
+          description: 変更後の名前（英小文字・数字・ハイフンのみ、最大20文字）
+          example: "web-v2"
+
+    PathRule:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        ingress_route_id:
+          type: string
+          format: uuid
+        path_prefix:
+          type: string
+          maxLength: 255
+          description: ルーティング対象のパスプレフィックス（同一 IngressRoute 内で一意）
+        service_id:
+          type: string
+          format: uuid
+          description: 転送先の Service ID
+        strip_prefix:
+          type: boolean
+          description: true の場合、転送時に path_prefix を除去する
+        status:
+          type: string
+          enum: [pending, active, deleting]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreatePathRuleRequest:
+      type: object
+      required: [path_prefix, service_id]
       properties:
         path_prefix:
           type: string
-          nullable: true
-        port:
-          type: integer
-          nullable: true
-        tls_enabled:
-          type: boolean
-          nullable: true
-        certificate_resolver:
+          maxLength: 255
+          example: "/api"
+        service_id:
           type: string
-          nullable: true
+          format: uuid
+          description: 転送先の Service ID
+        strip_prefix:
+          type: boolean
+          description: true の場合パスプレフィックスを除去して転送
+          example: false
 
     # ─── Build ───────────────────────────────────────────────────────────────
     DeploymentBuild:
@@ -579,9 +772,14 @@ components:
         id:
           type: string
           format: uuid
+        project_id:
+          type: string
+          format: uuid
         deployment_id:
           type: string
           format: uuid
+          nullable: true
+          description: デプロイメント削除後も履歴として残るため null になり得る
         build_type:
           type: string
           enum: [dockerfile, railpack]
@@ -591,13 +789,11 @@ components:
         k8s_job_name:
           type: string
           description: キャンセル時に使用する k8s Job 名
-        built_image_url:
+        github_repo_url:
           type: string
-          description: ビルド成功時の push 先イメージ URL
         commit_sha:
           type: string
           maxLength: 40
-          description: ビルド時点のコミット SHA
         commit_message:
           type: string
         branch:
@@ -611,7 +807,7 @@ components:
           type: string
         build_log:
           type: string
-          description: k8s Job の Pod ログ（完了後に格納）
+          description: k8s Job の Pod ログ全文（完了後に格納。差分取得は logs エンドポイントを利用）
         started_at:
           type: string
           format: date-time
@@ -624,12 +820,256 @@ components:
           type: string
           format: date-time
 
+    TriggerBuildRequest:
+      type: object
+      description: 全フィールド省略可（バインド失敗時も無視されオプション扱いになる）
+      properties:
+        commit_message:
+          type: string
+          example: "fix: update dependencies"
+        author:
+          type: string
+          example: "octocat"
+
     BuildLogsResponse:
       type: object
       properties:
         logs:
           type: string
           description: ビルドログのテキスト
+        last_timestamp:
+          type: string
+          format: date-time
+          nullable: true
+          description: 最終チャンクのタイムスタンプ（RFC3339Nano、次回 since に使用。ログが空の場合は省略される）
+
+    # ─── Deployment Template ─────────────────────────────────────────────────
+    TemplateEnvVar:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+          description: auto_generate=true の場合は初期値のひな形（実際は自動生成される）
+        is_secret:
+          type: boolean
+        auto_generate:
+          type: boolean
+          description: true の場合、デプロイメント作成時に length 文字のランダム値を自動生成する
+        length:
+          type: integer
+          description: auto_generate=true の場合の生成文字数
+
+    TemplateVolume:
+      type: object
+      properties:
+        name:
+          type: string
+        size_mb:
+          type: integer
+        mount_path:
+          type: string
+
+    DeploymentTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 63
+          description: テンプレート名（一意）
+        description:
+          type: string
+        type:
+          type: string
+          enum: [image_url, dockerfile, railpack]
+        image_url:
+          type: string
+        instance_size:
+          type: string
+        replicas:
+          type: integer
+          format: int32
+        command:
+          type: array
+          items:
+            type: string
+        args:
+          type: array
+          items:
+            type: string
+        service_port:
+          type: integer
+        service_target_port:
+          type: integer
+        service_type:
+          type: string
+          enum: [ClusterIP, NodePort, LoadBalancer]
+        env_vars:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateEnvVar"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateVolume"
+        created_by:
+          type: string
+          description: 作成した管理者の userID
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateTemplateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 63
+        description:
+          type: string
+        image_url:
+          type: string
+        instance_size:
+          type: string
+          example: "small"
+        replicas:
+          type: integer
+          format: int32
+          example: 1
+        command:
+          type: array
+          items:
+            type: string
+        args:
+          type: array
+          items:
+            type: string
+        service_port:
+          type: integer
+        service_target_port:
+          type: integer
+        service_type:
+          type: string
+          enum: [ClusterIP, NodePort, LoadBalancer]
+        env_vars:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateEnvVar"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateVolume"
+
+    UpdateTemplateRequest:
+      type: object
+      description: 指定フィールドのみ更新（null/省略は変更なし。command/args/env_vars/volumes は配列そのものを置換）
+      properties:
+        name:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        image_url:
+          type: string
+          nullable: true
+        instance_size:
+          type: string
+          nullable: true
+        replicas:
+          type: integer
+          format: int32
+          nullable: true
+        command:
+          type: array
+          items:
+            type: string
+        args:
+          type: array
+          items:
+            type: string
+        service_port:
+          type: integer
+          nullable: true
+        service_target_port:
+          type: integer
+          nullable: true
+        service_type:
+          type: string
+          nullable: true
+        env_vars:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateEnvVar"
+        volumes:
+          type: array
+          items:
+            $ref: "#/components/schemas/TemplateVolume"
+
+    ExtraEnvVar:
+      type: object
+      required: [key, value]
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+        is_secret:
+          type: boolean
+
+    CreateDeploymentFromTemplateRequest:
+      type: object
+      required: [template_id, name]
+      properties:
+        template_id:
+          type: string
+          format: uuid
+          description: 使用するテンプレートの ID
+        name:
+          type: string
+          maxLength: 63
+          description: 作成するデプロイメント名
+        image_url:
+          type: string
+          nullable: true
+          description: 指定時はテンプレートの image_url を上書きする
+        instance_size:
+          type: string
+          nullable: true
+          description: 指定時はテンプレートの instance_size を上書きする
+        replicas:
+          type: integer
+          format: int32
+          nullable: true
+          description: 指定時はテンプレートの replicas を上書きする
+        skip_volume_names:
+          type: array
+          items:
+            type: string
+          description: テンプレートで定義されたボリュームのうち、作成をスキップする名前一覧
+        volume_size_overrides:
+          type: object
+          additionalProperties:
+            type: integer
+          description: ボリューム名をキーにしたサイズ（MB）上書きマップ
+        override_env_vars:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExtraEnvVar"
+          description: テンプレートの同名環境変数を上書きする
+        extra_env_vars:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExtraEnvVar"
+          description: テンプレートにない環境変数を追加する
 
     # ─── Volume ──────────────────────────────────────────────────────────────
     Volume:
@@ -670,10 +1110,9 @@ components:
           example: "my-data"
         size_mb:
           type: integer
-          description: ボリュームサイズ（MB）、1 以上
+          description: ボリュームサイズ（MB）。1 未満は 400 エラー
           example: 1024
 
-    # ─── VolumeMount ─────────────────────────────────────────────────────────
     VolumeMount:
       type: object
       properties:
@@ -689,7 +1128,6 @@ components:
         mount_path:
           type: string
           maxLength: 255
-          description: コンテナ内のマウントパス
         pending_mount_path:
           type: string
         status:
@@ -709,14 +1147,14 @@ components:
         volume_id:
           type: string
           format: uuid
-          description: マウントするボリュームの ID
+          description: マウントするボリュームの ID（空文字は 400 エラー）
         mount_path:
           type: string
           maxLength: 255
-          description: コンテナ内のマウントパス
+          description: コンテナ内のマウントパス（空文字は 400 エラー）
           example: "/data"
 
-    # ─── EnvVar ──────────────────────────────────────────────────────────────
+    # ─── EnvVar / EnvVarMount ────────────────────────────────────────────────
     EnvVar:
       type: object
       properties:
@@ -729,13 +1167,14 @@ components:
         key:
           type: string
           maxLength: 255
-          description: 環境変数のキー名
+          description: 環境変数のキー名（プロジェクト内で一意）
         value:
           type: string
-          description: 環境変数の値（is_secret=true の場合は "***" でマスク）
+          description: |
+            環境変数の値。**注意**: `is_secret: true` でも値はマスクされずそのまま返却されます。
         is_secret:
           type: boolean
-          description: true の場合 k8s Secret に保存、UI でマスク表示
+          description: true の場合 k8s Secret に保存される
         status:
           type: string
           enum: [active, deleting]
@@ -748,18 +1187,18 @@ components:
 
     CreateEnvVarRequest:
       type: object
-      required: [key, value]
+      required: [key]
       properties:
         key:
           type: string
           maxLength: 255
+          description: 空文字は 400 エラー。プロジェクト内で重複する場合は 409 エラー
           example: "DATABASE_URL"
         value:
           type: string
           example: "postgres://user:pass@host:5432/db"
         is_secret:
           type: boolean
-          description: true にすると k8s Secret に保存され、API 応答でマスクされる
           example: true
 
     UpdateEnvVarRequest:
@@ -776,7 +1215,6 @@ components:
           type: boolean
           nullable: true
 
-    # ─── EnvVarMount ─────────────────────────────────────────────────────────
     EnvVarMount:
       type: object
       properties:
@@ -811,7 +1249,7 @@ components:
         env_var_id:
           type: string
           format: uuid
-          description: マウントする環境変数の ID
+          description: マウントする環境変数の ID（空文字は 400 エラー）
         override_key:
           type: string
           description: コンテナ内での名前（省略時は元の key を使用）
@@ -829,7 +1267,9 @@ components:
           format: uuid
         secret:
           type: string
-          description: GitHub Webhook の HMAC 検証用シークレット（GitHub 側での設定に使用）
+          description: |
+            HMAC 比較認証用のシークレット（32 バイトの hex 文字列、自動生成）。
+            `X-Webhook-Secret` ヘッダーに設定して Webhook 系エンドポイントを呼び出す。
         github_repo_url:
           type: string
         is_active:
@@ -847,67 +1287,186 @@ components:
       properties:
         github_repo_url:
           type: string
-          description: Webhook を設定する GitHub リポジトリ URL
           example: "https://github.com/org/repo"
 
-    # ─── UserQuota ───────────────────────────────────────────────────────────
+    WebhookTriggerBuildRequest:
+      type: object
+      description: 全フィールド省略可
+      properties:
+        commit_message:
+          type: string
+        author:
+          type: string
+
+    WebhookUpdateImageRequest:
+      type: object
+      required: [image_url]
+      properties:
+        image_url:
+          type: string
+          description: 新しいイメージ URL（空文字は 400 エラー）
+          example: "registry.example.com/org/app:v1.2.3"
+
+    # ─── UserQuota / Plan ────────────────────────────────────────────────────
     QuotaResponse:
       type: object
       properties:
         user_id:
           type: string
-          description: ユーザー ID
+        plan_id:
+          type: string
+          format: uuid
         max_projects:
           type: integer
-          description: プロジェクト上限数（デフォルト 5）
         max_deployments:
           type: integer
-          description: デプロイメント上限数（デフォルト 20）
         max_replicas_per_deployment:
           type: integer
-          description: デプロイメントあたりのレプリカ上限（デフォルト 5）
-        max_volume_mb:
+        max_volumes:
           type: integer
-          description: ボリューム合計容量の上限 MB（デフォルト 10240）
+        max_volume_size_mb:
+          type: integer
+          description: 1 ボリュームあたりの最大サイズ（MB）
+        max_total_volume_mb:
+          type: integer
+          description: ボリューム総容量上限（MB）
+        instance_limits:
+          type: object
+          additionalProperties:
+            type: integer
+          description: インスタンスサイズ（small/medium/large 等）ごとのデプロイメント数上限
+          example: { "small": 10, "medium": 5, "large": 2 }
+        current_instances:
+          type: object
+          additionalProperties:
+            type: integer
+          description: インスタンスサイズごとの現在のデプロイメント数
         current_projects:
           type: integer
-          description: 現在のプロジェクト数
         current_deployments:
           type: integer
-          description: 現在のデプロイメント数
-        current_volume_mb:
+        current_volumes:
           type: integer
-          description: 現在のボリューム使用量 MB
+        current_total_volume_mb:
+          type: integer
 
     UpdateQuotaRequest:
       type: object
-      description: 指定フィールドのみ更新（null/省略は変更なし）
+      description: |
+        指定フィールドのみ更新（null/省略は変更なし）。プラン変更または個別項目の上書きを行う。
+        **注意**: 実装上 `RequireAdmin` は付与されておらず、認証済みユーザーは誰でも
+        自分自身の quota をこの API で更新できます。
       properties:
-        max_projects:
+        plan_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: 変更先のプラン ID
+        override_max_projects:
           type: integer
           nullable: true
-        max_deployments:
+        override_max_deployments:
           type: integer
           nullable: true
-        max_replicas_per_deployment:
+        override_max_replicas_per_deployment:
           type: integer
           nullable: true
-        max_volume_mb:
+        override_max_volumes:
+          type: integer
+          nullable: true
+        override_max_volume_size_mb:
+          type: integer
+          nullable: true
+        override_max_total_volume_mb:
           type: integer
           nullable: true
 
-    # ─── Pod Logs ─────────────────────────────────────────────────────────────
-    PodLogsResponse:
+    # ─── Metrics ─────────────────────────────────────────────────────────────
+    DeploymentMetrics:
       type: object
       properties:
+        id:
+          type: string
+          format: uuid
+        deployment_id:
+          type: string
+          format: uuid
+        pod_name:
+          type: string
+        cpu_millicores:
+          type: integer
+          format: int64
+        memory_bytes:
+          type: integer
+          format: int64
+        ready_replicas:
+          type: integer
+          format: int32
+        total_replicas:
+          type: integer
+          format: int32
+        recorded_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    DeploymentMetricsListResponse:
+      type: object
+      properties:
+        metrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeploymentMetrics"
+
+    # ─── Pod Logs ─────────────────────────────────────────────────────────────
+    PodLogsEntry:
+      type: object
+      properties:
+        pod_name:
+          type: string
         logs:
           type: string
-          description: Pod ログのテキスト
+          description: この Pod に紐づくログチャンクを結合した文字列
         last_timestamp:
           type: string
           format: date-time
           nullable: true
-          description: ログの最終タイムスタンプ（次回リクエストの since パラメータに使用）
+          description: 最後のログチャンクの記録時刻（次回リクエストの since に使用）
+
+    PodLogsResponse:
+      type: object
+      properties:
+        active_pod_names:
+          type: array
+          items:
+            type: string
+          description: k8s 上で現在稼働中の Pod 名一覧
+        pods:
+          type: array
+          items:
+            $ref: "#/components/schemas/PodLogsEntry"
+          description: Pod ごとのログ一覧（削除済み Pod のログも含む）
+
+  parameters:
+    ProjectIdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: プロジェクト ID
+
+    DeploymentIdParam:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: デプロイメント ID
 
 paths:
   # ══════════════════════════════════════════════════════════════════
@@ -915,8 +1474,10 @@ paths:
   # ══════════════════════════════════════════════════════════════════
   /api/v1/users/quota:
     get:
-      summary: クォータ取得
-      description: 認証ユーザーのリソース上限と現在の使用量を取得します。レコードが存在しない場合は初回アクセス時に自動生成されます。
+      summary: 自分のクォータ取得
+      description: |
+        認証ユーザー自身の実効クォータ（プラン + 個別上書き）と現在の使用量を取得します。
+        `UserQuota` レコードが存在しない場合はデフォルトプランで自動生成されます。
       tags: [Quota]
       responses:
         "200":
@@ -933,8 +1494,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
     put:
-      summary: クォータ更新
-      description: 認証ユーザーのリソース上限を変更します。
+      summary: 自分のクォータ更新
+      description: |
+        認証ユーザー自身のプラン変更または個別上限の上書きを行います。
+
+        **注意**: このエンドポイントには管理者権限チェックが付与されておらず、
+        認証済みであれば誰でも自分自身のクォータを自由に変更できてしまう実装になっています。
       tags: [Quota]
       requestBody:
         required: true
@@ -950,7 +1515,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/QuotaResponse"
         "400":
-          description: リクエスト不正
+          description: リクエストが不正
           content:
             application/json:
               schema:
@@ -989,8 +1554,9 @@ paths:
     post:
       summary: プロジェクト作成
       description: |
-        新しいプロジェクト（k8s Namespace）を作成します。
-        クォータ上限に達している場合は `400` を返します。
+        新しいプロジェクトを作成します。DB に `provisioning` 状態で作成した後、
+        Temporal `CreateProjectWorkflow` が非同期に k8s Namespace と Harbor プロジェクトを
+        作成し、完了すると `status` が `active` に更新されます。
       tags: [Projects]
       requestBody:
         required: true
@@ -1002,17 +1568,23 @@ paths:
               name: "my-project"
       responses:
         "201":
-          description: 作成されたプロジェクト
+          description: 作成されたプロジェクト（作成直後は status=provisioning）
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Project"
         "400":
-          description: バリデーションエラーまたはクォータ超過
+          description: リクエストが不正（Bind 失敗、または name が空文字）
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: クォータ超過（プロジェクト数上限）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaExceededResponse"
         "500":
           description: サーバーエラー
           content:
@@ -1022,16 +1594,13 @@ paths:
 
   /api/v1/projects/{id}:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: プロジェクト ID
+      - $ref: "#/components/parameters/ProjectIdParam"
 
     get:
       summary: プロジェクト取得
+      description: |
+        **注意**: 実装上このエンドポイントは所有権チェックを行っていません。
+        認証済みであれば他ユーザーのプロジェクトも取得できてしまいます。
       tags: [Projects]
       responses:
         "200":
@@ -1055,6 +1624,8 @@ paths:
 
     put:
       summary: プロジェクト更新
+      description: |
+        **注意**: 実装上このエンドポイントは所有権チェックを行っていません。
       tags: [Projects]
       requestBody:
         required: true
@@ -1069,6 +1640,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Project"
+        "400":
+          description: リクエストが不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: プロジェクトが見つからない
           content:
@@ -1084,7 +1661,11 @@ paths:
 
     delete:
       summary: プロジェクト削除
-      description: プロジェクトを削除します。k8s Namespace および関連リソースも削除されます。
+      description: |
+        プロジェクトを `deleting` 状態にし、Temporal `DeleteProjectWorkflow` を起動します。
+        k8s Namespace・Harbor プロジェクト・関連リソースは非同期に削除されます。
+
+        **注意**: 実装上このエンドポイントは所有権チェックを行っていません。
       tags: [Projects]
       responses:
         "204":
@@ -1102,18 +1683,78 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/projects/{id}/quota:
+    parameters:
+      - $ref: "#/components/parameters/ProjectIdParam"
+    get:
+      summary: プロジェクトの Harbor ストレージクォータ取得
+      description: |
+        プロジェクトに紐づく Harbor レジストリプロジェクトのストレージ使用量・上限を取得します。
+        `UserQuota` とは異なり、こちらはコンテナイメージのストレージ使用量です。
+      tags: [Projects]
+      responses:
+        "200":
+          description: Harbor ストレージクォータ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HarborProjectQuota"
+        "403":
+          description: アクセス権限がありません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: プロジェクトまたは Harbor 認証情報が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/projects/{id}/apply:
+    parameters:
+      - $ref: "#/components/parameters/ProjectIdParam"
+    post:
+      summary: プロジェクト単位で IngressRoute を apply
+      description: |
+        プロジェクトに属する IngressRoute（+ 配下の PathRule）をまとめて Kubernetes に反映します。
+        Deployment 単位の apply（`POST /deployments/{id}/apply`）とは独立した操作です。
+      tags: [IngressRoute]
+      responses:
+        "204":
+          description: apply 成功（レスポンスボディなし）
+        "403":
+          description: アクセスが禁止されています
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: IngressRoute が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー（生のエラーメッセージが含まれる場合がある）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ══════════════════════════════════════════════════════════════════
   # Deployments
   # ══════════════════════════════════════════════════════════════════
   /api/v1/projects/{id}/deployments:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: プロジェクト ID
+      - $ref: "#/components/parameters/ProjectIdParam"
 
     get:
       summary: デプロイメント一覧取得
@@ -1138,15 +1779,17 @@ paths:
     post:
       summary: デプロイメント作成
       description: |
-        新しいデプロイメントを作成します。`type` によって必須フィールドが異なります。
+        新しいデプロイメントを作成します。`type` によって使用するフィールドが異なります。
 
-        | type | 必須フィールド |
+        | type | 主に使用するフィールド |
         |------|----------------|
         | `image_url` | `image_url` |
-        | `dockerfile` | `github_repo_url`, `github_branch`, `dockerfile_path` |
+        | `dockerfile` | `github_repo_url`, `github_branch`, `dockerfile_path`（現在ビルド未サポート） |
         | `railpack` | `github_repo_url`, `github_branch` |
 
-        作成直後のステータスは `pending` です。`apply` を実行して Kubernetes に反映してください。
+        `railpack` / `dockerfile` タイプの初期ステータスは `not_init` となり、
+        ビルドが成功するまで apply できません。`image_url` タイプは `pending` から開始し、
+        直接 apply 可能です。
       tags: [Deployments]
       requestBody:
         required: true
@@ -1163,15 +1806,14 @@ paths:
                   image_url: "nginx:latest"
                   instance_size: "small"
                   replicas: 2
-              dockerfile:
-                summary: dockerfile タイプ
+              railpack:
+                summary: railpack タイプ
                 value:
                   name: "api-server"
-                  type: "dockerfile"
+                  type: "railpack"
                   github_repo_url: "https://github.com/org/repo"
                   github_branch: "main"
                   github_commit_sha: "HEAD"
-                  dockerfile_path: "./Dockerfile"
                   instance_size: "medium"
                   replicas: 1
       responses:
@@ -1182,7 +1824,71 @@ paths:
               schema:
                 $ref: "#/components/schemas/Deployment"
         "400":
-          description: バリデーションエラーまたはクォータ超過
+          description: リクエストが不正（Bind 失敗）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: クォータ超過（デプロイメント数・インスタンスサイズ別上限）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QuotaExceededResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/projects/{id}/deployments/from-template:
+    parameters:
+      - $ref: "#/components/parameters/ProjectIdParam"
+    post:
+      summary: テンプレートからデプロイメント作成
+      description: |
+        事前定義された `DeploymentTemplate` を元にデプロイメントを作成します。
+        テンプレートの Service・EnvVar・Volume 設定も同時に作成されます。
+        `override_env_vars` / `extra_env_vars` で環境変数の上書き・追加、
+        `skip_volume_names` / `volume_size_overrides` でボリューム構成を調整できます。
+      tags: [DeploymentTemplates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDeploymentFromTemplateRequest"
+            example:
+              template_id: "550e8400-e29b-41d4-a716-446655440000"
+              name: "my-wordpress"
+              extra_env_vars:
+                - key: "WP_ADMIN_EMAIL"
+                  value: "admin@example.com"
+                  is_secret: false
+      responses:
+        "201":
+          description: 作成されたデプロイメント
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deployment"
+        "400":
+          description: リクエストが不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: アクセス権限なし、またはクォータ超過
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/QuotaExceededResponse"
+        "404":
+          description: テンプレートまたはプロジェクトが見つからない
           content:
             application/json:
               schema:
@@ -1196,13 +1902,7 @@ paths:
 
   /api/v1/deployments/{id}:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: デプロイメント ID
+      - $ref: "#/components/parameters/DeploymentIdParam"
 
     get:
       summary: デプロイメント取得
@@ -1215,7 +1915,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Deployment"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -1237,8 +1937,9 @@ paths:
       summary: デプロイメント更新
       description: |
         デプロイメントの設定を更新します。変更は `pending_*` フィールドに書き込まれ、
-        次回 `apply` 実行時に Kubernetes に反映されます。
-        `type` フィールドは変更できません。
+        次回 `POST /deployments/{id}/apply` 実行時に Kubernetes に反映されます。
+        `type` フィールドは変更できません。`replicas` を増やす場合はレプリカ数クォータの
+        チェックが行われます。
       tags: [Deployments]
       requestBody:
         required: true
@@ -1254,17 +1955,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Deployment"
         "400":
-          description: バリデーションエラーまたはクォータ超過
+          description: リクエストが不正
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されている、またはクォータ超過
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/QuotaExceededResponse"
         "404":
           description: デプロイメントが見つからない
           content:
@@ -1280,23 +1983,63 @@ paths:
 
     delete:
       summary: デプロイメント削除
-      description: デプロイメントを削除します。関連する k8s リソース（Deployment, Service, Ingress 等）も削除されます。
+      description: |
+        デプロイメントを `deleting` 状態にし、Temporal `DeleteDeploymentWorkflow` を起動して
+        関連する k8s リソースを非同期に削除します。
+
+        **注意**: 他の DELETE エンドポイントと異なり `200` で更新後のデプロイメント情報を返します
+        （`204 No Content` ではありません）。
       tags: [Deployments]
       responses:
         "200":
-          description: 削除対象のデプロイメント情報
+          description: 更新後（status=deleting）のデプロイメント情報
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Deployment"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: デプロイメントが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/deployments/{id}/discard-pending:
+    parameters:
+      - $ref: "#/components/parameters/DeploymentIdParam"
+    post:
+      summary: pending 変更の破棄
+      description: |
+        `UpdateDeployment` などで `pending_*` フィールドに書き込まれた未適用の変更を破棄し、
+        現在の本フィールドの値に戻します。
+      tags: [Deployments]
+      responses:
+        "200":
+          description: pending 破棄後のデプロイメント
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Deployment"
+        "403":
+          description: 権限がありません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: デプロイメントが見つかりません
           content:
             application/json:
               schema:
@@ -1310,51 +2053,41 @@ paths:
 
   /api/v1/deployments/{id}/apply:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: デプロイメント ID
+      - $ref: "#/components/parameters/DeploymentIdParam"
 
     post:
-      summary: Apply（Kubernetes への反映）
+      summary: Apply（Kubernetes への非同期反映）
       description: |
-        `pending_*` フィールドの値を本フィールドに昇格させ、Kubernetes リソースを同期します。
+        Temporal `ApplyWorkflow`（WorkflowID: `apply-{deployment_id}`、冪等）を非同期に起動します。
+        実際の `pending_*` → 本フィールドへの昇格・Kubernetes リソース同期・ApplyHistory 記録は
+        controller Worker 側の Workflow 内で行われます。
 
-        **処理内容**:
-        1. `pending_*` フィールドを本フィールドに昇格
-        2. k8s Deployment / Service / IngressRoute などのマニフェストを生成・Apply
-        3. ApplyHistory にスナップショットを記録
-
-        **ビルドが必要なタイプ（dockerfile/railpack）の場合**:
-        - apply と同時にビルドもトリガーされ、`build_id` が返ります
-        - ビルド完了後に自動的にデプロイが実行されます
-
-        **エラー時**:
-        - `409`: すでに apply が実行中
-        - `400`: デプロイメントが削除中 / 設定が不正
+        **エラー条件**:
+        - `status` が `deleting` または `app_status` が `deploying` の場合は `409`（既に apply 中/削除中）
+        - `status` が `not_init`（railpack/dockerfile で初回ビルド未完了）の場合は `400`
+        - レプリカ数がクォータを超える場合は `403`
       tags: [Deployments]
       responses:
-        "200":
-          description: Apply 結果
+        "202":
+          description: Apply Workflow が起動された（非同期処理の受理）
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApplyResult"
         "400":
-          description: 設定不正またはデプロイメントが削除中
+          description: 設定不正、または not_init 状態（初回ビルド未完了）
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されている、またはクォータ超過（レプリカ数）
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/QuotaExceededResponse"
         "404":
           description: デプロイメントが見つからない
           content:
@@ -1362,13 +2095,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: すでに apply が実行中
+          description: すでに apply が実行中、または削除中
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: サーバーエラー
+          description: サーバーエラー（生のエラーメッセージが含まれる場合がある）
           content:
             application/json:
               schema:
@@ -1376,13 +2109,7 @@ paths:
 
   /api/v1/deployments/{id}/apply-histories:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: デプロイメント ID
+      - $ref: "#/components/parameters/DeploymentIdParam"
 
     get:
       summary: Apply 履歴一覧取得
@@ -1398,7 +2125,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/ApplyHistory"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -1421,13 +2148,7 @@ paths:
   # ══════════════════════════════════════════════════════════════════
   /api/v1/deployments/{id}/service:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: デプロイメント ID
+      - $ref: "#/components/parameters/DeploymentIdParam"
 
     get:
       summary: Service 取得
@@ -1441,7 +2162,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Service"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -1489,7 +2210,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -1510,8 +2231,8 @@ paths:
     put:
       summary: Service 更新
       description: |
-        Service のポート設定を更新します。
-        変更は `pending_*` フィールドに書き込まれ、次回 `apply` で反映されます。
+        Service のポート設定を更新します。変更は `pending_*` フィールドに書き込まれ、
+        次回 `apply` で反映されます。
       tags: [Service]
       requestBody:
         required: true
@@ -1529,8 +2250,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Service"
+        "400":
+          description: リクエストが不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -1556,7 +2283,7 @@ paths:
         "204":
           description: 削除成功
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -1575,9 +2302,87 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   # ══════════════════════════════════════════════════════════════════
-  # IngressRoute
+  # IngressRoute / PathRule
   # ══════════════════════════════════════════════════════════════════
-  /api/v1/deployments/{id}/ingress-route:
+  /api/v1/projects/{id}/ingress-routes:
+    parameters:
+      - $ref: "#/components/parameters/ProjectIdParam"
+
+    get:
+      summary: IngressRoute 一覧取得
+      description: プロジェクトに属する IngressRoute 一覧を返します。
+      tags: [IngressRoute]
+      responses:
+        "200":
+          description: IngressRoute 一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/IngressRoute"
+        "403":
+          description: アクセスが禁止されています
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    post:
+      summary: IngressRoute 作成
+      description: |
+        プロジェクトに IngressRoute を作成します。`name` を省略するとプロジェクト名から
+        自動生成されます。名前は英小文字・数字・ハイフンのみ、最大20文字、プロジェクト内で一意である
+        必要があります。作成後 `POST /projects/{id}/apply` を実行すると Traefik IngressRoute が
+        k8s に反映されます。
+      tags: [IngressRoute]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateIngressRouteRequest"
+            example:
+              name: "web"
+      responses:
+        "201":
+          description: 作成された IngressRoute
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngressRoute"
+        "400":
+          description: リクエストが不正、または名前形式が不正（英小文字・数字・ハイフン以外、20文字超）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: アクセスが禁止されています
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: 同じ名前の IngressRoute がこのプロジェクトに既に存在する
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/ingress-routes/{id}:
     parameters:
       - name: id
         in: path
@@ -1585,21 +2390,113 @@ paths:
         schema:
           type: string
           format: uuid
-        description: デプロイメント ID
+        description: IngressRoute ID
 
-    get:
-      summary: IngressRoute 取得
-      description: デプロイメントに紐づく IngressRoute 設定を返します。
+    delete:
+      summary: IngressRoute 削除
       tags: [IngressRoute]
       responses:
-        "200":
-          description: IngressRoute 情報
+        "204":
+          description: 削除成功
+        "403":
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/IngressRoute"
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: IngressRoute が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/ingress-routes/{id}/name:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: IngressRoute ID
+
+    patch:
+      summary: IngressRoute 名前変更
+      description: |
+        変更後の名前は `pending_name` に書き込まれ、次回 `POST /projects/{id}/apply` で
+        ホスト名の再生成とともに反映されます。
+      tags: [IngressRoute]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateIngressRouteNameRequest"
+      responses:
+        "204":
+          description: 変更成功（レスポンスボディなし）
+        "400":
+          description: リクエストが不正、または名前形式が不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: IngressRoute が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: 同じ名前の IngressRoute がこのプロジェクトに既に存在する
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/ingress-routes/{id}/path-rules:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: IngressRoute ID
+
+    get:
+      summary: PathRule 一覧取得
+      tags: [IngressRoute]
+      responses:
+        "200":
+          description: PathRule 一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PathRule"
+        "403":
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -1618,68 +2515,36 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
     post:
-      summary: IngressRoute 作成
+      summary: PathRule 作成
       description: |
-        デプロイメントに IngressRoute を作成します（1デプロイメントにつき1つ）。
-        作成後 `apply` を実行すると Traefik IngressRoute が k8s に反映されます。
+        IngressRoute にパスルーティングルールを追加します。同一 IngressRoute 内で
+        `path_prefix` は一意である必要があります。
       tags: [IngressRoute]
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateIngressRouteRequest"
+              $ref: "#/components/schemas/CreatePathRuleRequest"
             example:
-              host: "web-app-ab12cd34.launchs.org"
-              path_prefix: "/"
-              port: 8080
-              tls_enabled: true
-              certificate_resolver: "letsencrypt"
+              path_prefix: "/api"
+              service_id: "550e8400-e29b-41d4-a716-446655440000"
+              strip_prefix: false
       responses:
         "201":
-          description: 作成された IngressRoute
+          description: 作成された PathRule
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/IngressRoute"
+                $ref: "#/components/schemas/PathRule"
+        "400":
+          description: リクエストが不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "404":
-          description: デプロイメントが見つからない
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "500":
-          description: サーバーエラー
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-    put:
-      summary: IngressRoute 更新
-      description: 変更は `pending_*` フィールドに書き込まれ、次回 `apply` で反映されます。
-      tags: [IngressRoute]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateIngressRouteRequest"
-      responses:
-        "200":
-          description: 更新後の IngressRoute
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/IngressRoute"
-        "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -1690,6 +2555,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: 同じパスプレフィックスが既に登録されている
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: サーバーエラー
           content:
@@ -1697,20 +2568,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/ingress-routes/{id}/path-rules/{pathRuleID}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: IngressRoute ID（このエンドポイントでは未使用）
+      - name: pathRuleID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: PathRule ID
+
     delete:
-      summary: IngressRoute 削除
+      summary: PathRule 削除
       tags: [IngressRoute]
       responses:
         "204":
           description: 削除成功
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: IngressRoute が見つからない
+          description: PathRule が見つからない
           content:
             application/json:
               schema:
@@ -1727,27 +2615,28 @@ paths:
   # ══════════════════════════════════════════════════════════════════
   /api/v1/deployments/{id}/build:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: デプロイメント ID
+      - $ref: "#/components/parameters/DeploymentIdParam"
 
     post:
       summary: ビルドトリガー
       description: |
-        dockerfile または railpack タイプのデプロイメントでビルドを開始します。
+        `railpack` タイプのデプロイメントで Temporal `BuildWorkflow` を起動しビルドを開始します。
+
+        **注意**: `dockerfile` タイプは現在サポートされていません（`400` が返ります）。
 
         **前提条件**:
-        - `type` が `dockerfile` または `railpack` であること
-        - `github_repo_url` と `github_branch` が設定されていること
-        - 別のビルドが実行中でないこと（409 を返す）
+        - `type` が `railpack` であること（`dockerfile` は非対応）
+        - 別のビルドが実行中でないこと（`409` を返す）
 
-        ビルドは k8s Job として実行されます。
-        進捗は `GET /api/v1/builds/:id/logs` で確認できます。
+        ビルドは k8s Job として実行されます。進捗は `GET /api/v1/builds/{id}/logs` で確認できます。
+        成功すると Image レコードが自動作成され `pending_image_id` に設定されます。
       tags: [Builds]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TriggerBuildRequest"
       responses:
         "201":
           description: 開始されたビルド情報
@@ -1755,8 +2644,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DeploymentBuild"
+        "400":
+          description: dockerfile タイプは現在サポートされていません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -1780,6 +2675,75 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/deployments/{id}/builds:
+    parameters:
+      - $ref: "#/components/parameters/DeploymentIdParam"
+    get:
+      summary: デプロイメント単位ビルド一覧取得
+      tags: [Builds]
+      responses:
+        "200":
+          description: ビルド一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeploymentBuild"
+        "403":
+          description: アクセスが禁止されています
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: デプロイメントが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/projects/{id}/builds:
+    parameters:
+      - $ref: "#/components/parameters/ProjectIdParam"
+    get:
+      summary: プロジェクト単位ビルド一覧取得
+      description: プロジェクト配下の全デプロイメントのビルド履歴（削除済みデプロイメントの履歴も含む）を返します。
+      tags: [Builds]
+      responses:
+        "200":
+          description: ビルド一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeploymentBuild"
+        "403":
+          description: アクセスが禁止されています
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: プロジェクトが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/builds/{id}:
     parameters:
       - name: id
@@ -1790,12 +2754,44 @@ paths:
           format: uuid
         description: ビルド ID
 
+    get:
+      summary: ビルド取得
+      description: |
+        デプロイメントが削除済みの場合（`deployment_id` が null）は、Build レコードの
+        `project_id` を経由して所有権を確認します。
+      tags: [Builds]
+      responses:
+        "200":
+          description: ビルド情報
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentBuild"
+        "403":
+          description: アクセスが禁止されています
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: ビルドが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
     delete:
       summary: ビルドキャンセル
       description: |
-        実行中のビルドをキャンセルします。
-        `status` が `pending` または `building` のビルドのみキャンセル可能です。
-        k8s Job を削除してビルドを停止します。
+        実行中のビルドをキャンセルします。`status` が `pending` または `building` のビルドのみ
+        キャンセル可能です。Temporal Workflow をキャンセルし k8s Job を削除します
+        （`CancelBuildWorkflow` を起動）。
       tags: [Builds]
       responses:
         "200":
@@ -1803,13 +2799,11 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: "ビルドをキャンセルしました"
+                $ref: "#/components/schemas/MessageResponse"
+              example:
+                message: "ビルドをキャンセルしました"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -1846,8 +2840,7 @@ paths:
     get:
       summary: ビルドログ取得
       description: |
-        ビルドのログを取得します。
-        `since` パラメータで差分取得が可能です（ポーリング向け）。
+        ビルドのログを取得します。`since` パラメータで差分取得が可能です（ポーリング向け）。
       tags: [Builds]
       parameters:
         - name: since
@@ -1858,7 +2851,7 @@ paths:
             format: date-time
           description: |
             この日時以降のログのみ取得（RFC3339 形式、例: `2024-01-01T00:00:00Z`）。
-            省略時は全ログを返します。
+            省略時は全ログを返します。パース失敗時は `400` エラー。
           example: "2024-01-01T00:00:00Z"
       responses:
         "200":
@@ -1874,7 +2867,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -1893,24 +2886,143 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   # ══════════════════════════════════════════════════════════════════
-  # Pod Logs
+  # Images
   # ══════════════════════════════════════════════════════════════════
-  /api/v1/deployments/{id}/logs:
+  /api/v1/projects/{id}/images:
     parameters:
-      - name: id
+      - $ref: "#/components/parameters/ProjectIdParam"
+    get:
+      summary: プロジェクト単位イメージ一覧取得
+      description: |
+        プロジェクトに紐づく Image レコード一覧を返します。ビルド成功時やイメージ URL 指定時に
+        自動生成されるレコードで、Harbor に push されたイメージまたは外部イメージ URL を表します。
+      tags: [Images]
+      responses:
+        "200":
+          description: イメージ一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Image"
+        "403":
+          description: アクセス権限がありません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: プロジェクトが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/projects/{id}/images/{imageId}:
+    parameters:
+      - $ref: "#/components/parameters/ProjectIdParam"
+      - name: imageId
         in: path
         required: true
         schema:
           type: string
           format: uuid
-        description: デプロイメント ID
+        description: イメージ ID
+
+    delete:
+      summary: イメージ削除
+      description: |
+        Image レコードを削除します。いずれかの Deployment の `image_id` または
+        `pending_image_id` から参照されている場合は削除できません。
+      tags: [Images]
+      responses:
+        "204":
+          description: 削除成功
+        "403":
+          description: アクセス権限がありません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: イメージが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: このイメージは Deployment から参照されているため削除できません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/images/{imageId}:
+    parameters:
+      - name: imageId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: イメージ ID
+
+    get:
+      summary: イメージ取得
+      tags: [Images]
+      responses:
+        "200":
+          description: イメージ情報
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Image"
+        "403":
+          description: アクセス権限がありません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: イメージが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ══════════════════════════════════════════════════════════════════
+  # Pod Logs
+  # ══════════════════════════════════════════════════════════════════
+  /api/v1/deployments/{id}/logs:
+    parameters:
+      - $ref: "#/components/parameters/DeploymentIdParam"
 
     get:
       summary: Pod ログ取得
       description: |
-        デプロイメントの Pod ログを取得します。
-        `since` パラメータで差分取得が可能です（ポーリング向け）。
-        レスポンスの `last_timestamp` を次回リクエストの `since` に使用してください。
+        デプロイメントの Pod ログを Pod ごとにグループ化して取得します。`since` パラメータで
+        差分取得が可能です（ポーリング向け）。レスポンスの各 Pod エントリの `last_timestamp` を
+        次回リクエストの `since` に使用してください。稼働中の Pod 名一覧は `active_pod_names` で、
+        既に削除された Pod のログ履歴も `pods` 配列に残ります。
       tags: [Logs]
       parameters:
         - name: since
@@ -1929,13 +3041,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/PodLogsResponse"
         "400":
-          description: since パラメータの形式不正
+          description: since パラメータの形式が不正（RFC3339 形式で指定してください）
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセス権限がありません
           content:
             application/json:
               schema:
@@ -1954,25 +3066,76 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
   # ══════════════════════════════════════════════════════════════════
+  # Metrics
+  # ══════════════════════════════════════════════════════════════════
+  /api/v1/deployments/{id}/metrics:
+    parameters:
+      - $ref: "#/components/parameters/DeploymentIdParam"
+
+    get:
+      summary: デプロイメントメトリクス取得
+      description: |
+        デプロイメントの CPU / メモリ使用量・レプリカ状態の時系列データを取得します
+        （watcher サービスが定期収集）。
+      tags: [Metrics]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 720
+            minimum: 1
+            maximum: 8640
+          description: |
+            取得件数の上限。デフォルト 720 件（30 秒間隔 × 720 件 = 過去1時間分）。
+            最大 8640 件（過去3日分）で、それを超える値は自動的に上限値に丸められます。
+            0 以下または非数値を指定すると `400` エラー。
+      responses:
+        "200":
+          description: メトリクス一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentMetricsListResponse"
+        "400":
+          description: limit は正の整数で指定してください
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: アクセスが許可されていません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: deployment が見つかりません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ══════════════════════════════════════════════════════════════════
   # Webhooks
   # ══════════════════════════════════════════════════════════════════
   /api/v1/deployments/{id}/webhooks:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: デプロイメント ID
+      - $ref: "#/components/parameters/DeploymentIdParam"
 
     post:
       summary: Webhook 作成
       description: |
-        GitHub リポジトリの push イベントを受け取る Webhook を作成します。
-        レスポンスの `secret` を GitHub Webhook 設定の「Secret」欄に設定してください。
-
-        Webhook URL: `POST /webhooks/{deployment_id}/github`
+        GitHub リポジトリの push イベント等を受け取るための Webhook を作成します。
+        レスポンスの `secret` を控えておき、`POST /webhooks/{deployment_id}/*` 系エンドポイントの
+        `X-Webhook-Secret` ヘッダーに使用してください（後から再取得はできません）。
       tags: [Webhooks]
       requestBody:
         required: true
@@ -1989,8 +3152,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DeploymentWebhook"
+        "400":
+          description: リクエストが不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが拒否されました
           content:
             application/json:
               schema:
@@ -2019,7 +3188,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/DeploymentWebhook"
         "403":
-          description: アクセス権限なし
+          description: アクセスが拒否されました
           content:
             application/json:
               schema:
@@ -2052,17 +3221,15 @@ paths:
       tags: [Webhooks]
       responses:
         "200":
-          description: 削除成功
+          description: 削除成功（`204` ではなくボディ付きで返却される点に注意）
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: "Webhook を削除しました"
+                $ref: "#/components/schemas/MessageResponse"
+              example:
+                message: "削除しました"
         "403":
-          description: アクセス権限なし
+          description: アクセスが拒否されました
           content:
             application/json:
               schema:
@@ -2080,7 +3247,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /webhooks/{deployment_id}/github:
+  /webhooks/{deployment_id}/build:
     parameters:
       - name: deployment_id
         in: path
@@ -2091,74 +3258,212 @@ paths:
         description: デプロイメント ID
 
     post:
-      summary: GitHub Webhook 受信
+      summary: シークレット認証でビルドをトリガー（外部 CI/CD 用）
       description: |
-        GitHub からの push イベントを受信してビルドをトリガーします。
-
-        **認証なし**（GitHub から直接呼ばれるため JWT 不要）。
-
-        **シグネチャ検証**: `X-Hub-Signature-256` ヘッダーで HMAC-SHA256 検証を行います。
-        Webhook 作成時に返された `secret` を使って GitHub 側で設定してください。
-
-        **動作**: push イベントを受信すると、対象デプロイメントのブランチが一致する場合にビルドをトリガーします。
+        JWT 認証は不要ですが、`X-Webhook-Secret` ヘッダーによるシークレット認証が必須です。
+        GitHub Actions などの外部 CI/CD パイプラインから呼び出すことを想定しています。
+        内部的には `POST /api/v1/deployments/{id}/build` と同じビルドロジックを実行します。
       tags: [Webhooks]
-      security: []
-      parameters:
-        - name: X-Hub-Signature-256
-          in: header
-          required: true
-          schema:
-            type: string
-          description: |
-            GitHub の HMAC-SHA256 シグネチャ（形式: `sha256=<hex>`）
-          example: "sha256=abc123..."
+      security:
+        - webhookSecret: []
       requestBody:
-        required: true
+        required: false
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                ref:
-                  type: string
-                  description: プッシュ先ブランチ参照（例: `refs/heads/main`）
-                  example: "refs/heads/main"
-                after:
-                  type: string
-                  description: プッシュ後のコミット SHA
-                  example: "abc123def456..."
-                repository:
-                  type: object
-                  properties:
-                    full_name:
-                      type: string
-                      description: リポジトリのフルネーム（`org/repo` 形式）
-                      example: "org/repo"
+              $ref: "#/components/schemas/WebhookTriggerBuildRequest"
       responses:
-        "200":
-          description: Webhook 受信成功
+        "201":
+          description: 開始されたビルド情報
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: "Webhook を受信しました"
+                $ref: "#/components/schemas/DeploymentBuild"
         "401":
-          description: シグネチャ検証失敗
+          description: X-Webhook-Secret ヘッダーが未指定、またはシークレットが不正・Webhook が無効
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: デプロイメントが見つからない
+          description: リソースが見つかりません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: ビルドが既に進行中、初回ビルド未完了、または Apply が既に進行中
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
-          description: サーバーエラー
+          description: 内部サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /webhooks/{deployment_id}/builds/{build_id}:
+    parameters:
+      - name: deployment_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: デプロイメント ID
+      - name: build_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: ビルド ID
+
+    get:
+      summary: シークレット認証でビルド状態確認（外部 CI/CD 用）
+      description: JWT 認証は不要ですが、`X-Webhook-Secret` ヘッダーによるシークレット認証が必須です。
+      tags: [Webhooks]
+      security:
+        - webhookSecret: []
+      responses:
+        "200":
+          description: ビルド情報
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentBuild"
+        "401":
+          description: X-Webhook-Secret ヘッダーが未指定、またはシークレットが不正・Webhook が無効
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: リソースが見つかりません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: 内部サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /webhooks/{deployment_id}/apply:
+    parameters:
+      - name: deployment_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: デプロイメント ID
+
+    post:
+      summary: シークレット認証で Apply 実行（外部 CI/CD 用）
+      description: |
+        JWT 認証は不要ですが、`X-Webhook-Secret` ヘッダーによるシークレット認証が必須です。
+        内部的には `POST /api/v1/deployments/{id}/apply` と同じ Apply ロジックを実行します。
+      tags: [Webhooks]
+      security:
+        - webhookSecret: []
+      responses:
+        "200":
+          description: Apply 結果（Workflow 起動済み。JWT 版は 202 を返すがこちらは 200 で統一されている点に注意）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyResult"
+        "401":
+          description: X-Webhook-Secret ヘッダーが未指定、またはシークレットが不正・Webhook が無効
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: リソースが見つかりません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: ビルドが既に進行中、初回ビルド未完了、または Apply が既に進行中
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: 内部サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /webhooks/{deployment_id}/update-image:
+    parameters:
+      - name: deployment_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: デプロイメント ID
+
+    post:
+      summary: シークレット認証でイメージ更新 & Apply（image_url タイプ専用）
+      description: |
+        JWT 認証は不要ですが、`X-Webhook-Secret` ヘッダーによるシークレット認証が必須です。
+        指定した `image_url` に対応する Image レコードを解決（既存なら再利用、なければ新規作成）し、
+        `pending_image_id` に設定した上で Apply を実行します。CI/CD からのイメージ更新デプロイに
+        使用することを想定しています。
+      tags: [Webhooks]
+      security:
+        - webhookSecret: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookUpdateImageRequest"
+            example:
+              image_url: "registry.example.com/org/app:v1.2.3"
+      responses:
+        "200":
+          description: Apply 結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyResult"
+        "400":
+          description: リクエストが不正、または image_url が空
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: X-Webhook-Secret ヘッダーが未指定、またはシークレットが不正・Webhook が無効
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: リソースが見つかりません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: ビルドが既に進行中、初回ビルド未完了、または Apply が既に進行中
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: 内部サーバーエラー
           content:
             application/json:
               schema:
@@ -2169,19 +3474,13 @@ paths:
   # ══════════════════════════════════════════════════════════════════
   /api/v1/projects/{id}/env-vars:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: プロジェクト ID
+      - $ref: "#/components/parameters/ProjectIdParam"
 
     get:
       summary: 環境変数一覧取得
       description: |
-        指定プロジェクトの環境変数一覧を返します。
-        `is_secret: true` の変数は `value` が `***` にマスクされます。
+        指定プロジェクトの環境変数一覧を返します。**注意**: `is_secret: true` の変数も
+        `value` はマスクされずそのまま返却されます。
       tags: [EnvVars]
       responses:
         "200":
@@ -2193,7 +3492,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/EnvVar"
         "403":
-          description: アクセス権限なし
+          description: アクセスが拒否されました
           content:
             application/json:
               schema:
@@ -2214,9 +3513,9 @@ paths:
     post:
       summary: 環境変数作成
       description: |
-        プロジェクトに環境変数を追加します。
-        `is_secret: true` にすると値が k8s Secret に保存され、API 応答でマスクされます。
-        環境変数はデプロイメントに EnvVarMount で紐づけた後、`apply` で k8s に反映されます。
+        プロジェクトに環境変数を追加します。`is_secret: true` にすると値が k8s Secret に
+        保存されます。環境変数はデプロイメントに EnvVarMount で紐づけた後、`apply` で k8s に
+        反映されます。同一プロジェクト内で `key` が重複する場合は `409` を返します。
       tags: [EnvVars]
       requestBody:
         required: true
@@ -2245,19 +3544,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/EnvVar"
         "400":
-          description: バリデーションエラー
+          description: リクエストが不正、または key が空文字
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが拒否されました
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: プロジェクトが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: 同じキーの環境変数がすでに存在します
           content:
             application/json:
               schema:
@@ -2295,14 +3600,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EnvVar"
+        "400":
+          description: リクエストが不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが拒否されました
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: 環境変数が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: 同じキーの環境変数がすでに存在します
           content:
             application/json:
               schema:
@@ -2321,7 +3638,7 @@ paths:
         "204":
           description: 削除成功
         "403":
-          description: アクセス権限なし
+          description: アクセスが拒否されました
           content:
             application/json:
               schema:
@@ -2344,13 +3661,7 @@ paths:
   # ══════════════════════════════════════════════════════════════════
   /api/v1/deployments/{id}/env-var-mounts:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: デプロイメント ID
+      - $ref: "#/components/parameters/DeploymentIdParam"
 
     get:
       summary: 環境変数マウント一覧取得
@@ -2366,7 +3677,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/EnvVarMount"
         "403":
-          description: アクセス権限なし
+          description: アクセスが拒否されました
           content:
             application/json:
               schema:
@@ -2387,10 +3698,10 @@ paths:
     post:
       summary: 環境変数マウント作成
       description: |
-        環境変数をデプロイメントにマウントします。
-        `override_key` を指定するとコンテナ内での環境変数名を上書きできます。
+        環境変数をデプロイメントにマウントします。`override_key` を指定するとコンテナ内での
+        環境変数名を上書きできます。
 
-        **制約**: 同一デプロイメントへの同一環境変数の重複マウントは不可（409 を返す）。
+        **制約**: 同一デプロイメントへの同一環境変数の重複マウントは不可（`409` を返す）。
         マウント後 `apply` を実行すると k8s に反映されます。
       tags: [EnvVarMounts]
       requestBody:
@@ -2410,13 +3721,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/EnvVarMount"
         "400":
-          description: バリデーションエラー
+          description: リクエストが不正、または env_var_id が空文字
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが拒否されました
           content:
             application/json:
               schema:
@@ -2428,7 +3739,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: 既にマウント済み
+          description: この環境変数は既にマウントされています
           content:
             application/json:
               schema:
@@ -2457,7 +3768,7 @@ paths:
         "204":
           description: 削除成功
         "403":
-          description: アクセス権限なし
+          description: アクセスが拒否されました
           content:
             application/json:
               schema:
@@ -2480,13 +3791,7 @@ paths:
   # ══════════════════════════════════════════════════════════════════
   /api/v1/projects/{id}/volumes:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: プロジェクト ID
+      - $ref: "#/components/parameters/ProjectIdParam"
 
     get:
       summary: ボリューム一覧取得
@@ -2501,7 +3806,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/Volume"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -2523,8 +3828,8 @@ paths:
       summary: ボリューム作成
       description: |
         k8s PersistentVolumeClaim (PVC) として作成されるボリュームを定義します。
-        `apply` 実行後に k8s に反映されます。
-        ボリュームサイズはクォータ (`max_volume_mb`) の制限を受けます。
+        DB に `pending` 状態で保存され、Temporal `CreateVolumeWorkflow` が非同期に PVC を
+        作成します。ボリュームサイズ・数・総容量はクォータの制限を受けます。
       tags: [Volumes]
       requestBody:
         required: true
@@ -2543,17 +3848,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Volume"
         "400":
-          description: バリデーションエラーまたはクォータ超過
+          description: リクエストが不正（name 空文字、または size_mb が 1 未満）
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されている、またはクォータ超過（数・サイズ・総容量）
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                oneOf:
+                  - $ref: "#/components/schemas/ErrorResponse"
+                  - $ref: "#/components/schemas/QuotaExceededResponse"
         "404":
           description: プロジェクトが見つからない
           content:
@@ -2579,13 +3886,22 @@ paths:
 
     delete:
       summary: ボリューム削除
-      description: ボリュームを削除します（PVC ReclaimPolicy=Delete のため k8s から PV も削除されます）。
+      description: |
+        ボリュームを削除します（PVC ReclaimPolicy=Delete のため k8s から PV も削除されます）。
+        Temporal `DeleteVolumeWorkflow` を起動します。既にマウントされている場合は
+        先にアンマウントする必要があります。
       tags: [Volumes]
       responses:
         "204":
           description: 削除成功
+        "400":
+          description: ボリュームがマウントされています。先にアンマウントしてから削除してください
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -2608,13 +3924,7 @@ paths:
   # ══════════════════════════════════════════════════════════════════
   /api/v1/deployments/{id}/volume-mounts:
     parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-        description: デプロイメント ID
+      - $ref: "#/components/parameters/DeploymentIdParam"
 
     get:
       summary: ボリュームマウント一覧取得
@@ -2629,7 +3939,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/VolumeMount"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -2651,7 +3961,7 @@ paths:
       summary: ボリュームマウント作成
       description: |
         ボリュームをデプロイメントのコンテナにマウントします。
-        **制約**: 同一デプロイメントの同一マウントパスへの重複マウントは不可（409 を返す）。
+        **制約**: 同一デプロイメントの同一マウントパスへの重複マウントは不可（`409` を返す）。
         マウント後 `apply` を実行すると k8s に反映されます。
       tags: [VolumeMounts]
       requestBody:
@@ -2671,13 +3981,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/VolumeMount"
         "400":
-          description: バリデーションエラー
+          description: リクエストが不正（volume_id または mount_path が空文字）
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -2713,12 +4023,15 @@ paths:
 
     delete:
       summary: ボリュームマウント削除
+      description: |
+        pending 状態（未 apply）の場合は即座に削除されます。それ以外の場合は
+        `status` が `deleting` に変更され、次回 apply 時に k8s から実際に削除されます。
       tags: [VolumeMounts]
       responses:
         "204":
           description: 削除成功
         "403":
-          description: アクセス権限なし
+          description: アクセスが禁止されています
           content:
             application/json:
               schema:
@@ -2736,23 +4049,196 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  # ══════════════════════════════════════════════════════════════════
+  # Deployment Templates
+  # ══════════════════════════════════════════════════════════════════
+  /api/v1/deployment-templates:
+    get:
+      summary: テンプレート一覧取得
+      description: 全認証ユーザーが利用可能なデプロイメントテンプレート一覧を返します。
+      tags: [DeploymentTemplates]
+      responses:
+        "200":
+          description: テンプレート一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeploymentTemplate"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    post:
+      summary: テンプレート作成（管理者専用）
+      description: |
+        新しいデプロイメントテンプレートを作成します。JWT の `labels` クレームに `admin` を
+        含むユーザーのみ実行可能です（`admin` を含まない場合は `403`）。
+      tags: [DeploymentTemplates]
+      security:
+        - jwtAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTemplateRequest"
+      responses:
+        "201":
+          description: 作成されたテンプレート
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentTemplate"
+        "400":
+          description: リクエストが不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 管理者権限が必要です
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/deployment-templates/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: テンプレート ID
+
+    get:
+      summary: テンプレート詳細取得
+      tags: [DeploymentTemplates]
+      responses:
+        "200":
+          description: テンプレート詳細
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentTemplate"
+        "404":
+          description: テンプレートが見つかりません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    put:
+      summary: テンプレート更新（管理者専用）
+      description: 指定フィールドのみ更新（null/省略は変更なし）。`admin` ラベル必須。
+      tags: [DeploymentTemplates]
+      security:
+        - jwtAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTemplateRequest"
+      responses:
+        "200":
+          description: 更新後のテンプレート
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentTemplate"
+        "400":
+          description: リクエストが不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: 管理者権限が必要です
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: テンプレートが見つかりません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    delete:
+      summary: テンプレート削除（管理者専用）
+      description: '`admin` ラベル必須。'
+      tags: [DeploymentTemplates]
+      security:
+        - jwtAuth: []
+      responses:
+        "204":
+          description: 削除成功
+        "403":
+          description: 管理者権限が必要です
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: テンプレートが見つかりません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 tags:
   - name: Quota
-    description: ユーザーのリソースクォータ管理
+    description: 認証ユーザー自身のリソースクォータ管理
   - name: Projects
-    description: プロジェクト（k8s Namespace）管理
+    description: プロジェクト（k8s Namespace + Harbor プロジェクト）管理
   - name: Deployments
     description: デプロイメント定義・Apply 操作
   - name: Service
     description: k8s Service 設定（デプロイメントのネットワーク公開）
   - name: IngressRoute
-    description: Traefik IngressRoute 設定（HTTP ルーティング・TLS）
+    description: Traefik IngressRoute / PathRule 設定（HTTP ルーティング）
   - name: Builds
-    description: コンテナイメージのビルド操作（dockerfile/railpack タイプ専用）
+    description: コンテナイメージのビルド操作（railpack タイプ専用。dockerfile は現在未サポート）
+  - name: Images
+    description: ビルド成果物・外部指定イメージの管理
   - name: Logs
     description: Pod ログ取得
+  - name: Metrics
+    description: デプロイメントの CPU/メモリメトリクス取得
   - name: Webhooks
-    description: GitHub Webhook 管理（push イベント → 自動ビルド）
+    description: GitHub 等の外部 CI/CD 連携用 Webhook 管理（push イベント→自動ビルド・自動デプロイ）
   - name: EnvVars
     description: 環境変数管理（プロジェクトスコープ）
   - name: EnvVarMounts
@@ -2761,3 +4247,5 @@ tags:
     description: 永続ボリューム（k8s PVC）管理
   - name: VolumeMounts
     description: ボリュームのデプロイメントへのマウント
+  - name: DeploymentTemplates
+    description: デプロイメントテンプレート（プリセット）管理。作成・更新・削除は管理者専用
