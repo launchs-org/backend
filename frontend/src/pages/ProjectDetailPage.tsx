@@ -25,6 +25,7 @@ import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, E
 import { SIDEBAR_INITIAL_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, FLOW_ROW_HEIGHT } from '@/lib/config'
 import { toast } from 'sonner' // トースト通知をインポートする
 import { ConfirmDialog } from '@/components/ui/confirm-dialog' // 確認ダイアログをインポートする
+import { ProjectApplyBar } from '@/components/ProjectApplyBar' // 一括Applyフローティングバーをインポートする
 import { useTutorialContext } from '@/tutorial/TutorialContext' // チュートリアル Context をインポートする
 
 const NODE_TYPES = {
@@ -91,7 +92,7 @@ export function ProjectDetailPage() {
   const [deletingEnvVarId, setDeletingEnvVarId] = useState<string | null>(null) // 削除中の環境変数ID
   const [deleteProjectConfirmOpen, setDeleteProjectConfirmOpen] = useState(false) // プロジェクト削除確認ダイアログの表示フラグ
   const [pendingSummary, setPendingSummary] = useState<ProjectPendingSummary | null>(null) // プロジェクト配下のpending集計を管理する
-  const [applyProjectConfirmOpen, setApplyProjectConfirmOpen] = useState(false) // 一括Apply確認ダイアログの表示フラグ
+  const [applyProjectDetailsOpen, setApplyProjectDetailsOpen] = useState(false) // 一括Apply詳細ダイアログの表示フラグ
   const [applyingProject, setApplyingProject] = useState(false) // 一括Apply実行中フラグ
   const [deleteVolumeConfirmId, setDeleteVolumeConfirmId] = useState<string | null>(null) // ボリューム削除確認ダイアログ対象ID
   const [deleteEnvVarConfirmId, setDeleteEnvVarConfirmId] = useState<string | null>(null) // 環境変数削除確認ダイアログ対象ID
@@ -659,17 +660,6 @@ export function ProjectDetailPage() {
             )}
           </div>
 
-          {pendingSummary?.has_pending && ( // pendingが1件以上ある場合のみ一括Applyボタンを表示する
-            <button
-              onClick={() => setApplyProjectConfirmOpen(true)} // 一括Apply確認ダイアログを開く
-              disabled={applyingProject}
-              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-600 text-white text-sm px-3 py-1.5 rounded-md transition-colors disabled:opacity-50"
-            >
-              <Play className="w-3.5 h-3.5" />
-              {applyingProject ? 'Apply中...' : 'Apply'}
-            </button>
-          )}
-
           <button
             onClick={() => setDeleteProjectConfirmOpen(true)} // プロジェクト削除確認ダイアログを開く
             disabled={deletingProject}
@@ -978,20 +968,31 @@ export function ProjectDetailPage() {
 
     </Layout>
 
-    {/* プロジェクト一括Apply確認ダイアログ */}
+    {/* プロジェクト一括Apply詳細ダイアログ */}
     <ConfirmDialog
-      open={applyProjectConfirmOpen}
-      onOpenChange={setApplyProjectConfirmOpen}
-      title="プロジェクトを一括Apply"
-      description={`Deployment ${pendingSummary?.pending_deployment_count ?? 0}件、IngressRoute ${pendingSummary?.pending_ingress_route_count ?? 0}件の保留中の変更をまとめて適用します。\nこの操作は Kubernetes に反映され、実行中のアプリケーションに影響する場合があります。`}
-      confirmLabel="Apply"
+      open={applyProjectDetailsOpen}
+      onOpenChange={setApplyProjectDetailsOpen}
+      title="保留中の変更"
+      description={`Deployment ${pendingSummary?.pending_deployment_count ?? 0}件、IngressRoute ${pendingSummary?.pending_ingress_route_count ?? 0}件の変更が保留中です。\nApply を実行すると Kubernetes に反映され、実行中のアプリケーションに影響する場合があります。`}
+      confirmLabel="Deploy"
       variant="default"
       loading={applyingProject}
       onConfirm={async () => {
         await handleApplyProject() // プロジェクトを一括applyする
-        setApplyProjectConfirmOpen(false) // ダイアログを閉じる
+        setApplyProjectDetailsOpen(false) // ダイアログを閉じる
       }}
     />
+
+    {/* プロジェクト一括Applyフローティングバー */}
+    {pendingSummary?.has_pending && ( // pendingが1件以上ある場合のみ表示する
+      <ProjectApplyBar
+        pendingDeploymentCount={pendingSummary.pending_deployment_count}
+        pendingIngressRouteCount={pendingSummary.pending_ingress_route_count}
+        applying={applyingProject}
+        onApply={handleApplyProject}
+        onShowDetails={() => setApplyProjectDetailsOpen(true)}
+      />
+    )}
 
     {/* プロジェクト削除確認ダイアログ */}
     <ConfirmDialog
