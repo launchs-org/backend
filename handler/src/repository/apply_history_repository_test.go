@@ -184,14 +184,14 @@ func TestDeploymentRepository_FindByIDForUpdate_正常にロック付きで取�
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	// テスト用 Deployment を作成する
-	pendingImageID := "image-id-lock" // pending_image_id に設定する ID を定義する
+	pendingImage := createTestImage(t, db, projectData.ID, "nginx:lock-test") // pending_image_id に設定する Image を作成する
 	deploymentData := &models.Deployment{
 		ProjectID:      projectData.ID,
 		Name:           "test-app-lock",
 		Type:           models.DeploymentTypeImageURL,
 		Status:         models.DeploymentStatusPending,
 		AppStatus:      models.AppStatusPending,
-		PendingImageID: &pendingImageID,
+		PendingImageID: &pendingImage.ID,
 	}
 	db.Create(deploymentData)                                          // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
@@ -215,8 +215,8 @@ func TestDeploymentRepository_FindByIDForUpdate_正常にロック付きで取�
 	if fetchedDeployment.ID != deploymentData.ID { // ID が一致することを確認する
 		t.Errorf("期待する ID: %s, 実際の ID: %s", deploymentData.ID, fetchedDeployment.ID)
 	}
-	if fetchedDeployment.PendingImageID == nil || *fetchedDeployment.PendingImageID != "image-id-lock" { // pending_image_id が正しいことを確認する
-		t.Errorf("期待する pending_image_id: image-id-lock, 実際の pending_image_id: %v", fetchedDeployment.PendingImageID)
+	if fetchedDeployment.PendingImageID == nil || *fetchedDeployment.PendingImageID != pendingImage.ID { // pending_image_id が正しいことを確認する
+		t.Errorf("期待する pending_image_id: %s, 実際の pending_image_id: %v", pendingImage.ID, fetchedDeployment.PendingImageID)
 	}
 }
 
