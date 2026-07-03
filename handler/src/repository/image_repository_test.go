@@ -296,3 +296,94 @@ func TestImageRepository_Delete(t *testing.T) {
 		t.Errorf("削除後のイメージ件数 0 を期待しましたが、実際の件数は %d です", count)
 	}
 }
+
+// TestImageRepository_FindOrCreate_新規作成 は既存レコードがない場合に新規作成されることを確認する
+func TestImageRepository_FindOrCreate_新規作成(t *testing.T) {
+	db := setupTestDB(t) // テスト用 DB を準備する
+	ctx := context.Background()
+
+	projectData := &models.Project{
+		Name:      "test-project-image-foc-new", // プロジェクト名を設定する
+		Namespace: "ns-image-foc-new",           // namespace を設定する
+		UserID:    "user-1",                     // ユーザー ID を設定する
+		Status:    models.ProjectStatusActive,   // ステータスを設定する
+	}
+	if err := db.Create(projectData).Error; err != nil { // プロジェクトを作成する
+		t.Fatalf("テスト用プロジェクトの作成に失敗しました: %v", err)
+	}
+	defer db.Delete(projectData) // テスト後にプロジェクトを削除する
+
+	imageRepo := NewImageRepository(db) // リポジトリを生成する
+
+	imageData, err := imageRepo.FindOrCreate(ctx, &models.Image{
+		ProjectID: projectData.ID,               // プロジェクト ID を設定する
+		ImageURL:  "harbor.example.com/a/b:foc", // イメージ URL を設定する
+	})
+	if err != nil {
+		t.Fatalf("FindOrCreate() がエラーを返しました: %v", err)
+	}
+	defer db.Delete(imageData) // テスト後にイメージレコードを削除する
+
+	if imageData.ID == "" { // ID が採番されたことを確認する
+		t.Error("新規作成時にイメージ ID が設定されていません")
+	}
+
+	var count int64
+	db.Model(&models.Image{}).Where("project_id = ? AND image_url = ?", projectData.ID, "harbor.example.com/a/b:foc").Count(&count) // 件数を確認する
+	if count != 1 {                                                                                                                    // 1件のみ作成されたことを確認する
+		t.Errorf("期待するイメージ件数 1、実際の件数 %d", count)
+	}
+}
+
+// TestImageRepository_FindOrCreate_既存を再利用 は同一(project_id, image_url)で呼び出した場合に既存レコードが再利用され重複作成されないことを確認する
+func TestImageRepository_FindOrCreate_既存を再利用(t *testing.T) {
+	db := setupTestDB(t) // テスト用 DB を準備する
+	ctx := context.Background()
+
+	projectData := &models.Project{
+		Name:      "test-project-image-foc-reuse", // プロジェクト名を設定する
+		Namespace: "ns-image-foc-reuse",           // namespace を設定する
+		UserID:    "user-1",                       // ユーザー ID を設定する
+		Status:    models.ProjectStatusActive,     // ステータスを設定する
+	}
+	if err := db.Create(projectData).Error; err != nil { // プロジェクトを作成する
+		t.Fatalf("テスト用プロジェクトの作成に失敗しました: %v", err)
+	}
+	defer db.Delete(projectData) // テスト後にプロジェクトを削除する
+
+	imageRepo := NewImageRepository(db) // リポジトリを生成する
+	imageURL := "harbor.example.com/a/b:foc-reuse"
+
+	firstImage, err := imageRepo.FindOrCreate(ctx, &models.Image{ProjectID: projectData.ID, ImageURL: imageURL}) // 1回目の呼び出しで新規作成する
+	if err != nil {
+		t.Fatalf("1回目の FindOrCreate() がエラーを返しました: %v", err)
+	}
+	defer db.Delete(firstImage) // テスト後にイメージレコードを削除する
+
+	secondImage, err := imageRepo.FindOrCreate(ctx, &models.Image{ProjectID: projectData.ID, ImageURL: imageURL}) // 2回目の呼び出しは既存を再利用するはず
+	if err != nil {
+		t.Fatalf("2回目の FindOrCreate() がエラーを返しました: %v", err)
+	}
+
+	if firstImage.ID != secondImage.ID { // 同じレコードが返されたことを確認する
+		t.Errorf("既存レコードが再利用されず、別レコードが返されました: 1回目=%s, 2回目=%s", firstImage.ID, secondImage.ID)
+	}
+
+	var count int64
+	db.Model(&models.Image{}).Where("project_id = ? AND image_url = ?", projectData.ID, imageURL).Count(&count) // 件数を確認する
+	if count != 1 {                                                                                              // 重複作成されず1件のみであることを確認する
+		t.Errorf("期待するイメージ件数 1、実際の件数 %d（重複作成が発生しています）", count)
+	}
+}
+
+// TestImageRepository_FindByProjectIDAndURL_NotFound は存在しない組み合わせの場合にエラーが返ることを確認する
+func TestImageRepository_FindByProjectIDAndURL_NotFound(t *testing.T) {
+	db := setupTestDB(t) // テスト用 DB を準備する
+	ctx := context.Background()
+
+	imageRepo := NewImageRepository(db) // リポジトリを生成する
+
+	if _, err := imageRepo.FindByProjectIDAndURL(ctx, "00000000-0000-0000-0000-000000000000", "no-such-url"); err == nil { // 存在しない組み合わせで検索する
+		t.Error("存在しない組み合わせの場合にエラーが返されませんでした")
+	}
+}
