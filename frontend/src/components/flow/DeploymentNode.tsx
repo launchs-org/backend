@@ -40,7 +40,7 @@ export function DeploymentNode({ data }: NodeProps) {
   const color = TYPE_COLOR[deployment.type] ?? TYPE_COLOR.image_url // タイプに対応するカラーを取得する
 
   const hasPending = !!(
-    deployment.pending_image_url ||
+    deployment.pending_image_id ||
     deployment.pending_github_repo_url ||
     deployment.pending_replicas ||
     deployment.pending_instance_size

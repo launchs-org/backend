@@ -11,7 +11,7 @@ import {
   type Edge,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Plus, Trash2, X, Globe, Copy, Check, ExternalLink, Play, HardDrive, KeyRound, Layers, ChevronRight, Package } from 'lucide-react'
+import { Plus, Trash2, X, Globe, Copy, Check, ExternalLink, Play, HardDrive, KeyRound, Layers, ChevronRight, Package, GitBranch, GitCommit, FolderOpen, ScrollText } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { StatusBadge } from '@/components/StatusBadge'
 import { DeploymentNode } from '@/components/flow/DeploymentNode'
@@ -21,7 +21,7 @@ import { InternetNode } from '@/components/flow/InternetNode'
 import { VolumeNode } from '@/components/flow/VolumeNode'
 import { EnvVarNode } from '@/components/flow/EnvVarNode'
 import { get, post, put, del, patch } from '@/lib/api'
-import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar, VolumeMount, EnvVarMount, Build, ProjectQuota } from '@/lib/types'
+import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar, VolumeMount, EnvVarMount, Image, ProjectQuota } from '@/lib/types'
 import { SIDEBAR_INITIAL_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, FLOW_ROW_HEIGHT } from '@/lib/config'
 import { toast } from 'sonner' // トースト通知をインポートする
 import { ConfirmDialog } from '@/components/ui/confirm-dialog' // 確認ダイアログをインポートする
@@ -83,9 +83,9 @@ export function ProjectDetailPage() {
   const [selectedEnvVarId, setSelectedEnvVarId] = useState<string | null>(null) // クリックされた環境変数ID（ハイライト用）
   const [showDeploymentListSidebar, setShowDeploymentListSidebar] = useState(false) // デプロイメント一覧サイドバーの表示フラグ
   const [showIngressListSidebar, setShowIngressListSidebar] = useState(false) // IngressRoute一覧サイドバーの表示フラグ
-  const [showBuildSidebar, setShowBuildSidebar] = useState(false) // ビルド一覧サイドバーの表示フラグ
+  const [showImageSidebar, setShowImageSidebar] = useState(false) // イメージ一覧サイドバーの表示フラグ
   const [sidebarNewQuery, setSidebarNewQuery] = useState('') // デプロイメント新規作成サイドバーのクエリパラメータ
-  const [buildList, setBuildList] = useState<Build[]>([]) // プロジェクトのビルド一覧を管理する
+  const [imageList, setImageList] = useState<Image[]>([]) // プロジェクトのイメージ一覧を管理する
   const [projectQuota, setProjectQuota] = useState<ProjectQuota | null>(null) // Harborストレージクォータを管理する
   const [envVarList, setEnvVarList] = useState<EnvVar[]>([]) // プロジェクトの環境変数一覧を管理する
   const [deletingEnvVarId, setDeletingEnvVarId] = useState<string | null>(null) // 削除中の環境変数ID
@@ -344,12 +344,12 @@ export function ProjectDetailPage() {
       const envVars = await get<EnvVar[]>(`/projects/${projectId}/env-vars`).catch(() => []) // 環境変数一覧を取得する
       setEnvVarList(envVars ?? []) // 環境変数一覧を設定する
 
-      // ビルド一覧とクォータを並行取得する
-      const [builds, quota] = await Promise.all([
-        get<Build[]>(`/projects/${projectId}/builds`).catch(() => []), // ビルド一覧を取得する
+      // イメージ一覧とクォータを並行取得する
+      const [images, quota] = await Promise.all([
+        get<Image[]>(`/projects/${projectId}/images`).catch(() => []), // イメージ一覧を取得する
         get<ProjectQuota>(`/projects/${projectId}/quota`).catch(() => null), // Harbor クォータを取得する
       ])
-      setBuildList(builds ?? []) // ビルド一覧を設定する
+      setImageList(images ?? []) // イメージ一覧を設定する
       setProjectQuota(quota) // クォータを設定する
 
       // envVar を含めてグラフを再描画する（selectedEnvVarId は useEffect 側で監視）
@@ -637,7 +637,7 @@ export function ProjectDetailPage() {
             {/* 左アイコンレール */}
             <div className="w-14 shrink-0 flex flex-col items-center pt-3 gap-2 border-r border-gray-100 bg-gray-50 z-10">
               <button
-                onClick={() => { setShowDeploymentListSidebar(prev => !prev); setShowIngressListSidebar(false); setShowVolumeSidebar(false); setShowEnvVarSidebar(false); setShowBuildSidebar(false) }}
+                onClick={() => { setShowDeploymentListSidebar(prev => !prev); setShowIngressListSidebar(false); setShowVolumeSidebar(false); setShowEnvVarSidebar(false); setShowImageSidebar(false) }}
                 title="デプロイメント"
                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                   showDeploymentListSidebar
@@ -648,7 +648,7 @@ export function ProjectDetailPage() {
                 <Layers className="w-5 h-5" />
               </button>
               <button
-                onClick={() => { setShowIngressListSidebar(prev => !prev); setShowDeploymentListSidebar(false); setShowVolumeSidebar(false); setShowEnvVarSidebar(false); setShowBuildSidebar(false) }}
+                onClick={() => { setShowIngressListSidebar(prev => !prev); setShowDeploymentListSidebar(false); setShowVolumeSidebar(false); setShowEnvVarSidebar(false); setShowImageSidebar(false) }}
                 title="IngressRoute"
                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                   showIngressListSidebar
@@ -659,7 +659,7 @@ export function ProjectDetailPage() {
                 <Globe className="w-5 h-5" />
               </button>
               <button
-                onClick={() => { setShowVolumeSidebar(prev => !prev); setShowEnvVarSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false); setShowBuildSidebar(false) }}
+                onClick={() => { setShowVolumeSidebar(prev => !prev); setShowEnvVarSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false); setShowImageSidebar(false) }}
                 title="ボリューム"
                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                   showVolumeSidebar
@@ -670,7 +670,7 @@ export function ProjectDetailPage() {
                 <HardDrive className="w-5 h-5" />
               </button>
               <button
-                onClick={() => { setShowEnvVarSidebar(prev => !prev); setShowVolumeSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false); setShowBuildSidebar(false) }}
+                onClick={() => { setShowEnvVarSidebar(prev => !prev); setShowVolumeSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false); setShowImageSidebar(false) }}
                 title="環境変数"
                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
                   showEnvVarSidebar
@@ -681,10 +681,10 @@ export function ProjectDetailPage() {
                 <KeyRound className="w-5 h-5" />
               </button>
               <button
-                onClick={() => { setShowBuildSidebar(prev => !prev); setShowEnvVarSidebar(false); setShowVolumeSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false) }}
-                title="ビルド"
+                onClick={() => { setShowImageSidebar(prev => !prev); setShowEnvVarSidebar(false); setShowVolumeSidebar(false); setShowDeploymentListSidebar(false); setShowIngressListSidebar(false) }}
+                title="イメージ"
                 className={`w-10 h-10 flex items-center justify-center rounded-lg transition-all ${
-                  showBuildSidebar
+                  showImageSidebar
                     ? 'bg-emerald-500 text-white shadow-md'
                     : 'bg-emerald-50 text-emerald-500 hover:bg-emerald-100'
                 }`}
@@ -757,17 +757,17 @@ export function ProjectDetailPage() {
               </div>
             )}
 
-            {/* ビルドサイドバー（左から開く） */}
-            {showBuildSidebar && (
+            {/* イメージサイドバー（左から開く） */}
+            {showImageSidebar && (
               <div className="w-96 shrink-0 flex flex-col border-r border-gray-200 bg-white z-10">
-                <BuildSidebar
+                <ImageSidebar
                   projectId={projectId!}
-                  buildList={buildList}
+                  imageList={imageList}
                   projectQuota={projectQuota}
-                  onClose={() => setShowBuildSidebar(false)}
-                  onBuildDeleted={(buildId) => setBuildList(prev => prev.filter(b => b.id !== buildId))}
-                  onDeployFromBuild={(imageUrl) => {
-                    setShowBuildSidebar(false) // ビルドサイドバーを閉じる
+                  onClose={() => setShowImageSidebar(false)}
+                  onImageDeleted={(imageId) => setImageList(prev => prev.filter(i => i.id !== imageId))}
+                  onDeployFromImage={(imageUrl) => {
+                    setShowImageSidebar(false) // イメージサイドバーを閉じる
                     openDeploymentNewSidebar(new URLSearchParams({ image_url: imageUrl }).toString()) // デプロイメント作成サイドバーを開く
                   }}
                 />
@@ -2023,25 +2023,41 @@ function IngressListSidebar({
   )
 }
 
-// ── BuildSidebar ──────────────────────────────────────────────
+// ── ImageSidebar ──────────────────────────────────────────────
 
-function BuildSidebar({
+function ImageSidebar({
   projectId,
-  buildList,
+  imageList,
   projectQuota,
   onClose,
-  onBuildDeleted,
-  onDeployFromBuild,
+  onImageDeleted,
+  onDeployFromImage,
 }: {
   projectId: string
-  buildList: Build[]
+  imageList: Image[]
   projectQuota: ProjectQuota | null
   onClose: () => void
-  onBuildDeleted: (buildId: string) => void
-  onDeployFromBuild: (imageUrl: string) => void
+  onImageDeleted: (imageId: string) => void
+  onDeployFromImage: (imageUrl: string) => void
 }) {
-  const [deletingBuildId, setDeletingBuildId] = useState<string | null>(null) // 削除中のビルド ID を管理する
-  const [deleteBuildConfirmId, setDeleteBuildConfirmId] = useState<string | null>(null) // ビルド削除確認ダイアログ対象ID
+  const navigate = useNavigate()
+  const [deletingImageId, setDeletingImageId] = useState<string | null>(null) // 削除中のイメージ ID を管理する
+  const [deleteImageConfirmId, setDeleteImageConfirmId] = useState<string | null>(null) // イメージ削除確認ダイアログ対象ID
+  const [copiedImageId, setCopiedImageId] = useState<string | null>(null) // URLコピー直後のイメージIDを管理する
+
+  const handleCopyImageUrl = (image: Image) => {
+    void navigator.clipboard.writeText(image.image_url) // イメージURLをクリップボードにコピーする
+    setCopiedImageId(image.id) // コピー完了表示を出す
+    setTimeout(() => setCopiedImageId(prev => (prev === image.id ? null : prev)), 1500) // 1.5秒後に表示を戻す
+  }
+
+  const buildStatusBorder: Record<string, string> = { // ビルドステータスに対応する左ボーダー色を定義する
+    pending: 'border-l-gray-300',
+    building: 'border-l-blue-400',
+    succeeded: 'border-l-emerald-400',
+    failed: 'border-l-red-400',
+    cancelled: 'border-l-gray-300',
+  }
 
   const buildStatusColor: Record<string, string> = { // ビルドステータスに対応する色を定義する
     pending: 'bg-gray-100 text-gray-500',
@@ -2059,20 +2075,22 @@ function BuildSidebar({
     cancelled: 'キャンセル',
   }
 
-  const handleDeployFromBuild = (build: Build) => {
-    onDeployFromBuild(build.built_image_url) // 親コンポーネントのサイドバーを開く
+  const handleDeployFromImage = (image: Image) => {
+    onDeployFromImage(image.image_url) // 親コンポーネントのサイドバーを開く
   }
 
-  const handleDeleteBuild = async (build: Build) => {
-    setDeletingBuildId(build.id) // 削除中フラグを立てる
+  const handleDeleteImage = async (image: Image) => {
+    setDeletingImageId(image.id) // 削除中フラグを立てる
     try {
-      await del(`/projects/${projectId}/builds/${build.id}`) // DELETE API を呼び出す
-      onBuildDeleted(build.id) // 親コンポーネントに削除を通知する
-    } catch (deleteBuildError) {
-      console.error(deleteBuildError)
-      toast.error(deleteBuildError instanceof Error ? deleteBuildError.message : '削除に失敗しました') // エラートーストを表示する
+      await del(`/projects/${projectId}/images/${image.id}`) // DELETE API を呼び出す
+      onImageDeleted(image.id) // 親コンポーネントに削除を通知する
+    } catch (deleteImageError) {
+      console.error(deleteImageError)
+      // 409（使用中）はメッセージを分けて分かりやすく表示する
+      const isConflict = deleteImageError instanceof Error && deleteImageError.message.includes('409')
+      toast.error(isConflict ? 'このイメージは使用中のため削除できません' : (deleteImageError instanceof Error ? deleteImageError.message : '削除に失敗しました')) // エラートーストを表示する
     } finally {
-      setDeletingBuildId(null) // 削除中フラグを解除する
+      setDeletingImageId(null) // 削除中フラグを解除する
     }
   }
 
@@ -2089,14 +2107,17 @@ function BuildSidebar({
     ? Math.min(100, Math.round((projectQuota.used_bytes / projectQuota.limit_bytes) * 100))
     : 0 // 使用率を計算する（最大100%）
 
+  const targetImage = imageList.find(image => image.id === deleteImageConfirmId) // 削除確認ダイアログ対象のイメージを取得する
+  const isExternalImage = targetImage ? targetImage.build_id === null : false // ビルド経由でない（外部URL直接指定）かどうかを判定する
+
   return (
     <div className="flex flex-col h-full">
       {/* ヘッダー */}
       <div className="h-10 flex items-center justify-between px-3 border-b border-gray-100 bg-gray-50 shrink-0">
         <div className="flex items-center gap-2">
           <Package className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-          <span className="text-xs font-medium text-[#111827]">ビルド</span>
-          <span className="text-xs text-gray-400">{buildList.length}</span>
+          <span className="text-xs font-medium text-[#111827]">イメージ</span>
+          <span className="text-xs text-gray-400">{imageList.length}</span>
         </div>
         <button
           onClick={onClose}
@@ -2125,109 +2146,158 @@ function BuildSidebar({
           </div>
         )}
 
-        {/* ビルド一覧 */}
-        {buildList.length === 0 ? (
-          <p className="text-xs text-gray-400 py-2">ビルドがありません</p>
+        {/* イメージ一覧 */}
+        {imageList.length === 0 ? (
+          <p className="text-xs text-gray-400 py-2">イメージがありません</p>
         ) : (
           <div className="space-y-2">
-            {buildList.map(build => (
-              <div key={build.id} className="bg-gray-50 rounded-md border border-gray-100 p-3 space-y-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${buildStatusColor[build.status] ?? 'bg-gray-100 text-gray-500'}`}>
-                      {buildStatusLabel[build.status] ?? build.status}
-                    </span>
-                    {build.image_size_bytes > 0 && (
-                      <span className="text-[10px] text-gray-400 shrink-0">{formatBytes(build.image_size_bytes)}</span>
-                    )}
+            {imageList.map(image => {
+              const build = image.build // Preload されたビルド情報（存在しない場合は外部URL直接指定）
+              const directory = build?.directory ? (build.directory === './' ? 'プロジェクトルート' : build.directory) : null // ./ はプロジェクトルートとして表示する
+              const hasMetaRow = !!(build?.branch || build?.commit_sha || directory || build?.author) // メタ情報行を描画するか判定する
+              return (
+                <div
+                  key={image.id}
+                  className={`bg-white rounded-lg border border-gray-100 border-l-[3px] ${build ? (buildStatusBorder[build.status] ?? 'border-l-gray-300') : 'border-l-gray-300'} shadow-sm overflow-hidden`}
+                >
+                  {/* ヘッダー行: ステータス・サイズ・日時・削除 */}
+                  <div className="flex items-center justify-between gap-2 px-3 pt-2.5">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {build && (
+                        <span className={`inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${buildStatusColor[build.status] ?? 'bg-gray-100 text-gray-500'}`}>
+                          {buildStatusLabel[build.status] ?? build.status}
+                        </span>
+                      )}
+                      {!build && (
+                        <span className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 bg-gray-100 text-gray-500">外部イメージ</span>
+                      )}
+                      {image.size_bytes > 0 && (
+                        <span className="text-[10px] text-gray-400 shrink-0">{formatBytes(image.size_bytes)}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-0.5 shrink-0">
+                      <span className="text-[10px] text-gray-400 mr-1">
+                        {new Date(image.created_at).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      <button
+                        onClick={() => setDeleteImageConfirmId(image.id)} // イメージ削除確認ダイアログを開く
+                        disabled={deletingImageId === image.id}
+                        className="p-1 rounded hover:bg-red-50 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="イメージを削除"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <span className="text-[10px] text-gray-400">
-                      {build.finished_at
-                        ? new Date(build.finished_at).toLocaleString('ja-JP')
-                        : build.started_at
-                          ? new Date(build.started_at).toLocaleString('ja-JP')
-                          : new Date(build.created_at).toLocaleString('ja-JP')}
-                    </span>
+
+                  {/* 本文: コミットメッセージ */}
+                  <div className="px-3 pt-1.5">
+                    <p className="text-xs font-medium text-[#111827] truncate" title={build?.commit_message || image.image_url}>
+                      {build?.commit_message || image.image_url}
+                    </p>
+                  </div>
+
+                  {/* メタ情報行: ブランチ・SHA・ディレクトリ・作者 */}
+                  {hasMetaRow && (
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pt-1.5 text-[10px] text-gray-500">
+                      {build?.branch && (
+                        <span className="inline-flex items-center gap-1">
+                          <GitBranch className="w-3 h-3 text-gray-300 shrink-0" />
+                          {build.github_repo_url ? (
+                            <a
+                              href={`${build.github_repo_url}/tree/${build.branch}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="hover:underline hover:text-[#00C2D1] font-mono"
+                            >
+                              {build.branch}
+                            </a>
+                          ) : <span className="font-mono">{build.branch}</span>}
+                        </span>
+                      )}
+                      {build?.commit_sha && (
+                        <span className="inline-flex items-center gap-1">
+                          <GitCommit className="w-3 h-3 text-gray-300 shrink-0" />
+                          {build.github_repo_url ? (
+                            <a
+                              href={`${build.github_repo_url}/commit/${build.commit_sha}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="hover:underline hover:text-[#00C2D1] font-mono"
+                            >
+                              {build.commit_sha.slice(0, 7)}
+                            </a>
+                          ) : <span className="font-mono">{build.commit_sha.slice(0, 7)}</span>}
+                        </span>
+                      )}
+                      {directory && (
+                        <span className={`inline-flex items-center gap-1 ${directory === 'プロジェクトルート' ? '' : 'font-mono'}`} title={`ディレクトリ: ${directory}`}>
+                          <FolderOpen className="w-3 h-3 text-gray-300 shrink-0" />
+                          {directory}
+                        </span>
+                      )}
+                      {build?.author && (
+                        <span className="text-gray-400">{build.author}</span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* イメージURL: truncate + コピー */}
+                  {image.image_url && (
+                    <div className="flex items-center gap-1 px-3 pt-1.5">
+                      <p className="flex-1 min-w-0 text-[10px] text-gray-400 font-mono truncate" title={image.image_url}>{image.image_url}</p>
+                      <button
+                        onClick={() => handleCopyImageUrl(image)}
+                        className="p-0.5 rounded hover:bg-gray-100 text-gray-300 hover:text-gray-500 transition-colors shrink-0"
+                        title="URLをコピー"
+                      >
+                        {copiedImageId === image.id ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* アクション行: デプロイ・ログ */}
+                  <div className="flex items-stretch gap-1.5 px-3 py-2.5 mt-1">
                     <button
-                      onClick={() => setDeleteBuildConfirmId(build.id)} // ビルド削除確認ダイアログを開く
-                      disabled={deletingBuildId === build.id || build.status === 'pending' || build.status === 'building'}
-                      className="p-1 rounded hover:bg-red-100 text-gray-300 hover:text-red-500 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                      title="ビルドを削除"
+                      onClick={() => handleDeployFromImage(image)}
+                      className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium py-1.5 rounded-md transition-colors"
                     >
-                      <Trash2 className="w-3 h-3" />
+                      <Play className="w-3 h-3" />
+                      このイメージでデプロイ
                     </button>
+                    {image.build_id && (
+                      <button
+                        onClick={() => navigate(`/builds/${image.build_id}/logs`)}
+                        className="flex items-center justify-center gap-1 px-2.5 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 text-xs transition-colors"
+                        title="ビルドログを見る"
+                      >
+                        <ScrollText className="w-3 h-3" />
+                        ログ
+                      </button>
+                    )}
                   </div>
                 </div>
-                {build.commit_message && (
-                  <p className="text-xs text-[#111827] truncate" title={build.commit_message}>{build.commit_message}</p>
-                )}
-                {build.branch && (
-                  <p className="text-[10px] text-gray-500 font-mono truncate">
-                    {build.github_repo_url ? (
-                      <a
-                        href={`${build.github_repo_url}/tree/${build.branch}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="hover:underline text-blue-500"
-                        title={build.github_repo_url}
-                      >
-                        {build.branch}
-                      </a>
-                    ) : build.branch}
-                    {build.commit_sha && (
-                      <>
-                        {' @ '}
-                        {build.github_repo_url ? (
-                          <a
-                            href={`${build.github_repo_url}/commit/${build.commit_sha}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="hover:underline text-blue-500"
-                          >
-                            {build.commit_sha.slice(0, 7)}
-                          </a>
-                        ) : build.commit_sha.slice(0, 7)}
-                      </>
-                    )}
-                  </p>
-                )}
-                {build.directory && (
-                  <p className="text-[10px] text-gray-400 font-mono truncate" title={`ディレクトリ: ${build.directory}`}>📁 {build.directory}</p>
-                )}
-                {build.author && (
-                  <p className="text-[10px] text-gray-400 truncate">👤 {build.author}</p>
-                )}
-                {build.built_image_url && (
-                  <p className="text-[10px] text-gray-400 font-mono truncate" title={build.built_image_url}>{build.built_image_url}</p>
-                )}
-                {build.status === 'succeeded' && build.built_image_url && (
-                  <button
-                    onClick={() => handleDeployFromBuild(build)}
-                    className="w-full flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs py-1.5 rounded transition-colors"
-                  >
-                    <Play className="w-3 h-3" />
-                    このイメージでデプロイ
-                  </button>
-                )}
-              </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>
 
-      {/* ビルド削除確認ダイアログ */}
+      {/* イメージ削除確認ダイアログ */}
       <ConfirmDialog
-        open={deleteBuildConfirmId !== null}
-        onOpenChange={open => { if (!open) setDeleteBuildConfirmId(null) }} // ダイアログを閉じる
-        title="ビルドを削除"
-        description={`このビルドを削除しますか？\nHarbor 上のイメージも削除されます。`}
+        open={deleteImageConfirmId !== null}
+        onOpenChange={open => { if (!open) setDeleteImageConfirmId(null) }} // ダイアログを閉じる
+        title="イメージを削除"
+        description={
+          isExternalImage
+            ? 'このイメージを削除しますか？\nこのイメージはアプリ上の登録のみ削除されます。外部レジストリ上の実イメージは削除されません。'
+            : 'このイメージを削除しますか？\nHarbor 上のイメージも削除されます。'
+        }
         confirmLabel="削除"
         variant="destructive"
         onConfirm={async () => {
-          const targetBuild = buildList.find(build => build.id === deleteBuildConfirmId) // 削除対象ビルドを取得する
-          setDeleteBuildConfirmId(null) // ダイアログを閉じる
-          if (targetBuild) await handleDeleteBuild(targetBuild) // ビルドを削除する
+          setDeleteImageConfirmId(null) // ダイアログを閉じる
+          if (targetImage) await handleDeleteImage(targetImage) // イメージを削除する
         }}
       />
     </div>
