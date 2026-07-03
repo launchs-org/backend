@@ -381,9 +381,9 @@ export function DeploymentDetailPage() {
           </div>
         )}
 
-        {/* タブナビゲーション */}
+        {/* タブナビゲーション（横幅超過を防ぐため2行に折り返す） */}
         <div className="border-b border-gray-200">
-          <nav className="flex gap-0">
+          <nav className="flex flex-wrap gap-0">
             {availableTabs.map((tab) => (
               <button
                 key={tab}

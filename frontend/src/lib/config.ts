@@ -5,8 +5,8 @@ export const POLL_INTERVAL_BUILDS = 10000 // ビルド一覧のポーリング�
 export const FAST_POLL_DURATION = 30000 // 高速ポーリングを維持する時間（ms）
 
 // サイドバー設定
-export const SIDEBAR_INITIAL_WIDTH = 795 // サイドバーの初期幅（px）
-export const SIDEBAR_MIN_WIDTH = 795 // サイドバーの最小幅（px）
+export const SIDEBAR_INITIAL_WIDTH = 500 // サイドバーの初期幅（px）
+export const SIDEBAR_MIN_WIDTH = 500 // サイドバーの最小幅（px）
 export const SIDEBAR_MAX_WIDTH = 1200 // サイドバーの最大幅（px）
 
 // フロービュー設定
