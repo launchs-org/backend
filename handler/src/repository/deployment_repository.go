@@ -50,19 +50,19 @@ func (repo *deploymentRepositoryImpl) CreateWithTx(ctx context.Context, tx *gorm
 	return tx.WithContext(ctx).Create(deployment).Error // tx を使って作成する
 }
 
-// FindByID は deploymentID に対応する deployment を返す
+// FindByID は deploymentID に対応する deployment を返す（Image / PendingImage を Preload する）
 func (repo *deploymentRepositoryImpl) FindByID(ctx context.Context, deploymentID string) (*models.Deployment, error) {
-	var deploymentData models.Deployment                                                          // deployment を格納する変数を定義する
-	if err := repo.db.WithContext(ctx).First(&deploymentData, "id = ?", deploymentID).Error; err != nil { // db から deployment を取得する
+	var deploymentData models.Deployment                                                                                                                    // deployment を格納する変数を定義する
+	if err := repo.db.WithContext(ctx).Preload("Image").Preload("PendingImage").First(&deploymentData, "id = ?", deploymentID).Error; err != nil { // db から deployment を取得する
 		return nil, err // 取得エラーを返す
 	}
 	return &deploymentData, nil // deployment を返す
 }
 
-// FindAllByProjectID は projectID に紐づく deployment 一覧を返す
+// FindAllByProjectID は projectID に紐づく deployment 一覧を返す（Image / PendingImage を Preload する）
 func (repo *deploymentRepositoryImpl) FindAllByProjectID(ctx context.Context, projectID string) ([]models.Deployment, error) {
-	var deploymentList []models.Deployment                                                                              // deployment 一覧を格納するスライスを定義する
-	if err := repo.db.WithContext(ctx).Where("project_id = ?", projectID).Find(&deploymentList).Error; err != nil { // db から deployment 一覧を取得する
+	var deploymentList []models.Deployment                                                                                                                                              // deployment 一覧を格納するスライスを定義する
+	if err := repo.db.WithContext(ctx).Preload("Image").Preload("PendingImage").Where("project_id = ?", projectID).Find(&deploymentList).Error; err != nil { // db から deployment 一覧を取得する
 		return nil, err // 取得エラーを返す
 	}
 	return deploymentList, nil // deployment 一覧を返す

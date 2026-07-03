@@ -147,6 +147,45 @@ func TestDeploymentRepository_FindByID_正常に取得される(t *testing.T) {
 	}
 }
 
+// TestDeploymentRepository_FindByID_ImageがPreloadされる は ImageID/PendingImageID に対応する Image が Preload されて返ることを確認する
+func TestDeploymentRepository_FindByID_ImageがPreloadされる(t *testing.T) {
+	db := setupTestDB(t)                     // テスト用 DB を準備する
+	projectData := createTestProject(t, db) // テスト用 Project を作成する
+
+	imageData := &models.Image{
+		ProjectID: projectData.ID,           // プロジェクト ID を設定する
+		ImageURL:  "nginx:preload-test",     // イメージ URL を設定する
+	}
+	if err := db.Create(imageData).Error; err != nil { // テスト用 Image を作成する
+		t.Fatalf("テスト用イメージレコードの作成に失敗しました: %v", err)
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(imageData) }) // テスト終了後にレコードを削除する
+
+	// テスト用 Deployment を作成する（image_id に上記 Image を設定する）
+	deploymentData := &models.Deployment{
+		ProjectID: projectData.ID,
+		Name:      "test-app-with-image",
+		Type:      models.DeploymentTypeImageURL,
+		Status:    models.DeploymentStatusRunning,
+		AppStatus: models.AppStatusRunning,
+		ImageID:   &imageData.ID, // 作成した Image を紐づける
+	}
+	db.Create(deploymentData)                                                      // テスト用レコードを作成する
+	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
+
+	repo := NewDeploymentRepository(db)                                            // リポジトリを生成する
+	result, err := repo.FindByID(context.Background(), deploymentData.ID) // リポジトリを実行する
+	if err != nil {
+		t.Fatalf("FindByID がエラーを返しました: %v", err)
+	}
+	if result.Image == nil { // Image が Preload されていることを確認する
+		t.Fatal("Image が Preload されていません")
+	}
+	if result.Image.ImageURL != "nginx:preload-test" { // Preload された Image の内容を確認する
+		t.Errorf("期待する image_url: nginx:preload-test, 実際の image_url: %s", result.Image.ImageURL)
+	}
+}
+
 // TestDeploymentRepository_FindByID_存在しないIDはエラーを返す は存在しない ID でエラーが返ることを確認する
 func TestDeploymentRepository_FindByID_存在しないIDはエラーを返す(t *testing.T) {
 	db := setupTestDB(t)                     // テスト用 DB を準備する
