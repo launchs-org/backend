@@ -37,6 +37,7 @@ type webhookServiceImpl struct {
 	webhookRepo    repository.WebhookRepository    // webhook リポジトリ
 	deploymentRepo repository.DeploymentRepository // deployment リポジトリ（認可チェックに使用する）
 	projectRepo    repository.ProjectRepository    // project リポジトリ（認可チェックに使用する）
+	imageRepo      repository.ImageRepository       // image リポジトリ（image_url 更新時の Image レコード作成用）
 	applyService   ApplyServiceInterface           // apply サービス（Webhook 経由の Apply 実行に使用する）
 	buildService   BuildService                    // build サービス（Webhook 経由のビルドトリガーに使用する）
 }
@@ -46,6 +47,7 @@ func NewWebhookService(
 	webhookRepo repository.WebhookRepository,
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
+	imageRepo repository.ImageRepository,
 	applyService ApplyServiceInterface,
 	buildService BuildService,
 ) WebhookService {
@@ -53,6 +55,7 @@ func NewWebhookService(
 		webhookRepo:    webhookRepo,    // webhook リポジトリを注入する
 		deploymentRepo: deploymentRepo, // deployment リポジトリを注入する
 		projectRepo:    projectRepo,    // project リポジトリを注入する
+		imageRepo:      imageRepo,      // image リポジトリを注入する
 		applyService:   applyService,   // apply サービスを注入する
 		buildService:   buildService,   // build サービスを注入する
 	}
@@ -195,12 +198,20 @@ func (svc *webhookServiceImpl) UpdateImageAndApplyByWebhook(ctx context.Context,
 	if err := svc.verifyWebhookSecret(ctx, deploymentID, secret); err != nil { // シークレットを検証する
 		return nil, err // 検証エラーを返す
 	}
-	if err := svc.deploymentRepo.UpdatePendingImageURL(ctx, deploymentID, imageURL); err != nil { // pending_image_url を更新する
-		return nil, err // 更新エラーを返す
-	}
 	projectData, err := svc.getDeploymentOwner(ctx, deploymentID) // deployment の所有者 project を取得する
 	if err != nil {
 		return nil, err // 取得エラーを返す
+	}
+	imageData, err := svc.imageRepo.FindOrCreate(ctx, &models.Image{ // (project_id, image_url) が既存であれば再利用し、なければ作成する
+		ProjectID: projectData.ID, // プロジェクト ID を設定する
+		BuildID:   nil,            // ビルドを経由しない直接指定のため nil
+		ImageURL:  imageURL,       // 指定された URL を設定する
+	})
+	if err != nil {
+		return nil, err // 解決エラーを返す
+	}
+	if err := svc.deploymentRepo.UpdatePendingImageID(ctx, deploymentID, imageData.ID); err != nil { // pending_image_id を更新する
+		return nil, err // 更新エラーを返す
 	}
 	return svc.applyService.Apply(ctx, projectData.UserID, deploymentID) // Apply を実行する
 }

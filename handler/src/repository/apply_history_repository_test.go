@@ -184,13 +184,14 @@ func TestDeploymentRepository_FindByIDForUpdate_正常にロック付きで取�
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	// テスト用 Deployment を作成する
+	pendingImage := createTestImage(t, db, projectData.ID, "nginx:lock-test") // pending_image_id に設定する Image を作成する
 	deploymentData := &models.Deployment{
-		ProjectID:       projectData.ID,
-		Name:            "test-app-lock",
-		Type:            models.DeploymentTypeImageURL,
-		Status:          models.DeploymentStatusPending,
-		AppStatus:       models.AppStatusPending,
-		PendingImageURL: "nginx:latest",
+		ProjectID:      projectData.ID,
+		Name:           "test-app-lock",
+		Type:           models.DeploymentTypeImageURL,
+		Status:         models.DeploymentStatusPending,
+		AppStatus:      models.AppStatusPending,
+		PendingImageID: &pendingImage.ID,
 	}
 	db.Create(deploymentData)                                          // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
@@ -214,8 +215,8 @@ func TestDeploymentRepository_FindByIDForUpdate_正常にロック付きで取�
 	if fetchedDeployment.ID != deploymentData.ID { // ID が一致することを確認する
 		t.Errorf("期待する ID: %s, 実際の ID: %s", deploymentData.ID, fetchedDeployment.ID)
 	}
-	if fetchedDeployment.PendingImageURL != "nginx:latest" { // pending_image_url が正しいことを確認する
-		t.Errorf("期待する pending_image_url: nginx:latest, 実際の pending_image_url: %s", fetchedDeployment.PendingImageURL)
+	if fetchedDeployment.PendingImageID == nil || *fetchedDeployment.PendingImageID != pendingImage.ID { // pending_image_id が正しいことを確認する
+		t.Errorf("期待する pending_image_id: %s, 実際の pending_image_id: %v", pendingImage.ID, fetchedDeployment.PendingImageID)
 	}
 }
 
@@ -224,6 +225,14 @@ func TestDeploymentRepository_Updates_apply後のcurrentフィールドが更新
 	db := setupTestDB(t)                     // テスト用 DB を準備する
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
+	// テスト用 Image レコードを作成する（pending_image_id が参照する image_url を保持する）
+	imageData := &models.Image{
+		ProjectID: projectData.ID, // プロジェクト ID を設定する
+		ImageURL:  "nginx:latest", // イメージ URL を設定する
+	}
+	db.Create(imageData)                                          // テスト用レコードを作成する
+	t.Cleanup(func() { db.Unscoped().Delete(imageData) }) // テスト終了後にレコードを削除する
+
 	// テスト用 Deployment を作成する（pending 状態）
 	deploymentData := &models.Deployment{
 		ProjectID:           projectData.ID,
@@ -231,9 +240,9 @@ func TestDeploymentRepository_Updates_apply後のcurrentフィールドが更新
 		Type:                models.DeploymentTypeImageURL,
 		Status:              models.DeploymentStatusPending,
 		AppStatus:           models.AppStatusPending,
-		PendingImageURL:     "nginx:latest", // pending image_url を設定する
-		PendingInstanceSize: "small",        // pending instance_size を設定する
-		PendingReplicas:     2,              // pending replicas を設定する
+		PendingImageID:      &imageData.ID, // pending image_id を設定する
+		PendingInstanceSize: "small",       // pending instance_size を設定する
+		PendingReplicas:     2,             // pending replicas を設定する
 	}
 	db.Create(deploymentData)                                          // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
@@ -242,8 +251,8 @@ func TestDeploymentRepository_Updates_apply後のcurrentフィールドが更新
 
 	// apply 後の昇格を模倣する更新を実行する
 	updates := map[string]interface{}{
-		"image_url":             "nginx:latest",               // image_url を昇格する
-		"pending_image_url":     "",                           // pending_image_url をクリアする
+		"image_id":              imageData.ID,                      // image_id を昇格する
+		"pending_image_id":      nil,                               // pending_image_id をクリアする
 		"instance_size":         "small",                      // instance_size を昇格する
 		"pending_instance_size": "",                           // pending_instance_size をクリアする
 		"replicas":              int32(2),                     // replicas を昇格する
@@ -260,11 +269,11 @@ func TestDeploymentRepository_Updates_apply後のcurrentフィールドが更新
 	// DB から取得して更新を確認する
 	var fetchedDeployment models.Deployment
 	db.First(&fetchedDeployment, "id = ?", deploymentData.ID) // 更新後のレコードを取得する
-	if fetchedDeployment.ImageURL != "nginx:latest" { // image_url が昇格されていることを確認する
-		t.Errorf("期待する image_url: nginx:latest, 実際の image_url: %s", fetchedDeployment.ImageURL)
+	if fetchedDeployment.ImageID == nil || *fetchedDeployment.ImageID != imageData.ID { // image_id が昇格されていることを確認する
+		t.Errorf("期待する image_id: %s, 実際の image_id: %v", imageData.ID, fetchedDeployment.ImageID)
 	}
-	if fetchedDeployment.PendingImageURL != "" { // pending_image_url がクリアされていることを確認する
-		t.Errorf("期待する pending_image_url: (空), 実際の pending_image_url: %s", fetchedDeployment.PendingImageURL)
+	if fetchedDeployment.PendingImageID != nil { // pending_image_id がクリアされていることを確認する
+		t.Errorf("期待する pending_image_id: nil, 実際の pending_image_id: %v", fetchedDeployment.PendingImageID)
 	}
 	if fetchedDeployment.Status != models.DeploymentStatusRunning { // status が running であることを確認する
 		t.Errorf("期待する status: running, 実際の status: %s", fetchedDeployment.Status)

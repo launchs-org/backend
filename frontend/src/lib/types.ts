@@ -23,8 +23,10 @@ export type Deployment = {
   project_id: string
   name: string
   type: DeploymentType
-  image_url: string
-  pending_image_url: string
+  image_id: string | null
+  image: Image | null
+  pending_image_id: string | null
+  pending_image: Image | null
   github_repo_url: string
   pending_github_repo_url: string
   github_branch: string
@@ -64,8 +66,6 @@ export type Build = {
   build_type: 'dockerfile' | 'railpack'
   status: BuildStatus
   k8s_job_name: string
-  built_image_url: string
-  image_size_bytes: number
   github_repo_url: string
   commit_sha: string
   commit_message: string
@@ -76,6 +76,18 @@ export type Build = {
   build_log: string
   started_at: string | null
   finished_at: string | null
+  created_at: string
+}
+
+// ── Image ─────────────────────────────────────────────────────
+
+export type Image = {
+  id: string
+  project_id: string
+  build_id: string | null
+  build?: Build
+  image_url: string
+  size_bytes: number
   created_at: string
 }
 

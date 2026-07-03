@@ -39,6 +39,7 @@ type ApplyActivities struct {
 	envVarMountRepo  repository.EnvVarMountRepository    // env_var_mount リポジトリ
 	volumeRepo       repository.VolumeRepository         // volume リポジトリ
 	volumeMountRepo  repository.VolumeMountRepository    // volume_mount リポジトリ
+	imageRepo        repository.ImageRepository           // image リポジトリ
 }
 
 // NewApplyActivities は ApplyActivities を生成して返す
@@ -56,6 +57,7 @@ func NewApplyActivities(
 	envVarMountRepo repository.EnvVarMountRepository,
 	volumeRepo repository.VolumeRepository,
 	volumeMountRepo repository.VolumeMountRepository,
+	imageRepo repository.ImageRepository,
 ) *ApplyActivities {
 	return &ApplyActivities{ // 依存を注入して返す
 		db:               db,
@@ -71,6 +73,7 @@ func NewApplyActivities(
 		envVarMountRepo:  envVarMountRepo,
 		volumeRepo:       volumeRepo,
 		volumeMountRepo:  volumeMountRepo,
+		imageRepo:        imageRepo,
 	}
 }
 
@@ -106,9 +109,19 @@ func (activities *ApplyActivities) ExecuteApply(ctx context.Context, input Apply
 		}
 
 		// 3. pending_*** から使用する実効値を決定する
-		imageURL := deploymentData.PendingImageURL // pending の image_url を使う
-		if imageURL == "" {                        // pending が空の場合は current 値を使う
-			imageURL = deploymentData.ImageURL
+		imageID := deploymentData.PendingImageID // pending の image_id を使う
+		if imageID == nil {                      // pending が空の場合は current 値を使う
+			imageID = deploymentData.ImageID
+		}
+		var imageURL string        // k8s に適用する実際のイメージURL
+		var imageIDValue *string // pending→current 昇格用の image_id（未設定時は nil）
+		if imageID != nil {
+			imageData, imageErr := activities.imageRepo.FindByID(ctx, *imageID) // Image レコードを取得する
+			if imageErr != nil {
+				return fmt.Errorf("image の取得に失敗しました: %w", imageErr) // 取得エラーを返す
+			}
+			imageURL = imageData.ImageURL // Image の URL を使う
+			imageIDValue = &imageData.ID  // 昇格用に ID を保持する
 		}
 
 		instanceSize := deploymentData.PendingInstanceSize // pending の instance_size を使う
@@ -298,8 +311,8 @@ func (activities *ApplyActivities) ExecuteApply(ctx context.Context, input Apply
 		// 8. pending_*** を空にして current 値に昇格させる
 		appliedAt := time.Now() // apply 完了時刻を記録する
 		updates := map[string]interface{}{
-			"image_url":                     imageURL,
-			"pending_image_url":             "",
+			"image_id":                      imageIDValue,
+			"pending_image_id":              nil,
 			"instance_size":                 instanceSize,
 			"pending_instance_size":         "",
 			"replicas":                      replicas,

@@ -63,7 +63,7 @@ func (mock *mockDeploymentRepository) UpdateK8sStatus(ctx context.Context, deplo
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
-func (mock *mockDeploymentRepository) UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error {
+func (mock *mockDeploymentRepository) UpdatePendingImageID(ctx context.Context, deploymentID string, imageID string) error {
 	return nil // テストでは使用しないためデフォルト nil を返す
 }
 
@@ -236,7 +236,7 @@ func (mock *mockBuildRepository) FindAllBuilding(ctx context.Context) ([]models.
 func (mock *mockBuildRepository) UpdateStatus(ctx context.Context, buildID string, status models.BuildStatus) error {
 	return nil
 }
-func (mock *mockBuildRepository) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, imageSizeBytes int64, finishedAt time.Time) error {
+func (mock *mockBuildRepository) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, finishedAt time.Time) error {
 	return nil
 }
 func (mock *mockBuildRepository) UpdateK8sJobName(ctx context.Context, buildID string, jobName string) error {
@@ -255,15 +255,79 @@ func (mock *mockBuildRepository) DeleteAllByProjectID(ctx context.Context, db *g
 	return nil
 }
 
+// mockImageRepository は ImageRepository のテスト用モック
+type mockImageRepository struct {
+	createFunc                func(ctx context.Context, image *models.Image) error
+	findByIDFunc              func(ctx context.Context, imageID string) (*models.Image, error)
+	findByProjectIDAndURLFunc func(ctx context.Context, projectID string, imageURL string) (*models.Image, error)
+	findOrCreateFunc          func(ctx context.Context, image *models.Image) (*models.Image, error)
+	findAllByProjectIDFunc    func(ctx context.Context, projectID string) ([]models.Image, error)
+	deleteFunc                func(ctx context.Context, image *models.Image) error
+}
+
+func (mock *mockImageRepository) Create(ctx context.Context, image *models.Image) error {
+	if mock.createFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.createFunc(ctx, image)
+	}
+	image.ID = "image-id-1" // デフォルトの ID を付与する
+	return nil              // デフォルトは成功を返す
+}
+func (mock *mockImageRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, image *models.Image) error {
+	return nil // テストでは使用しない
+}
+func (mock *mockImageRepository) FindByID(ctx context.Context, imageID string) (*models.Image, error) {
+	if mock.findByIDFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.findByIDFunc(ctx, imageID)
+	}
+	return nil, nil // デフォルトは nil を返す
+}
+func (mock *mockImageRepository) FindByBuildID(ctx context.Context, buildID string) (*models.Image, error) {
+	return nil, nil // テストでは使用しない
+}
+func (mock *mockImageRepository) FindByProjectIDAndURL(ctx context.Context, projectID string, imageURL string) (*models.Image, error) {
+	if mock.findByProjectIDAndURLFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.findByProjectIDAndURLFunc(ctx, projectID, imageURL)
+	}
+	return nil, gorm.ErrRecordNotFound // デフォルトは未検出を返す
+}
+func (mock *mockImageRepository) FindOrCreate(ctx context.Context, image *models.Image) (*models.Image, error) {
+	if mock.findOrCreateFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.findOrCreateFunc(ctx, image)
+	}
+	if image.ID == "" { // デフォルトの ID を付与する
+		image.ID = "image-id-1"
+	}
+	return image, nil // デフォルトは新規作成成功を返す
+}
+func (mock *mockImageRepository) FindOrCreateWithTx(ctx context.Context, tx *gorm.DB, image *models.Image) (*models.Image, error) {
+	return mock.FindOrCreate(ctx, image) // テストでは通常版と同じ挙動でよい
+}
+func (mock *mockImageRepository) FindAllByProjectID(ctx context.Context, projectID string) ([]models.Image, error) {
+	if mock.findAllByProjectIDFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.findAllByProjectIDFunc(ctx, projectID)
+	}
+	return nil, nil // デフォルトは nil を返す
+}
+func (mock *mockImageRepository) UpdateSizeBytes(ctx context.Context, imageID string, sizeBytes int64) error {
+	return nil // テストでは使用しない
+}
+func (mock *mockImageRepository) Delete(ctx context.Context, image *models.Image) error {
+	if mock.deleteFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.deleteFunc(ctx, image)
+	}
+	return nil // デフォルトは nil を返す
+}
+
 // newTestDeploymentService はテスト用のデフォルト DeploymentService を生成するヘルパー関数
 func newTestDeploymentService(deploymentRepo *mockDeploymentRepository, serviceRepo *mockServiceRepository, projectRepo *mockProjectRepository) DeploymentService {
 	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
-	return NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
+	return NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &mockImageRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
 }
 
 // TestCreateDeployment_正常に作成されpendingフィールドに値が入る は POST で全フィールドが pending_*** に入ることを確認する
 func TestCreateDeployment_正常に作成されpendingフィールドに値が入る(t *testing.T) {
 	var capturedDeployment *models.Deployment // キャプチャした deployment を格納する変数を定義する
+	var capturedImage *models.Image           // キャプチャした image を格納する変数を定義する
 
 	deploymentRepo := &mockDeploymentRepository{
 		createFunc: func(ctx context.Context, deployment *models.Deployment) error {
@@ -277,8 +341,16 @@ func TestCreateDeployment_正常に作成されpendingフィールドに値が�
 			return nil // 正常終了を返す
 		},
 	}
+	imageRepo := &mockImageRepository{
+		findOrCreateFunc: func(ctx context.Context, image *models.Image) (*models.Image, error) {
+			capturedImage = image  // image をキャプチャする
+			image.ID = "image-id-1" // ID を付与する
+			return image, nil
+		},
+	}
 
-	deploymentSvc := newTestDeploymentService(deploymentRepo, serviceRepo, &mockProjectRepository{}) // サービスを生成する
+	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, &mockProjectRepository{}, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, imageRepo, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
 	req := CreateDeploymentRequest{
 		ProjectID:    "project-id-1",  // プロジェクト ID を設定する
 		Name:         "my-app",        // デプロイメント名を設定する
@@ -298,8 +370,11 @@ func TestCreateDeployment_正常に作成されpendingフィールドに値が�
 	if result.AppStatus != models.AppStatusPending { // app_status が pending であることを確認する
 		t.Errorf("期待する app_status: pending, 実際の app_status: %s", result.AppStatus)
 	}
-	if capturedDeployment.PendingImageURL != "nginx:latest" { // pending_image_url が設定されていることを確認する
-		t.Errorf("期待する pending_image_url: nginx:latest, 実際の pending_image_url: %s", capturedDeployment.PendingImageURL)
+	if capturedImage == nil || capturedImage.ImageURL != "nginx:latest" { // Image レコードに image_url が設定されていることを確認する
+		t.Errorf("期待する image_url: nginx:latest, 実際の image: %+v", capturedImage)
+	}
+	if capturedDeployment.PendingImageID == nil || *capturedDeployment.PendingImageID != "image-id-1" { // pending_image_id が設定されていることを確認する
+		t.Errorf("期待する pending_image_id: image-id-1, 実際の pending_image_id: %v", capturedDeployment.PendingImageID)
 	}
 	if capturedDeployment.PendingInstanceSize != "small" { // pending_instance_size が設定されていることを確認する
 		t.Errorf("期待する pending_instance_size: small, 実際の pending_instance_size: %s", capturedDeployment.PendingInstanceSize)
@@ -374,9 +449,10 @@ func TestCreateDeployment_Deployment作成失敗時にエラーを返す(t *test
 
 // TestUpdateDeployment_送ったフィールドのみpendingが更新される は送ったフィールドのみ更新されることを確認する
 func TestUpdateDeployment_送ったフィールドのみpendingが更新される(t *testing.T) {
+	oldImageID := "image-id-old" // 更新前の pending_image_id を設定する
 	originalDeployment := &models.Deployment{
 		ID:                  "deployment-id-1",
-		PendingImageURL:     "nginx:1.24",  // 更新前の値を設定する
+		PendingImageID:      &oldImageID,  // 更新前の値を設定する
 		PendingInstanceSize: "small",
 		PendingReplicas:     1,
 	}
@@ -392,8 +468,17 @@ func TestUpdateDeployment_送ったフィールドのみpendingが更新され�
 		},
 	}
 	serviceRepo := &mockServiceRepository{}
+	var capturedImage *models.Image // キャプチャした image を格納する変数を定義する
+	imageRepo := &mockImageRepository{
+		findOrCreateFunc: func(ctx context.Context, image *models.Image) (*models.Image, error) {
+			capturedImage = image     // image をキャプチャする
+			image.ID = "image-id-new" // 新しい ID を付与する
+			return image, nil
+		},
+	}
 
-	deploymentSvc := newTestDeploymentService(deploymentRepo, serviceRepo, &mockProjectRepository{}) // サービスを生成する
+	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, &mockProjectRepository{}, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, imageRepo, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
 	newImageURL := "nginx:1.25"                                        // 更新する image_url を設定する
 	req := UpdateDeploymentRequest{
 		ImageURL: &newImageURL, // image_url のみ送る
@@ -403,8 +488,11 @@ func TestUpdateDeployment_送ったフィールドのみpendingが更新され�
 	if err != nil {
 		t.Fatalf("UpdateDeployment がエラーを返しました: %v", err)
 	}
-	if savedDeployment.PendingImageURL != "nginx:1.25" { // image_url が更新されていることを確認する
-		t.Errorf("期待する pending_image_url: nginx:1.25, 実際の pending_image_url: %s", savedDeployment.PendingImageURL)
+	if capturedImage == nil || capturedImage.ImageURL != "nginx:1.25" { // Image レコードに新しい image_url が設定されていることを確認する
+		t.Errorf("期待する image_url: nginx:1.25, 実際の image: %+v", capturedImage)
+	}
+	if savedDeployment.PendingImageID == nil || *savedDeployment.PendingImageID != "image-id-new" { // pending_image_id が更新されていることを確認する
+		t.Errorf("期待する pending_image_id: image-id-new, 実際の pending_image_id: %v", savedDeployment.PendingImageID)
 	}
 	if savedDeployment.PendingInstanceSize != "small" { // 送っていない instance_size が変化していないことを確認する
 		t.Errorf("instance_size は変化しないはずですが変化しています: %s", savedDeployment.PendingInstanceSize)
@@ -461,7 +549,7 @@ func TestDeleteDeployment_statusがdeletingになる(t *testing.T) {
 	// k8s Deployment が存在することを示すために fake client に登録する
 	fakeK8sClient := k8sfake.NewSimpleClientset(makeK8sDeployment("test-ns", "test-deploy")) // fake k8s クライアントを生成する
 
-	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &mockImageRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
 
 	result, err := deploymentSvc.DeleteDeployment(context.Background(), "test-user-id", "deployment-id-1") // サービスを実行する
 	if err != nil {
@@ -518,7 +606,7 @@ func TestDeleteDeployment_k8sリソースが削除される(t *testing.T) {
 
 	// k8s Deployment が存在することを示すために fake client に登録する
 	fakeK8sClient := k8sfake.NewSimpleClientset(makeK8sDeployment("test-ns", "test-deploy")) // fake k8s クライアントを生成する
-	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &mockImageRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
 
 	result, err := deploymentSvc.DeleteDeployment(context.Background(), "test-user-id", "deployment-id-k8s") // サービスを実行する
 	if err != nil {
@@ -692,5 +780,52 @@ func makeK8sDeployment(namespace, name string) *appsv1.Deployment {
 			Namespace: namespace, // namespace を設定する
 			Name:      name,      // 名前を設定する
 		},
+	}
+}
+
+// TestCreateDeployment_同一イメージURLでImageが重複作成されない は既存の同一(project_id, image_url)のImageが再利用され、
+// imageRepo.Create ではなく FindOrCreate 経由で解決されることを確認する
+func TestCreateDeployment_同一イメージURLでImageが重複作成されない(t *testing.T) {
+	existingImage := &models.Image{ID: "existing-image-id", ProjectID: "project-id-1", ImageURL: "nginx:latest"} // 既存のImageレコードを模す
+
+	var findOrCreateCallCount int
+	var capturedRequestedImage *models.Image
+	imageRepo := &mockImageRepository{
+		findOrCreateFunc: func(ctx context.Context, image *models.Image) (*models.Image, error) {
+			findOrCreateCallCount++          // 呼び出し回数を記録する
+			capturedRequestedImage = image    // 要求された image を記録する
+			return existingImage, nil // (project_id, image_url) が一致するため既存レコードを返す
+		},
+	}
+	deploymentRepo := &mockDeploymentRepository{
+		createFunc: func(ctx context.Context, deployment *models.Deployment) error {
+			deployment.ID = "deployment-id-new" // ID を付与する
+			return nil
+		},
+	}
+	serviceRepo := &mockServiceRepository{}
+	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, &mockProjectRepository{}, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, imageRepo, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
+
+	req := CreateDeploymentRequest{
+		ProjectID: "project-id-1",
+		Name:      "my-app-2",
+		Type:      "image_url",
+		ImageURL:  "nginx:latest", // 既存Imageと同一のURLを指定する
+	}
+
+	result, err := deploymentSvc.CreateDeployment(context.Background(), req) // サービスを実行する
+	if err != nil {
+		t.Fatalf("CreateDeployment がエラーを返しました: %v", err)
+	}
+
+	if findOrCreateCallCount != 1 { // FindOrCreate が呼ばれたことを確認する（Create ではなく解決ロジック経由であること）
+		t.Errorf("期待する FindOrCreate 呼び出し回数 1、実際の回数 %d", findOrCreateCallCount)
+	}
+	if capturedRequestedImage == nil || capturedRequestedImage.ImageURL != "nginx:latest" { // 要求されたURLが一致することを確認する
+		t.Errorf("期待する image_url: nginx:latest, 実際の image: %+v", capturedRequestedImage)
+	}
+	if result.PendingImageID == nil || *result.PendingImageID != existingImage.ID { // 既存のImage IDが pending_image_id に設定されることを確認する
+		t.Errorf("期待する pending_image_id: %s、実際の pending_image_id: %v", existingImage.ID, result.PendingImageID)
 	}
 }

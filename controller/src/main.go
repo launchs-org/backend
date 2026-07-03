@@ -57,6 +57,7 @@ func main() {
 	volumeRepo := repository.NewVolumeRepository(repository.Database)                             // volume リポジトリを生成する
 	volumeMountRepo := repository.NewVolumeMountRepository(repository.Database)                   // volume_mount リポジトリを生成する
 	harborCredentialRepo := repository.NewHarborCredentialRepository(repository.Database)         // harbor credential リポジトリを生成する
+	imageRepo := repository.NewImageRepository(repository.Database)                               // image リポジトリを生成する
 
 	// Activity を生成する
 	applyActivities := activity.NewApplyActivities( // Apply Activity を生成する
@@ -73,6 +74,7 @@ func main() {
 		envVarMountRepo,
 		volumeRepo,
 		volumeMountRepo,
+		imageRepo,
 	)
 	deploymentActivities := activity.NewDeploymentActivities( // Deployment Activity を生成する
 		k8sClient,

@@ -27,6 +27,7 @@ func WatchBuildJobs(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
+	imageRepo repository.ImageRepository,
 	harborClient *HarborClient,
 	registryHost string,
 ) {
@@ -61,7 +62,7 @@ func WatchBuildJobs(
 
 		logger.Println("WatchBuildJobs: 監視を開始しました") // 監視開始ログを出力する
 
-		watchBuildJobLoop(ctx, watcher, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, harborClient, registryHost) // イベントループを実行する
+		watchBuildJobLoop(ctx, watcher, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, imageRepo, harborClient, registryHost) // イベントループを実行する
 
 		logger.Println("WatchBuildJobs: Watch チャネルが終了しました。再接続します") // 再接続ログを出力する
 	}
@@ -77,6 +78,7 @@ func watchBuildJobLoop(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
+	imageRepo repository.ImageRepository,
 	harborClient *HarborClient,
 	registryHost string,
 ) {
@@ -90,7 +92,7 @@ func watchBuildJobLoop(
 			if !ok { // チャネルが閉じられた場合はループを抜ける
 				return
 			}
-			handleBuildJobEvent(ctx, event, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, harborClient, registryHost) // イベントを処理する
+			handleBuildJobEvent(ctx, event, k8sClient, buildRepo, logChunkRepo, deploymentRepo, projectRepo, harborCredentialRepo, imageRepo, harborClient, registryHost) // イベントを処理する
 		}
 	}
 }
@@ -105,6 +107,7 @@ func handleBuildJobEvent(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	harborCredentialRepo repository.HarborCredentialRepository,
+	imageRepo repository.ImageRepository,
 	harborClient *HarborClient,
 	registryHost string,
 ) {
@@ -146,16 +149,28 @@ func handleBuildJobEvent(
 			logger.PrintErr("WatchBuildJobs: BuiltImageURL の組み立てに失敗しました（buildID=" + buildID + "）: " + urlErr.Error()) // エラーをログ出力する
 			return
 		}
+		imageData, err := imageRepo.FindOrCreate(ctx, &models.Image{ // (project_id, image_url) が既存であれば再利用し、なければ作成する
+			ProjectID: buildData.ProjectID, // 親プロジェクトIDを設定する
+			BuildID:   &buildData.ID,       // 成果物を生んだビルドIDを設定する
+			ImageURL:  builtImageURL,       // 組み立てたイメージURLを設定する
+		})
+		if err != nil {
+			logger.PrintErr("WatchBuildJobs: Image レコードの解決に失敗しました（buildID=" + buildID + "）: " + err.Error()) // エラーをログ出力する
+			return
+		}
 		imageSizeBytes := fetchImageSizeBytes(ctx, buildData, harborClient, harborCredentialRepo) // イメージサイズを Harbor から取得する（失敗しても 0 で継続）
-		finishedAt := time.Now()                                                                                                                    // 完了時刻を取得する
-		if err := buildRepo.UpdateBuildResult(ctx, buildID, models.BuildStatusSucceeded, builtImageURL, imageSizeBytes, finishedAt); err != nil { // ビルド結果を更新する
+		if err := imageRepo.UpdateSizeBytes(ctx, imageData.ID, imageSizeBytes); err != nil {       // Image のサイズを更新する
+			logger.PrintErr("WatchBuildJobs: Image サイズ更新に失敗しました（imageID=" + imageData.ID + "）: " + err.Error()) // エラーをログ出力する
+		}
+		finishedAt := time.Now()                                                                                    // 完了時刻を取得する
+		if err := buildRepo.UpdateBuildResult(ctx, buildID, models.BuildStatusSucceeded, finishedAt); err != nil { // ビルド結果を更新する
 			logger.PrintErr("WatchBuildJobs: ビルド結果更新に失敗しました（buildID=" + buildID + "）: " + err.Error()) // エラーをログ出力する
 			return
 		}
 		if buildData.DeploymentID != nil { // DeploymentID が存在する場合のみ Deployment を更新する（Deployment 削除済みの場合はスキップする）
 			deploymentIDValue := *buildData.DeploymentID // pointer をデリファレンスしてローカル変数に格納する
-			if err := deploymentRepo.UpdatePendingImageURL(ctx, deploymentIDValue, builtImageURL); err != nil { // pending_image_url を更新する
-				logger.PrintErr("WatchBuildJobs: pending_image_url 更新に失敗しました（deploymentID=" + deploymentIDValue + "）: " + err.Error()) // エラーをログ出力する
+			if err := deploymentRepo.UpdatePendingImageID(ctx, deploymentIDValue, imageData.ID); err != nil { // pending_image_id を更新する
+				logger.PrintErr("WatchBuildJobs: pending_image_id 更新に失敗しました（deploymentID=" + deploymentIDValue + "）: " + err.Error()) // エラーをログ出力する
 				return
 			}
 			builtDeploymentData, findErr := deploymentRepo.FindByID(ctx, deploymentIDValue) // pending_github_* 更新用に deployment を取得する
@@ -172,11 +187,11 @@ func handleBuildJobEvent(
 				return
 			}
 		}
-		logger.Println("WatchBuildJobs: ビルド成功。succeeded に更新し pending_image_url をセットしました: " + buildID) // 成功ログを出力する
+		logger.Println("WatchBuildJobs: ビルド成功。succeeded に更新し pending_image_id をセットしました: " + buildID) // 成功ログを出力する
 
 	case k8sJob.Status.Failed > 0 && buildData.Status == models.BuildStatusBuilding: // Job が失敗かつ DB が building の場合
-		finishedAt := time.Now()                                                                                                  // 完了時刻を取得する
-		if err := buildRepo.UpdateBuildResult(ctx, buildID, models.BuildStatusFailed, "", 0, finishedAt); err != nil { // ビルド結果を failed で更新する
+		finishedAt := time.Now()                                                                          // 完了時刻を取得する
+		if err := buildRepo.UpdateBuildResult(ctx, buildID, models.BuildStatusFailed, finishedAt); err != nil { // ビルド結果を failed で更新する
 			logger.PrintErr("WatchBuildJobs: ビルド失敗結果更新に失敗しました（buildID=" + buildID + "）: " + err.Error()) // エラーをログ出力する
 			return
 		}
@@ -447,7 +462,7 @@ func fetchImageSizeBytes(ctx context.Context, buildData *models.DeploymentBuild,
 	if buildData.DeploymentID != nil {
 		repositoryName = *buildData.DeploymentID // Deployment ID が存在する場合はそれをリポジトリ名として使う
 	}
-	sizeBytes, sizeErr := harborClient.GetArtifactSize(ctx, buildData.ProjectID, repositoryName, credential) // Harbor からサイズを取得する
+	sizeBytes, sizeErr := harborClient.GetArtifactSize(ctx, buildData.ProjectID, repositoryName, buildData.ID, credential) // Harbor からタグ単位でサイズを取得する
 	if sizeErr != nil {
 		logger.PrintErr("fetchImageSizeBytes: イメージサイズの取得に失敗しました（buildID=" + buildData.ID + "）: " + sizeErr.Error()) // エラーをログ出力する
 		return 0                                                                                                                  // 失敗しても 0 を返して継続する

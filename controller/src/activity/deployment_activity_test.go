@@ -23,7 +23,7 @@ type mockDeploymentRepository struct {
 	updateAppStatusFunc      func(ctx context.Context, deploymentID string, appStatus models.AppStatus) error
 	updateK8sStatusFunc      func(ctx context.Context, deploymentID string, k8sStatus datatypes.JSON) error
 	updateDeleteProgressFunc func(ctx context.Context, deploymentID string, progress string) error
-	updatePendingImageURLFunc func(ctx context.Context, deploymentID string, imageURL string) error
+	updatePendingImageIDFunc func(ctx context.Context, deploymentID string, imageID string) error
 	updatePendingGithubCommitSHAFunc func(ctx context.Context, deploymentID string, commitSHA string) error
 	updatePendingGithubBuildFieldsFunc func(ctx context.Context, deploymentID string, repoURL string, branch string, commitSHA string, directory string) error
 	updateDeploymentStatusFunc func(ctx context.Context, deploymentID string, status models.DeploymentStatus) error
@@ -100,9 +100,9 @@ func (mock *mockDeploymentRepository) UpdateDeleteProgress(ctx context.Context, 
 	}
 	return nil
 }
-func (mock *mockDeploymentRepository) UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error {
-	if mock.updatePendingImageURLFunc != nil {
-		return mock.updatePendingImageURLFunc(ctx, deploymentID, imageURL)
+func (mock *mockDeploymentRepository) UpdatePendingImageID(ctx context.Context, deploymentID string, imageID string) error {
+	if mock.updatePendingImageIDFunc != nil {
+		return mock.updatePendingImageIDFunc(ctx, deploymentID, imageID)
 	}
 	return nil
 }

@@ -41,9 +41,12 @@ type Deployment struct {
 	Name      string         `gorm:"type:varchar(63);not null"                      json:"name"`
 	Type      DeploymentType `gorm:"type:varchar(32);not null"                      json:"type"` // 作成後変更不可
 
-	// --- image_url 専用 ---
-	ImageURL        string `gorm:"type:text" json:"image_url"`
-	PendingImageURL string `gorm:"type:text" json:"pending_image_url"`
+	// --- イメージ参照（image_url / railpack / dockerfile 共通）---
+	// nil = イメージ未設定。apply 時に Image レコードを引いて実URLをk8sに適用する
+	ImageID        *string `gorm:"type:uuid" json:"image_id"`
+	Image          *Image  `gorm:"foreignKey:ImageID"        json:"image,omitempty"`
+	PendingImageID *string `gorm:"type:uuid" json:"pending_image_id"`
+	PendingImage   *Image  `gorm:"foreignKey:PendingImageID" json:"pending_image,omitempty"`
 
 	// --- dockerfile / railpack 共通（GitHub）---
 	GithubRepoURL        string `gorm:"type:text"          json:"github_repo_url"`

@@ -21,7 +21,7 @@ type DeploymentRepository interface {
 	UpdateAppStatus(ctx context.Context, deploymentID string, appStatus models.AppStatus) error                   // app_status を更新する
 	UpdateK8sStatus(ctx context.Context, deploymentID string, k8sStatus datatypes.JSON) error                     // k8s_status を更新する
 	UpdateDeleteProgress(ctx context.Context, deploymentID string, progress string) error                         // delete_progress を更新する（削除中のステップ名を保持する）
-	UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error                        // ビルド成功時に pending_image_url を更新する
+	UpdatePendingImageID(ctx context.Context, deploymentID string, imageID string) error                          // ビルド成功時に pending_image_id を更新する
 	UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error               // GitHub push 時に pending_github_commit_sha を更新する
 	UpdatePendingGithubBuildFields(ctx context.Context, deploymentID string, repoURL string, branch string, commitSHA string, directory string) error // ビルド成功時に pending_github_* フィールドをまとめて更新する
 	UpdateDeploymentStatus(ctx context.Context, deploymentID string, status models.DeploymentStatus) error       // deployment の status を更新する
@@ -50,19 +50,19 @@ func (repo *deploymentRepositoryImpl) CreateWithTx(ctx context.Context, tx *gorm
 	return tx.WithContext(ctx).Create(deployment).Error // tx を使って作成する
 }
 
-// FindByID は deploymentID に対応する deployment を返す
+// FindByID は deploymentID に対応する deployment を返す（Image / PendingImage を Preload する）
 func (repo *deploymentRepositoryImpl) FindByID(ctx context.Context, deploymentID string) (*models.Deployment, error) {
-	var deploymentData models.Deployment                                                          // deployment を格納する変数を定義する
-	if err := repo.db.WithContext(ctx).First(&deploymentData, "id = ?", deploymentID).Error; err != nil { // db から deployment を取得する
+	var deploymentData models.Deployment                                                                                                                    // deployment を格納する変数を定義する
+	if err := repo.db.WithContext(ctx).Preload("Image").Preload("PendingImage").First(&deploymentData, "id = ?", deploymentID).Error; err != nil { // db から deployment を取得する
 		return nil, err // 取得エラーを返す
 	}
 	return &deploymentData, nil // deployment を返す
 }
 
-// FindAllByProjectID は projectID に紐づく deployment 一覧を返す
+// FindAllByProjectID は projectID に紐づく deployment 一覧を返す（Image / PendingImage を Preload する）
 func (repo *deploymentRepositoryImpl) FindAllByProjectID(ctx context.Context, projectID string) ([]models.Deployment, error) {
-	var deploymentList []models.Deployment                                                                              // deployment 一覧を格納するスライスを定義する
-	if err := repo.db.WithContext(ctx).Where("project_id = ?", projectID).Find(&deploymentList).Error; err != nil { // db から deployment 一覧を取得する
+	var deploymentList []models.Deployment                                                                                                                                              // deployment 一覧を格納するスライスを定義する
+	if err := repo.db.WithContext(ctx).Preload("Image").Preload("PendingImage").Where("project_id = ?", projectID).Find(&deploymentList).Error; err != nil { // db から deployment 一覧を取得する
 		return nil, err // 取得エラーを返す
 	}
 	return deploymentList, nil // deployment 一覧を返す
@@ -129,9 +129,9 @@ func (repo *deploymentRepositoryImpl) UpdateDeleteProgress(ctx context.Context, 
 	return nil // 正常終了（RowsAffected=0 は物理削除済みの場合があるため無視する）
 }
 
-// UpdatePendingImageURL は deploymentID に対応する deployment の pending_image_url を更新する
-func (repo *deploymentRepositoryImpl) UpdatePendingImageURL(ctx context.Context, deploymentID string, imageURL string) error {
-	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Update("pending_image_url", imageURL) // pending_image_url を更新する
+// UpdatePendingImageID は deploymentID に対応する deployment の pending_image_id を更新する
+func (repo *deploymentRepositoryImpl) UpdatePendingImageID(ctx context.Context, deploymentID string, imageID string) error {
+	result := repo.db.WithContext(ctx).Model(&models.Deployment{}).Where("id = ?", deploymentID).Update("pending_image_id", imageID) // pending_image_id を更新する
 	if result.Error != nil {                                                                                                             // エラーが発生した場合
 		return result.Error // エラーを返す
 	}

@@ -99,7 +99,9 @@ func main() {
 	baseDomain := os.Getenv("BASE_DOMAIN")                                                                                 // ベースドメインを環境変数から取得する
 	pathRuleRepo := repository.NewPathRuleRepository(repository.Database)                                                  // path_rule リポジトリを生成する
 
-	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, userQuotaRepo, k8sClient, temporalClient) // deployment サービスを生成する
+	imageRepo := repository.NewImageRepository(repository.Database) // image リポジトリを生成する
+
+	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, imageRepo, userQuotaRepo, k8sClient, temporalClient) // deployment サービスを生成する
 	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, pathRuleRepo, userQuotaRepo, temporalClient, baseDomain) // apply サービスを生成する
 	deploymentHandler := handler.NewDeploymentHandler(deploymentServiceImpl, applyServiceImpl)                                                                                                        // deployment ハンドラーを生成する
 
@@ -109,8 +111,12 @@ func main() {
 
 	// build ハンドラーを DI 組み立てする
 	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)                                                                           // build ログチャンクリポジトリを生成する
-	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient, harborClient, "harbor.main-harbor", temporalClient) // build サービスを生成する（Workflow は builder Worker に委譲する）
+	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient, "harbor.main-harbor", temporalClient) // build サービスを生成する（Workflow は builder Worker に委譲する）
 	buildHandler := handler.NewBuildHandler(buildServiceImpl)                                                                                            // build ハンドラーを生成する
+
+	// image ハンドラーを DI 組み立てする
+	imageServiceImpl := service.NewImageService(imageRepo, deploymentRepo, projectRepo, harborCredentialRepo, buildRepo, harborClient) // image サービスを生成する
+	imageHandler := handler.NewImageHandler(imageServiceImpl)                                                                          // image ハンドラーを生成する
 
 	// log ハンドラーを DI 組み立てする
 	podLogChunkRepo := repository.NewPodLogChunkRepository(repository.Database)                                       // pod ログチャンクリポジトリを生成する
@@ -128,12 +134,12 @@ func main() {
 
 	// webhook ハンドラーを DI 組み立てする
 	webhookRepo := repository.NewWebhookRepository(repository.Database)                                                                              // webhook リポジトリを生成する
-	webhookServiceImpl := service.NewWebhookService(webhookRepo, deploymentRepo, projectRepo, applyServiceImpl, buildServiceImpl)                      // webhook サービスを生成する
+	webhookServiceImpl := service.NewWebhookService(webhookRepo, deploymentRepo, projectRepo, imageRepo, applyServiceImpl, buildServiceImpl)                      // webhook サービスを生成する
 	webhookHandler := handler.NewWebhookHandler(webhookServiceImpl)                                                                                  // webhook ハンドラーを生成する
 
 	// deployment-template ハンドラーを DI 組み立てする
 	deploymentTemplateRepo := repository.NewDeploymentTemplateRepository(repository.Database)                                                            // deployment template リポジトリを生成する
-	deploymentTemplateServiceImpl := service.NewDeploymentTemplateService(repository.Database, deploymentTemplateRepo, deploymentRepo, serviceRepo, envVarRepo, envVarMountRepo, volumeRepo, volumeMountRepo, projectRepo, userQuotaRepo) // deployment template サービスを生成する
+	deploymentTemplateServiceImpl := service.NewDeploymentTemplateService(repository.Database, deploymentTemplateRepo, deploymentRepo, serviceRepo, envVarRepo, envVarMountRepo, volumeRepo, volumeMountRepo, projectRepo, imageRepo, userQuotaRepo) // deployment template サービスを生成する
 	deploymentTemplateHandler := handler.NewDeploymentTemplateHandler(deploymentTemplateServiceImpl)                                                     // deployment template ハンドラーを生成する
 
 	// metrics ハンドラーを DI 組み立てする
@@ -151,6 +157,7 @@ func main() {
 		EnvVarHandler:             envVarHandler,             // env_var ハンドラーを注入する
 		VolumeHandler:             volumeHandler,             // volume ハンドラーを注入する
 		BuildHandler:              buildHandler,              // build ハンドラーを注入する
+		ImageHandler:              imageHandler,              // image ハンドラーを注入する
 		WebhookHandler:            webhookHandler,            // webhook ハンドラーを注入する
 		LogHandler:                logHandler,                // log ハンドラーを注入する
 		MetricsHandler:            metricsHandler,            // metrics ハンドラーを注入する

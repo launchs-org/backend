@@ -83,7 +83,7 @@ func TestCreateWebhook_正常にwebhookが作成される_service(t *testing.T) 
 		},
 	}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, &mockImageRepository{}, nil, nil) // サービスを生成する
 
 	result, err := svc.CreateWebhook(context.Background(), "test-user-id", "dep-id-1", CreateWebhookRequest{
 		GithubRepoURL: "https://github.com/org/repo", // GitHub リポジトリ URL を設定する
@@ -119,7 +119,7 @@ func TestCreateWebhook_他ユーザーのDeploymentはErrForbiddenを返す_serv
 		},
 	}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, &mockImageRepository{}, nil, nil) // サービスを生成する
 
 	_, err := svc.CreateWebhook(context.Background(), "other-user-id", "dep-id-1", CreateWebhookRequest{}) // 他ユーザーとして作成する
 	if err != ErrForbidden { // ErrForbidden であることを確認する
@@ -152,7 +152,7 @@ func TestGetWebhook_正常にwebhookが取得される_service(t *testing.T) {
 		},
 	}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, &mockImageRepository{}, nil, nil) // サービスを生成する
 
 	result, err := svc.GetWebhook(context.Background(), "test-user-id", "dep-id-1") // webhook を取得する
 	if err != nil {
@@ -177,7 +177,7 @@ func TestGetWebhook_他ユーザーのDeploymentはErrForbiddenを返す_service
 		},
 	}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, &mockImageRepository{}, nil, nil) // サービスを生成する
 
 	_, err := svc.GetWebhook(context.Background(), "other-user-id", "dep-id-1") // 他ユーザーとして取得する
 	if err != ErrForbidden { // ErrForbidden であることを確認する
@@ -209,7 +209,7 @@ func TestDeleteWebhook_正常にwebhookが削除される_service(t *testing.T) 
 		},
 	}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, &mockImageRepository{}, nil, nil) // サービスを生成する
 
 	err := svc.DeleteWebhook(context.Background(), "test-user-id", "webhook-id-1") // webhook を削除する
 	if err != nil {
@@ -238,7 +238,7 @@ func TestDeleteWebhook_他ユーザーのWebhookはErrForbiddenを返す_service
 		},
 	}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, &mockImageRepository{}, nil, nil) // サービスを生成する
 
 	err := svc.DeleteWebhook(context.Background(), "other-user-id", "webhook-id-1") // 他ユーザーとして削除する
 	if err != ErrForbidden { // ErrForbidden であることを確認する
@@ -263,7 +263,7 @@ func TestCreateWebhook_シークレットが毎回異なる(t *testing.T) {
 	}
 	projectRepo := &mockProjectRepository{}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, &mockImageRepository{}, nil, nil) // サービスを生成する
 
 	for callIndex := 0; callIndex < 3; callIndex++ { // 3 回作成を実行する
 		_, err := svc.CreateWebhook(context.Background(), "test-user-id", "dep-id-1", CreateWebhookRequest{})
@@ -287,7 +287,7 @@ func TestCreateWebhook_存在しないDeploymentは404が返る(t *testing.T) {
 	}
 	projectRepo := &mockProjectRepository{}
 
-	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, nil, nil) // サービスを生成する
+	svc := NewWebhookService(webhookRepo, deploymentRepo, projectRepo, &mockImageRepository{}, nil, nil) // サービスを生成する
 
 	_, err := svc.CreateWebhook(context.Background(), "test-user-id", "nonexistent-dep", CreateWebhookRequest{}) // 存在しない deployment を指定する
 	if err == nil {                                                                                                // エラーが返ることを確認する

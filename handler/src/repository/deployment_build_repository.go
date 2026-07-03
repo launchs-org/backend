@@ -17,7 +17,7 @@ type DeploymentBuildRepository interface {
 	FindAllBuilding(ctx context.Context) ([]models.DeploymentBuild, error)                                                                                            // building 状態のビルドを全件取得する（Watcher 起動時リカバリ用）
 	UpdateStatus(ctx context.Context, buildID string, status models.BuildStatus) error                                                                                // ビルドのステータスを更新する
 	UpdateK8sJobName(ctx context.Context, buildID string, jobName string) error                                                                                       // k8s Job 名を更新する
-	UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, imageSizeBytes int64, finishedAt time.Time) error         // 完了時に status / built_image_url / image_size_bytes / finished_at を一括更新する
+	UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, finishedAt time.Time) error                                                     // 完了時に status / finished_at を一括更新する
 	Delete(ctx context.Context, build *models.DeploymentBuild) error                                                                                                  // ビルドレコードを1件削除する
 	DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error                                                                                           // deploymentID に紐づくビルドを全件削除する
 	DeleteAllByProjectID(ctx context.Context, db *gorm.DB, projectID string) error                                                                                    // projectID に紐づくビルドを全件削除する（Project 削除時に使用）
@@ -113,13 +113,11 @@ func (repo *deploymentBuildRepositoryImpl) Delete(ctx context.Context, build *mo
 	return repo.db.WithContext(ctx).Delete(build).Error // レコードを削除する
 }
 
-// UpdateBuildResult は buildID に対応するビルドの status / built_image_url / image_size_bytes / finished_at を一括更新する
-func (repo *deploymentBuildRepositoryImpl) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, builtImageURL string, imageSizeBytes int64, finishedAt time.Time) error {
+// UpdateBuildResult は buildID に対応するビルドの status / finished_at を一括更新する
+func (repo *deploymentBuildRepositoryImpl) UpdateBuildResult(ctx context.Context, buildID string, status models.BuildStatus, finishedAt time.Time) error {
 	result := repo.db.WithContext(ctx).Model(&models.DeploymentBuild{}).Where("id = ?", buildID).Updates(map[string]interface{}{ // 複数フィールドを一括更新する
-		"status":           status,          // ビルドステータスを更新する
-		"built_image_url":  builtImageURL,   // ビルド済みイメージURLを更新する
-		"image_size_bytes": imageSizeBytes,  // イメージサイズを更新する
-		"finished_at":      finishedAt,      // 完了日時を更新する
+		"status":      status,     // ビルドステータスを更新する
+		"finished_at": finishedAt, // 完了日時を更新する
 	})
 	if result.Error != nil { // エラーが発生した場合
 		return result.Error // エラーを返す

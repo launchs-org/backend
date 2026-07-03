@@ -12,6 +12,7 @@ import type {
   Deployment,
   Project,
   Build,
+  Image,
   K8sService,
   ApplyHistory,
   PodLogsResponse,
@@ -40,7 +41,7 @@ import { useTutorialContext } from '@/tutorial/TutorialContext' // チュート�
 import { toast } from 'sonner' // トースト通知をインポートする
 import { ConfirmDialog } from '@/components/ui/confirm-dialog' // 確認ダイアログをインポートする
 
-type Tab = 'overview' | 'logs' | 'builds' | 'settings' | 'networking' | 'env-vars' | 'volumes' | 'history' | 'metrics' | 'webhook'
+type Tab = 'overview' | 'logs' | 'images' | 'settings' | 'networking' | 'env-vars' | 'volumes' | 'history' | 'metrics' | 'webhook'
 
 // pending 項目の種類と redo 操作を保持する型
 type PendingItem = {
@@ -110,8 +111,8 @@ export function DeploymentDetailPage() {
 
     // deployment の pending フィールドを確認する
     if (deploymentData) {
-      if (deploymentData.pending_image_url && deploymentData.pending_image_url !== deploymentData.image_url)
-        items.push({ label: `イメージURL: ${deploymentData.pending_image_url}`, onDiscard: async () => { await post(`/deployments/${deploymentId}/discard-pending`) } })
+      if (deploymentData.pending_image_id && deploymentData.pending_image_id !== deploymentData.image_id)
+        items.push({ label: `イメージ: ${deploymentData.pending_image?.image_url ?? deploymentData.pending_image_id}`, onDiscard: async () => { await post(`/deployments/${deploymentId}/discard-pending`) } })
       if (deploymentData.pending_github_repo_url && deploymentData.pending_github_repo_url !== deploymentData.github_repo_url)
         items.push({ label: `リポジトリURL: ${deploymentData.pending_github_repo_url}`, onDiscard: async () => { await post(`/deployments/${deploymentId}/discard-pending`) } })
       if (deploymentData.pending_github_branch && deploymentData.pending_github_branch !== deploymentData.github_branch)
@@ -210,7 +211,7 @@ export function DeploymentDetailPage() {
     ? [
         'overview',
         'logs',
-        ...(deployment.type !== 'image_url' ? (['builds'] as Tab[]) : []),
+        ...(deployment.type !== 'image_url' ? (['images'] as Tab[]) : []),
         'settings',
         'networking',
         'env-vars',
@@ -412,7 +413,7 @@ export function DeploymentDetailPage() {
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                {{ overview: '概要', logs: 'ログ', builds: 'ビルド', settings: '設定', networking: 'ネットワーク', 'env-vars': '環境変数', volumes: 'ボリューム', history: '履歴', metrics: 'メトリクス', webhook: 'Webhook' }[tab]}
+                {{ overview: '概要', logs: 'ログ', images: 'イメージ', settings: '設定', networking: 'ネットワーク', 'env-vars': '環境変数', volumes: 'ボリューム', history: '履歴', metrics: 'メトリクス', webhook: 'Webhook' }[tab]}
               </button>
             ))}
           </nav>
@@ -422,7 +423,7 @@ export function DeploymentDetailPage() {
         <div>
           {activeTab === 'overview' && <OverviewTab deployment={deployment} projectId={projectId!} />}
           {activeTab === 'logs' && <LogsTab deploymentId={deploymentId!} />}
-          {activeTab === 'builds' && <BuildsTab deploymentId={deploymentId!} projectId={projectId!} deployment={deployment} />}
+          {activeTab === 'images' && <ImagesTab deploymentId={deploymentId!} projectId={projectId!} deployment={deployment} />}
           {activeTab === 'settings' && <SettingsTab deployment={deployment} onSaved={fetchDeployment} />}
           {activeTab === 'networking' && <NetworkingTab deploymentId={deploymentId!} projectId={projectId!} onUpdated={fetchAllPending} />}
           {activeTab === 'env-vars' && <EnvVarsTab deploymentId={deploymentId!} projectId={projectId!} onUpdated={fetchAllPending} />}
@@ -471,7 +472,7 @@ function OverviewTab({ deployment }: { deployment: Deployment; projectId: string
       <InfoCard label="インスタンスサイズ" value={deployment.instance_size || '—'} />
       <InfoCard label="最終Apply日時" value={deployment.applied_at ? new Date(deployment.applied_at).toLocaleString('ja-JP') : '未Apply'} />
       {deployment.type === 'image_url' && (
-        <InfoCard label="イメージURL" value={deployment.image_url || '—'} mono fullWidth />
+        <InfoCard label="イメージURL" value={deployment.image?.image_url || '—'} mono fullWidth />
       )}
       {deployment.type !== 'image_url' && (
         <>
@@ -630,7 +631,7 @@ function LogsTab({ deploymentId }: { deploymentId: string }) {
   )
 }
 
-// ── Builds タブ ───────────────────────────────────────────────
+// ── Images タブ ───────────────────────────────────────────────
 
 const BUILD_STATUS_META: Record<string, { label: string; icon: React.ReactNode; badge: string }> = {
   pending:   { label: '待機中',     icon: <Clock         className="w-3.5 h-3.5" />, badge: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
@@ -654,8 +655,9 @@ const BUILD_TYPE_LABEL: Record<string, string> = {
   dockerfile: 'Dockerfile',
 }
 
-function BuildsTab({
+function ImagesTab({
   deploymentId,
+  projectId,
   deployment,
 }: {
   deploymentId: string
@@ -664,24 +666,25 @@ function BuildsTab({
 }) {
   const navigate = useNavigate()
   const [building, setBuilding] = useState(false) // ビルド中フラグ
-  const [buildList, setBuildList] = useState<Build[]>([]) // ビルド一覧を管理する
+  const [imageList, setImageList] = useState<Image[]>([]) // このデプロイメントに紐づくイメージ一覧を管理する
   const [cancellingId, setCancellingId] = useState<string | null>(null) // キャンセル中のビルドIDを管理する
-  const [deployingId, setDeployingId] = useState<string | null>(null) // デプロイ中のビルドIDを管理する
+  const [deployingId, setDeployingId] = useState<string | null>(null) // デプロイ中のイメージIDを管理する
 
-  const fetchBuilds = useCallback(async () => {
+  const fetchImages = useCallback(async () => {
     try {
-      const data = await get<Build[]>(`/deployments/${deploymentId}/builds`) // ビルド一覧を取得する
-      setBuildList(data ?? [])
+      // プロジェクト単位のイメージ一覧を取得し、このデプロイメント由来のビルドに紐づくものだけに絞り込む
+      const data = await get<Image[]>(`/projects/${projectId}/images`)
+      setImageList((data ?? []).filter(image => image.build?.deployment_id === deploymentId))
     } catch (fetchError) {
       console.error(fetchError)
     }
-  }, [deploymentId])
+  }, [projectId, deploymentId])
 
   useEffect(() => {
-    void fetchBuilds() // 初回取得
-    const intervalId = setInterval(() => void fetchBuilds(), POLL_INTERVAL_BUILDS) // 定期的にポーリングする
+    void fetchImages() // 初回取得
+    const intervalId = setInterval(() => void fetchImages(), POLL_INTERVAL_BUILDS) // 定期的にポーリングする
     return () => clearInterval(intervalId)
-  }, [fetchBuilds])
+  }, [fetchImages])
 
   const handleBuild = async () => {
     setBuilding(true)
@@ -707,7 +710,7 @@ function BuildsTab({
       }
 
       const result = await post<Build>(`/deployments/${deploymentId}/build`, { commit_message: commitMessage, author }) // ビルドを開始する
-      await fetchBuilds() // 一覧を即座に更新する
+      await fetchImages() // 一覧を即座に更新する
       navigate(`/builds/${result.id}/logs`) // ビルドログページへ遷移する
     } catch (buildError) {
       console.error(buildError)
@@ -723,7 +726,7 @@ function BuildsTab({
     setCancellingId(buildId)
     try {
       await del(`/builds/${buildId}`) // ビルドをキャンセルする
-      await fetchBuilds() // 一覧を即座に更新する
+      await fetchImages() // 一覧を即座に更新する
     } catch (cancelError) {
       console.error(cancelError)
       toast.error(cancelError instanceof Error ? cancelError.message : 'キャンセルに失敗しました') // エラーをトーストで表示する
@@ -732,16 +735,16 @@ function BuildsTab({
     }
   }
 
-  // 成功ビルドのイメージを pending_image_url にセットして即 Apply する
-  const handleDeploy = async (buildItem: Build, event: React.MouseEvent) => {
+  // イメージを pending_image_id にセットして即 Apply する
+  const handleDeploy = async (image: Image, event: React.MouseEvent) => {
     event.preventDefault() // Link のナビゲーションを阻止する
     event.stopPropagation()
-    if (!buildItem.built_image_url) return // built_image_url がない場合はスキップする
-    setDeployingId(buildItem.id)
+    if (!image.image_url) return // image_url がない場合はスキップする
+    setDeployingId(image.id)
     try {
-      await put(`/deployments/${deploymentId}`, { image_url: buildItem.built_image_url }) // イメージURLを pending にセットする
+      await put(`/deployments/${deploymentId}`, { image_url: image.image_url }) // イメージURLを pending にセットする
       await post(`/deployments/${deploymentId}/apply`) // 即座に Apply してデプロイする
-      toast.success(`ビルド #${buildItem.id.slice(0, 8)} をデプロイしました`) // 成功通知を表示する
+      toast.success(`イメージ #${image.id.slice(0, 8)} をデプロイしました`) // 成功通知を表示する
     } catch (deployError) {
       console.error(deployError)
       toast.error(deployError instanceof Error ? deployError.message : 'デプロイに失敗しました') // エラーをトーストで表示する
@@ -750,8 +753,8 @@ function BuildsTab({
     }
   }
 
-  const hasPendingOrBuilding = buildList.some(
-    buildItem => buildItem.status === 'pending' || buildItem.status === 'building'
+  const hasPendingOrBuilding = imageList.some(
+    image => image.build?.status === 'pending' || image.build?.status === 'building'
   ) // 進行中のビルドが存在するか確認する
 
   return (
@@ -769,76 +772,80 @@ function BuildsTab({
         </button>
       </div>
 
-      {buildList.length === 0 ? (
+      {imageList.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg border border-dashed border-gray-200">
-          <p className="text-sm text-gray-400">ビルド履歴がありません</p>
+          <p className="text-sm text-gray-400">イメージがありません</p>
         </div>
       ) : (
         <div className="grid gap-3">
-          {buildList.map(buildItem => {
-            const statusMeta = BUILD_STATUS_META[buildItem.status] // ステータスメタデータを取得する
-            const isCancellable = buildItem.status === 'pending' || buildItem.status === 'building' // キャンセル可能か判定する
-            const isDeployable = buildItem.status === 'succeeded' && !!buildItem.built_image_url // 成功かつイメージURLあり
-            const sizeLabel = formatBytes(buildItem.image_size_bytes) // サイズを人間が読める形式に変換する
+          {imageList.map(image => {
+            const build = image.build // Preload されたビルド情報
+            const statusMeta = build ? BUILD_STATUS_META[build.status] : undefined // ステータスメタデータを取得する
+            const isCancellable = build ? (build.status === 'pending' || build.status === 'building') : false // キャンセル可能か判定する
+            const isDeployable = !!image.image_url // イメージURLがあればデプロイ可能
+            const sizeLabel = formatBytes(image.size_bytes) // サイズを人間が読める形式に変換する
 
             // ステータスに応じた左ボーダー色を決定する
             const borderAccent =
-              buildItem.status === 'succeeded' ? 'border-l-green-400' :
-              buildItem.status === 'building'  ? 'border-l-blue-400'  :
-              buildItem.status === 'failed'    ? 'border-l-red-400'   :
-              buildItem.status === 'cancelled' ? 'border-l-gray-300'  :
-              'border-l-yellow-400'
+              build?.status === 'succeeded' ? 'border-l-green-400' :
+              build?.status === 'building'  ? 'border-l-blue-400'  :
+              build?.status === 'failed'    ? 'border-l-red-400'   :
+              build?.status === 'cancelled' ? 'border-l-gray-300'  :
+              build?.status === 'pending'   ? 'border-l-yellow-400' :
+              'border-l-gray-200'
 
             return (
-              <div key={buildItem.id} className={`bg-white rounded-xl border border-gray-200 border-l-4 ${borderAccent} shadow-sm`}>
-                {/* 上段: ステータス + ビルドID + 日時 + ログリンク */}
+              <div key={image.id} className={`bg-white rounded-xl border border-gray-200 border-l-4 ${borderAccent} shadow-sm`}>
+                {/* 上段: ステータス + イメージID + 日時 + ログリンク */}
                 <div className="flex items-center justify-between px-4 pt-3 pb-2">
                   <div className="flex items-center gap-2">
-                    <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full border ${statusMeta?.badge ?? 'bg-gray-100 text-gray-500 border-gray-200'}`}>
-                      {statusMeta?.icon}
-                      {statusMeta?.label ?? buildItem.status}
-                    </span>
-                    <span className="font-mono text-xs text-gray-400">#{buildItem.id.slice(0, 8)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {buildItem.finished_at && (
-                      <span className="text-xs text-gray-400">
-                        {new Date(buildItem.finished_at).toLocaleString('ja-JP')}
+                    {statusMeta && (
+                      <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-0.5 rounded-full border ${statusMeta.badge}`}>
+                        {statusMeta.icon}
+                        {statusMeta.label}
                       </span>
                     )}
-                    <Link
-                      to={`/builds/${buildItem.id}/logs`}
-                      className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
-                      title="ログを表示"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </Link>
+                    <span className="font-mono text-xs text-gray-400">#{image.id.slice(0, 8)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-400">
+                      {new Date(image.created_at).toLocaleString('ja-JP')}
+                    </span>
+                    {image.build_id && (
+                      <Link
+                        to={`/builds/${image.build_id}/logs`}
+                        className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                        title="ビルドログを表示"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </Link>
+                    )}
                   </div>
                 </div>
 
                 {/* 中段: ブランチ・ビルドタイプ・ディレクトリ・サイズ・GitHubリンク */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 pb-3 border-b border-gray-100">
-                  {buildItem.branch && (
+                  {build?.branch && (
                     <span className="flex items-center gap-1 text-xs text-gray-600 font-medium">
                       <GitBranch className="w-3.5 h-3.5 text-gray-400" />
-                      {buildItem.branch}
+                      {build.branch}
                     </span>
                   )}
-                  {buildItem.commit_sha && (
+                  {build?.commit_sha && (
                     <span className="flex items-center gap-1 text-xs text-gray-500 font-mono">
                       <GitCommit className="w-3.5 h-3.5 text-gray-400" />
-                      {buildItem.commit_sha.slice(0, 7)}
+                      {build.commit_sha.slice(0, 7)}
                     </span>
                   )}
-                  {buildItem.build_type && (
+                  {build?.build_type && (
                     <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded font-medium">
-                      {BUILD_TYPE_LABEL[buildItem.build_type] ?? buildItem.build_type}
+                      {BUILD_TYPE_LABEL[build.build_type] ?? build.build_type}
                     </span>
                   )}
-                  {buildItem.directory && buildItem.directory !== './' && (
+                  {build?.directory && (
                     <span className="flex items-center gap-1 text-xs text-gray-400">
                       <FolderOpen className="w-3.5 h-3.5" />
-                      {buildItem.directory}
+                      {build.directory === './' ? 'プロジェクトルート' : build.directory}
                     </span>
                   )}
                   {sizeLabel && (
@@ -847,9 +854,9 @@ function BuildsTab({
                       {sizeLabel}
                     </span>
                   )}
-                  {buildItem.github_repo_url && (
+                  {build?.github_repo_url && (
                     <a
-                      href={buildItem.github_repo_url}
+                      href={build.github_repo_url}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={(event) => event.stopPropagation()}
@@ -864,25 +871,25 @@ function BuildsTab({
                 {/* 下段: アクションボタン */}
                 <div className="flex items-center justify-end gap-2 px-4 py-2">
                   {/* キャンセルボタン（pending/building のみ）*/}
-                  {isCancellable && (
+                  {isCancellable && image.build_id && (
                     <button
-                      onClick={(event) => void handleCancel(buildItem.id, event)}
-                      disabled={cancellingId === buildItem.id}
+                      onClick={(event) => void handleCancel(image.build_id!, event)}
+                      disabled={cancellingId === image.build_id}
                       className="flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors disabled:opacity-50"
                     >
                       <X className="w-3 h-3" />
-                      {cancellingId === buildItem.id ? 'キャンセル中...' : 'キャンセル'}
+                      {cancellingId === image.build_id ? 'キャンセル中...' : 'キャンセル'}
                     </button>
                   )}
-                  {/* デプロイボタン（成功ビルドかつ built_image_url あり）*/}
+                  {/* デプロイボタン（イメージURLあり）*/}
                   {isDeployable && (
                     <button
-                      onClick={(event) => void handleDeploy(buildItem, event)}
-                      disabled={deployingId === buildItem.id}
+                      onClick={(event) => void handleDeploy(image, event)}
+                      disabled={deployingId === image.id}
                       className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[#00C2D1] text-white hover:bg-[#00adb9] transition-colors disabled:opacity-50 font-medium"
                     >
                       <Rocket className="w-3.5 h-3.5" />
-                      {deployingId === buildItem.id ? 'デプロイ中...' : 'このビルドをデプロイ'}
+                      {deployingId === image.id ? 'デプロイ中...' : 'このイメージをデプロイ'}
                     </button>
                   )}
                 </div>
@@ -940,7 +947,7 @@ async function fetchGitHubDirs(repo: string, branch: string): Promise<string[]> 
 
 function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved: () => Promise<void> }) {
   const [formData, setFormData] = useState({
-    image_url: deployment.pending_image_url || deployment.image_url || '',
+    image_url: deployment.pending_image?.image_url || deployment.image?.image_url || '',
     github_repo_url: deployment.pending_github_repo_url || deployment.github_repo_url || '',
     github_branch: deployment.pending_github_branch || deployment.github_branch || '',
     github_commit_sha: deployment.pending_github_commit_sha || deployment.github_commit_sha || '',
@@ -1049,9 +1056,9 @@ function SettingsTab({ deployment, onSaved }: { deployment: Deployment; onSaved:
         {deployment.type === 'image_url' && (
           <div>
             <label className={labelClass}>イメージURL</label>
-            {deployment.image_url && deployment.pending_image_url && deployment.image_url !== deployment.pending_image_url && (
+            {deployment.image?.image_url && deployment.pending_image?.image_url && deployment.image.image_url !== deployment.pending_image.image_url && (
               <p className="text-xs text-amber-600 mb-1">
-                現在: <span className="font-mono">{deployment.image_url}</span> → 保留中: <span className="font-mono">{deployment.pending_image_url}</span>
+                現在: <span className="font-mono">{deployment.image.image_url}</span> → 保留中: <span className="font-mono">{deployment.pending_image.image_url}</span>
               </p>
             )}
             <input
