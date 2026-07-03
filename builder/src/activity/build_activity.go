@@ -188,13 +188,13 @@ func (act *BuildActivities) SetPendingImageActivity(ctx context.Context, input B
 		buildData.ID,     // ビルド ID をタグに使用する
 	) // イメージURLを組み立てる
 
-	imageData := &models.Image{ // Image レコードを生成する
+	imageData, err := act.ImageRepo.FindOrCreate(ctx, &models.Image{ // (project_id, image_url) が既存であれば再利用し、なければ作成する
 		ProjectID: buildData.ProjectID, // 親プロジェクトIDを設定する
 		BuildID:   &buildData.ID,       // 成果物を生んだビルドIDを設定する
 		ImageURL:  builtImageURL,       // 組み立てたイメージURLを設定する
-	}
-	if err := act.ImageRepo.Create(ctx, imageData); err != nil { // Image レコードを作成する
-		return "", fmt.Errorf("Image レコードの作成に失敗しました: %w", err) // 作成エラーを返す
+	})
+	if err != nil {
+		return "", fmt.Errorf("Image レコードの解決に失敗しました: %w", err) // 解決エラーを返す
 	}
 
 	deploymentIDValue := *buildData.DeploymentID                                                        // pointer をデリファレンスする

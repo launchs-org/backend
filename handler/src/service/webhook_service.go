@@ -202,13 +202,13 @@ func (svc *webhookServiceImpl) UpdateImageAndApplyByWebhook(ctx context.Context,
 	if err != nil {
 		return nil, err // 取得エラーを返す
 	}
-	imageData := &models.Image{ // イメージレコードを構築する（Webhook 経由の外部URL直接指定のため BuildID は nil）
+	imageData, err := svc.imageRepo.FindOrCreate(ctx, &models.Image{ // (project_id, image_url) が既存であれば再利用し、なければ作成する
 		ProjectID: projectData.ID, // プロジェクト ID を設定する
 		BuildID:   nil,            // ビルドを経由しない直接指定のため nil
 		ImageURL:  imageURL,       // 指定された URL を設定する
-	}
-	if err := svc.imageRepo.Create(ctx, imageData); err != nil { // Image レコードを作成する
-		return nil, err // 作成エラーを返す
+	})
+	if err != nil {
+		return nil, err // 解決エラーを返す
 	}
 	if err := svc.deploymentRepo.UpdatePendingImageID(ctx, deploymentID, imageData.ID); err != nil { // pending_image_id を更新する
 		return nil, err // 更新エラーを返す

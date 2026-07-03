@@ -149,13 +149,13 @@ func handleBuildJobEvent(
 			logger.PrintErr("WatchBuildJobs: BuiltImageURL の組み立てに失敗しました（buildID=" + buildID + "）: " + urlErr.Error()) // エラーをログ出力する
 			return
 		}
-		imageData := &models.Image{ // Image レコードを生成する
+		imageData, err := imageRepo.FindOrCreate(ctx, &models.Image{ // (project_id, image_url) が既存であれば再利用し、なければ作成する
 			ProjectID: buildData.ProjectID, // 親プロジェクトIDを設定する
 			BuildID:   &buildData.ID,       // 成果物を生んだビルドIDを設定する
 			ImageURL:  builtImageURL,       // 組み立てたイメージURLを設定する
-		}
-		if err := imageRepo.Create(ctx, imageData); err != nil { // Image レコードを作成する
-			logger.PrintErr("WatchBuildJobs: Image レコードの作成に失敗しました（buildID=" + buildID + "）: " + err.Error()) // エラーをログ出力する
+		})
+		if err != nil {
+			logger.PrintErr("WatchBuildJobs: Image レコードの解決に失敗しました（buildID=" + buildID + "）: " + err.Error()) // エラーをログ出力する
 			return
 		}
 		imageSizeBytes := fetchImageSizeBytes(ctx, buildData, harborClient, harborCredentialRepo) // イメージサイズを Harbor から取得する（失敗しても 0 で継続）

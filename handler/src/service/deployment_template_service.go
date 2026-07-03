@@ -300,13 +300,13 @@ func (svc *deploymentTemplateServiceImpl) CreateDeploymentFromTemplate(ctx conte
 			return err // 作成エラーを返してロールバックする
 		}
 
-		imageData := &models.Image{ // イメージレコードを構築する（テンプレートからの外部URL直接指定のため BuildID は nil）
+		imageData, err := svc.imageRepo.FindOrCreateWithTx(ctx, tx, &models.Image{ // (project_id, image_url) が既存であれば再利用し、なければトランザクション内で作成する
 			ProjectID: req.ProjectID, // プロジェクト ID を設定する
 			BuildID:   nil,           // ビルドを経由しない直接指定のため nil
 			ImageURL:  imageURL,      // 解決したイメージ URL を設定する
-		}
-		if err := svc.imageRepo.CreateWithTx(ctx, tx, imageData); err != nil { // イメージをトランザクション内で作成する
-			return err // 作成エラーを返してロールバックする
+		})
+		if err != nil {
+			return err // 解決エラーを返してロールバックする
 		}
 		if err := svc.deploymentRepo.Updates(ctx, tx, deploymentData, map[string]interface{}{ // pending_image_id を更新する
 			"pending_image_id": imageData.ID,

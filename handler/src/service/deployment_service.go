@@ -177,14 +177,14 @@ func (svc *deploymentServiceImpl) CreateDeployment(ctx context.Context, req Crea
 		return nil, err // 作成エラーを返す
 	}
 
-	if req.ImageURL != "" { // 外部イメージURL直接指定の場合は Image レコードを作成する
-		imageData := &models.Image{
+	if req.ImageURL != "" { // 外部イメージURL直接指定の場合は Image レコードを解決する
+		imageData, err := svc.imageRepo.FindOrCreate(ctx, &models.Image{ // (project_id, image_url) が既存であれば再利用し、なければ作成する
 			ProjectID: req.ProjectID, // プロジェクト ID を設定する
 			BuildID:   nil,           // ビルドを経由しない直接指定のため nil
 			ImageURL:  req.ImageURL,  // 指定された URL を設定する
-		}
-		if err := svc.imageRepo.Create(ctx, imageData); err != nil { // Image レコードを作成する
-			return nil, err // 作成エラーを返す
+		})
+		if err != nil {
+			return nil, err // 解決エラーを返す
 		}
 		if err := svc.deploymentRepo.UpdatePendingImageID(ctx, deploymentData.ID, imageData.ID); err != nil { // pending_image_id を更新する
 			return nil, err // 更新エラーを返す
@@ -228,14 +228,14 @@ func (svc *deploymentServiceImpl) UpdateDeployment(ctx context.Context, userID s
 	}
 
 	// 送られてきたフィールドのみ pending_*** に書き込む
-	if req.ImageURL != nil { // 外部イメージURL直接指定の場合は Image レコードを作成してから pending_image_id を更新する
-		imageData := &models.Image{
+	if req.ImageURL != nil { // 外部イメージURL直接指定の場合は Image レコードを解決してから pending_image_id を更新する
+		imageData, err := svc.imageRepo.FindOrCreate(ctx, &models.Image{ // (project_id, image_url) が既存であれば再利用し、なければ作成する
 			ProjectID: deploymentData.ProjectID, // プロジェクト ID を設定する
 			BuildID:   nil,                      // ビルドを経由しない直接指定のため nil
 			ImageURL:  *req.ImageURL,             // 指定された URL を設定する
-		}
-		if err := svc.imageRepo.Create(ctx, imageData); err != nil { // Image レコードを作成する
-			return nil, err // 作成エラーを返す
+		})
+		if err != nil {
+			return nil, err // 解決エラーを返す
 		}
 		deploymentData.PendingImageID = &imageData.ID // pending_image_id を更新する
 	}
