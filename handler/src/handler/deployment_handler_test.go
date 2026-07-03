@@ -336,8 +336,12 @@ func (mock *mockApplyService) Apply(ctx context.Context, userID string, deployme
 	return mock.applyFunc(ctx, userID, deploymentID) // モック関数を呼び出す
 }
 
-func (mock *mockApplyService) ApplyProject(ctx context.Context, userID string, projectID string) error {
-	return nil // テストでは使用しないためデフォルト実装を返す
+func (mock *mockApplyService) ApplyProject(ctx context.Context, userID string, projectID string) (*service.ApplyProjectResult, error) {
+	return &service.ApplyProjectResult{}, nil // テストでは使用しないためデフォルト実装を返す
+}
+
+func (mock *mockApplyService) GetProjectPendingSummary(ctx context.Context, userID string, projectID string) (*service.ProjectPendingSummary, error) {
+	return &service.ProjectPendingSummary{}, nil // テストでは使用しないためデフォルト実装を返す
 }
 
 func (mock *mockApplyService) ListApplyHistories(ctx context.Context, userID string, deploymentID string) ([]*models.ApplyHistory, error) {

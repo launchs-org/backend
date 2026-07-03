@@ -36,8 +36,29 @@ type ApplyWorkflowInput struct {
 // ApplyServiceInterface は apply サービスのインターフェース
 type ApplyServiceInterface interface {
 	Apply(ctx context.Context, userID string, deploymentID string) (*ApplyResult, error)                        // apply を実行する
-	ApplyProject(ctx context.Context, userID string, projectID string) error                                    // project 単位で IngressRoute を apply する
+	ApplyProject(ctx context.Context, userID string, projectID string) (*ApplyProjectResult, error)             // project 配下の Deployment・IngressRoute を一括 apply する
+	GetProjectPendingSummary(ctx context.Context, userID string, projectID string) (*ProjectPendingSummary, error) // project 配下の pending 件数を集計する
 	ListApplyHistories(ctx context.Context, userID string, deploymentID string) ([]*models.ApplyHistory, error) // apply 履歴一覧を取得する
+}
+
+// ProjectPendingSummary は project 配下の pending 状況を集計した結果を表す構造体
+type ProjectPendingSummary struct {
+	HasPending               bool `json:"has_pending"`                 // pending が1件でもあるか
+	PendingDeploymentCount   int  `json:"pending_deployment_count"`    // pending がある deployment 件数
+	PendingIngressRouteCount int  `json:"pending_ingress_route_count"` // pending / deleting の ingress_route 件数
+}
+
+// ApplyProjectFailure は一括 apply で失敗した Deployment を表す構造体
+type ApplyProjectFailure struct {
+	DeploymentID string `json:"deployment_id"` // apply に失敗した deployment ID
+	Error        string `json:"error"`         // 失敗理由
+}
+
+// ApplyProjectResult は ApplyProject 処理の結果を表す構造体
+type ApplyProjectResult struct {
+	AppliedDeploymentCount int                   `json:"applied_deployment_count"` // apply に成功した deployment 件数
+	FailedDeploymentList   []ApplyProjectFailure `json:"failed_deployment_list"`   // apply に失敗した deployment 一覧
+	IngressRouteApplied    bool                  `json:"ingress_route_applied"`    // IngressRoute の apply を実行したか
 }
 
 // WorkflowStarter は Temporal Workflow を起動・操作するための最小インターフェース（テストモック用）
@@ -179,28 +200,142 @@ func isAlreadyStartedErr(err error) bool {
 	return temporalerr.IsWorkflowExecutionAlreadyStartedError(err) // Temporal の判定ヘルパーを使用する
 }
 
-// ApplyProject は projectID に紐づく全 IngressRoute・PathRule を k8s に apply する
-func (applyService *ApplyService) ApplyProject(ctx context.Context, userID string, projectID string) error {
+// ApplyProject は projectID 配下の全 Deployment の pending 変更と、全 IngressRoute・PathRule を一括で k8s に apply する
+// Deployment 群を先に apply し、その後に IngressRoute を apply する（Pod が新しい状態になってからルーティングを切り替える）
+// 一部の Deployment の apply が失敗してもスキップして処理を継続する
+func (applyService *ApplyService) ApplyProject(ctx context.Context, userID string, projectID string) (*ApplyProjectResult, error) {
 	projectData, err := applyService.ProjectRepository.FindByIDNoTx(ctx, projectID) // project を取得する
 	if err != nil {
-		return fmt.Errorf("project not found: %w", err) // 取得エラーを返す
+		return nil, fmt.Errorf("project not found: %w", err) // 取得エラーを返す
 	}
 	if projectData.UserID != userID { // 所有者チェック
-		return ErrForbidden // 所有者でない場合は禁止エラーを返す
+		return nil, ErrForbidden // 所有者でない場合は禁止エラーを返す
+	}
+
+	result := &ApplyProjectResult{ // 結果を格納する構造体を初期化する
+		FailedDeploymentList: []ApplyProjectFailure{},
+	}
+
+	deploymentList, err := applyService.DeploymentRepo.FindAllByProjectID(ctx, projectID) // project 配下の全 deployment を取得する
+	if err != nil {
+		return nil, fmt.Errorf("deployment 一覧取得に失敗しました: %w", err) // 取得エラーを返す
+	}
+
+	for _, deploymentData := range deploymentList { // pending がある deployment のみ apply する
+		if !hasPendingChanges(&deploymentData) { // pending がない場合はスキップする
+			continue
+		}
+		if _, applyErr := applyService.Apply(ctx, userID, deploymentData.ID); applyErr != nil { // 既存の Deployment apply ロジックを呼び出す
+			result.FailedDeploymentList = append(result.FailedDeploymentList, ApplyProjectFailure{ // 失敗した deployment を記録して継続する
+				DeploymentID: deploymentData.ID,
+				Error:        applyErr.Error(),
+			})
+			continue
+		}
+		result.AppliedDeploymentCount++ // apply 成功件数をカウントする
 	}
 
 	ingressRouteList, err := applyService.IngressRouteRepo.FindAllByProjectID(ctx, projectID) // 全 IngressRoute を取得する
 	if err != nil {
-		return fmt.Errorf("ingress_route 一覧取得に失敗しました: %w", err) // 取得エラーを返す
+		return nil, fmt.Errorf("ingress_route 一覧取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
 	for _, ingressRouteData := range ingressRouteList { // 各 IngressRoute に対して apply 処理を行う
 		if applyErr := applyService.applySingleIngressRoute(ctx, projectData.Namespace, ingressRouteData); applyErr != nil { // 個別 IngressRoute を apply する
-			return applyErr // エラーをそのまま返す
+			return nil, applyErr // エラーをそのまま返す
+		}
+	}
+	result.IngressRouteApplied = true // IngressRoute の apply が完了したことを記録する
+
+	return result, nil // 一括 apply の結果を返す
+}
+
+// GetProjectPendingSummary は projectID 配下の Deployment・IngressRoute の pending 件数を集計する
+func (applyService *ApplyService) GetProjectPendingSummary(ctx context.Context, userID string, projectID string) (*ProjectPendingSummary, error) {
+	projectData, err := applyService.ProjectRepository.FindByIDNoTx(ctx, projectID) // project を取得する
+	if err != nil {
+		return nil, fmt.Errorf("project not found: %w", err) // 取得エラーを返す
+	}
+	if projectData.UserID != userID { // 所有者チェック
+		return nil, ErrForbidden // 所有者でない場合は禁止エラーを返す
+	}
+
+	summary := &ProjectPendingSummary{} // 集計結果を格納する構造体を初期化する
+
+	deploymentList, err := applyService.DeploymentRepo.FindAllByProjectID(ctx, projectID) // project 配下の全 deployment を取得する
+	if err != nil {
+		return nil, fmt.Errorf("deployment 一覧取得に失敗しました: %w", err) // 取得エラーを返す
+	}
+	for _, deploymentData := range deploymentList { // pending がある deployment をカウントする
+		if hasPendingChanges(&deploymentData) {
+			summary.PendingDeploymentCount++
 		}
 	}
 
-	return nil // 正常終了
+	ingressRouteList, err := applyService.IngressRouteRepo.FindAllByProjectID(ctx, projectID) // project 配下の全 ingress_route を取得する
+	if err != nil {
+		return nil, fmt.Errorf("ingress_route 一覧取得に失敗しました: %w", err) // 取得エラーを返す
+	}
+	for _, ingressRouteData := range ingressRouteList { // pending がある ingress_route をカウントする
+		ingressRoutePending, pendingErr := applyService.hasIngressRoutePendingChanges(ctx, ingressRouteData) // 個別に pending 有無を判定する
+		if pendingErr != nil {
+			return nil, pendingErr // 判定エラーを返す
+		}
+		if ingressRoutePending {
+			summary.PendingIngressRouteCount++
+		}
+	}
+
+	summary.HasPending = summary.PendingDeploymentCount > 0 || summary.PendingIngressRouteCount > 0 // いずれかに pending があれば true にする
+	return summary, nil
+}
+
+// hasIngressRoutePendingChanges は IngressRoute 単体に未適用の pending 変更があるかを判定する
+func (applyService *ApplyService) hasIngressRoutePendingChanges(ctx context.Context, ingressRouteData *models.IngressRoute) (bool, error) {
+	if ingressRouteData.PendingName != "" { // 名前変更が保留中の場合
+		return true, nil
+	}
+	pendingPathRuleList, err := applyService.PathRuleRepo.FindPendingByIngressRouteID(ctx, ingressRouteData.ID) // pending の PathRule を取得する
+	if err != nil {
+		return false, fmt.Errorf("pending path_rule 取得に失敗しました: %w", err) // 取得エラーを返す
+	}
+	if len(pendingPathRuleList) > 0 { // pending の PathRule がある場合
+		return true, nil
+	}
+	deletingPathRuleList, err := applyService.PathRuleRepo.FindDeletingByIngressRouteID(ctx, ingressRouteData.ID) // deleting の PathRule を取得する
+	if err != nil {
+		return false, fmt.Errorf("deleting path_rule 取得に失敗しました: %w", err) // 取得エラーを返す
+	}
+	return len(deletingPathRuleList) > 0, nil // deleting の PathRule があれば true を返す
+}
+
+// hasPendingChanges は deployment に未適用の pending 変更があるかを判定する
+func hasPendingChanges(deploymentData *models.Deployment) bool {
+	if deploymentData.PendingImageID != nil && (deploymentData.ImageID == nil || *deploymentData.PendingImageID != *deploymentData.ImageID) { // イメージの変更
+		return true
+	}
+	if deploymentData.PendingGithubRepoURL != "" && deploymentData.PendingGithubRepoURL != deploymentData.GithubRepoURL { // リポジトリURLの変更
+		return true
+	}
+	if deploymentData.PendingGithubBranch != "" && deploymentData.PendingGithubBranch != deploymentData.GithubBranch { // ブランチの変更
+		return true
+	}
+	if deploymentData.PendingGithubCommitSHA != "" && deploymentData.PendingGithubCommitSHA != deploymentData.GithubCommitSHA { // コミットSHAの変更
+		return true
+	}
+	if deploymentData.PendingGithubRepoDirectory != "" && deploymentData.PendingGithubRepoDirectory != deploymentData.GithubRepoDirectory { // リポジトリディレクトリの変更
+		return true
+	}
+	if deploymentData.PendingDockerfilePath != "" && deploymentData.PendingDockerfilePath != deploymentData.DockerfilePath { // Dockerfileパスの変更
+		return true
+	}
+	if deploymentData.PendingInstanceSize != "" && deploymentData.PendingInstanceSize != deploymentData.InstanceSize { // インスタンスサイズの変更
+		return true
+	}
+	if deploymentData.PendingReplicas != 0 && deploymentData.PendingReplicas != deploymentData.Replicas { // レプリカ数の変更
+		return true
+	}
+	return false // pending 変更なし
 }
 
 // applySingleIngressRoute は1件の IngressRoute を k8s に apply する

@@ -98,7 +98,8 @@ func New(opts RouterOptions) *echo.Echo {
 	apiGroup.POST("/projects/:id/ingress-routes", opts.IngressRouteHandler.CreateIngressRoute)                              // ingress-route 作成エンドポイント
 	apiGroup.DELETE("/ingress-routes/:id", opts.IngressRouteHandler.DeleteIngressRoute)                                     // ingress-route 削除エンドポイント
 	apiGroup.PATCH("/ingress-routes/:id/name", opts.IngressRouteHandler.UpdateIngressRouteName)                             // ingress-route 名前変更エンドポイント
-	apiGroup.POST("/projects/:id/apply", opts.IngressRouteHandler.ApplyProject)                                             // project 単位 IngressRoute apply エンドポイント
+	apiGroup.POST("/projects/:id/apply", opts.IngressRouteHandler.ApplyProject)                                             // project 単位一括 apply エンドポイント（Deployment・IngressRoute）
+	apiGroup.GET("/projects/:id/pending-summary", opts.IngressRouteHandler.GetProjectPendingSummary)                        // project 配下の pending 件数集計エンドポイント
 	apiGroup.GET("/ingress-routes/:id/path-rules", opts.IngressRouteHandler.ListPathRules)                                  // path-rule 一覧取得エンドポイント
 	apiGroup.POST("/ingress-routes/:id/path-rules", opts.IngressRouteHandler.CreatePathRule)                                // path-rule 作成エンドポイント
 	apiGroup.DELETE("/ingress-routes/:id/path-rules/:pathRuleID", opts.IngressRouteHandler.DeletePathRule)                  // path-rule 削除エンドポイント

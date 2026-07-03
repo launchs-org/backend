@@ -103,10 +103,10 @@ func createApplyTestProject(t *testing.T, db *gorm.DB, namespace string) *models
 func createApplyTestDeployment(t *testing.T, db *gorm.DB, projectID string, name string) *models.Deployment {
 	t.Helper()
 
-	// テスト用 Image レコードを作成する（pending_image_id が参照する image_url を保持する）
+	// テスト用 Image レコードを作成する（pending_image_id が参照する image_url を保持する。同一 Project 内でユニーク制約に抵触しないよう name を含める）
 	imageData := &models.Image{
-		ProjectID: projectID,      // プロジェクト ID を設定する
-		ImageURL:  "nginx:latest", // イメージ URL を設定する
+		ProjectID: projectID,                  // プロジェクト ID を設定する
+		ImageURL:  "nginx:latest-" + name,      // イメージ URL を設定する
 	}
 	if err := db.Create(imageData).Error; err != nil {
 		t.Fatalf("テスト用 Image の作成に失敗しました: %v", err) // 作成失敗時はテスト失敗とする
@@ -314,6 +314,171 @@ func TestApplyService_ListApplyHistories_他ユーザーのdeploymentはErrForbi
 
 	_, err := applyService.ListApplyHistories(context.Background(), "other-user-id", deploymentData.ID) // 別ユーザーで実行する
 	if !errors.Is(err, ErrForbidden) {                                                                   // ErrForbidden が返ることを確認する
+		t.Errorf("期待するエラー: ErrForbidden, 実際: %v", err)
+	}
+}
+
+// TestApplyService_ApplyProject_pendingのあるDeploymentのみapplyされる は pending がある Deployment のみ apply され、成功件数が返ることを確認する
+func TestApplyService_ApplyProject_pendingのあるDeploymentのみapplyされる(t *testing.T) {
+	db := setupApplyTestDB(t)                                                 // テスト用 DB を準備する
+	projectData := createApplyTestProject(t, db, "test-ns-project-apply-ok") // テスト用 Project を作成する
+	pendingDeploymentData := createApplyTestDeployment(t, db, projectData.ID, "test-app-pending") // pending ありの Deployment を作成する
+
+	// pending なしの Deployment を作成する（apply 対象から除外されることを確認する）
+	noPendingDeploymentData := &models.Deployment{
+		ProjectID: projectData.ID,                    // プロジェクト ID を設定する
+		Name:      "test-app-nopending",              // デプロイメント名を設定する
+		Type:      models.DeploymentTypeImageURL,     // タイプを設定する
+		Status:    models.DeploymentStatusRunning,    // ステータスを running に設定する
+		AppStatus: models.AppStatusRunning,           // アプリステータスを running に設定する
+		Replicas:  1,                                 // current replicas を設定する
+	}
+	if err := db.Create(noPendingDeploymentData).Error; err != nil {
+		t.Fatalf("テスト用 Deployment の作成に失敗しました: %v", err) // 作成失敗時はテスト失敗とする
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(noPendingDeploymentData) }) // テスト終了後にレコードを削除する
+
+	var appliedDeploymentIDList []string // apply された deployment ID を記録するスライスを定義する
+	temporalMock := &mockWorkflowStarter{
+		executeWorkflowFunc: func(ctx context.Context, options temporalclient.StartWorkflowOptions, workflow interface{}, args ...interface{}) (temporalclient.WorkflowRun, error) {
+			appliedDeploymentIDList = append(appliedDeploymentIDList, options.ID) // 起動された WorkflowID を記録する
+			return nil, nil                                                       // 成功を返す
+		},
+	}
+
+	applyService := newApplyServiceForTest(db, temporalMock) // テスト用サービスを生成する
+
+	result, err := applyService.ApplyProject(context.Background(), "test-user-id", projectData.ID) // ApplyProject を実行する
+	if err != nil {
+		t.Fatalf("ApplyProject がエラーを返しました: %v", err)
+	}
+	if result.AppliedDeploymentCount != 1 { // pending ありの Deployment 1件のみ apply されることを確認する
+		t.Errorf("期待する AppliedDeploymentCount: 1, 実際: %d", result.AppliedDeploymentCount)
+	}
+	if len(result.FailedDeploymentList) != 0 { // 失敗がないことを確認する
+		t.Errorf("FailedDeploymentList は空であるべきですが、%d件でした", len(result.FailedDeploymentList))
+	}
+	if !result.IngressRouteApplied { // IngressRoute の apply が実行されたことを確認する
+		t.Error("IngressRouteApplied が true であるべきですが、false でした")
+	}
+	expectedWorkflowID := "apply-" + pendingDeploymentData.ID // pending ありの Deployment のみ apply されることを確認する
+	if len(appliedDeploymentIDList) != 1 || appliedDeploymentIDList[0] != expectedWorkflowID {
+		t.Errorf("期待する apply 対象 WorkflowID: [%s], 実際: %v", expectedWorkflowID, appliedDeploymentIDList)
+	}
+}
+
+// TestApplyService_ApplyProject_一部Deploymentが失敗しても他は継続する は一部の Deployment の apply が失敗しても他の Deployment・IngressRoute の apply が継続することを確認する
+func TestApplyService_ApplyProject_一部Deploymentが失敗しても他は継続する(t *testing.T) {
+	db := setupApplyTestDB(t)                                                    // テスト用 DB を準備する
+	projectData := createApplyTestProject(t, db, "test-ns-project-apply-partial") // テスト用 Project を作成する
+	okDeploymentData := createApplyTestDeployment(t, db, projectData.ID, "test-app-ok") // 成功する Deployment を作成する
+	failDeploymentData := createApplyTestDeployment(t, db, projectData.ID, "test-app-fail") // 失敗する Deployment を作成する
+
+	temporalMock := &mockWorkflowStarter{
+		executeWorkflowFunc: func(ctx context.Context, options temporalclient.StartWorkflowOptions, workflow interface{}, args ...interface{}) (temporalclient.WorkflowRun, error) {
+			if options.ID == "apply-"+failDeploymentData.ID { // 失敗させたい Deployment の場合はエラーを返す
+				return nil, errors.New("temporal connection refused")
+			}
+			return nil, nil // それ以外は成功を返す
+		},
+	}
+
+	applyService := newApplyServiceForTest(db, temporalMock) // テスト用サービスを生成する
+
+	result, err := applyService.ApplyProject(context.Background(), "test-user-id", projectData.ID) // ApplyProject を実行する
+	if err != nil {
+		t.Fatalf("ApplyProject がエラーを返しました: %v", err)
+	}
+	if result.AppliedDeploymentCount != 1 { // 成功した Deployment が1件であることを確認する
+		t.Errorf("期待する AppliedDeploymentCount: 1, 実際: %d", result.AppliedDeploymentCount)
+	}
+	if len(result.FailedDeploymentList) != 1 { // 失敗した Deployment が1件記録されることを確認する
+		t.Fatalf("期待する FailedDeploymentList件数: 1, 実際: %d", len(result.FailedDeploymentList))
+	}
+	if result.FailedDeploymentList[0].DeploymentID != failDeploymentData.ID { // 失敗した Deployment ID が正しいことを確認する
+		t.Errorf("期待する失敗 DeploymentID: %s, 実際: %s", failDeploymentData.ID, result.FailedDeploymentList[0].DeploymentID)
+	}
+	if !result.IngressRouteApplied { // 一部失敗しても IngressRoute の apply は実行されることを確認する
+		t.Error("IngressRouteApplied が true であるべきですが、false でした")
+	}
+	_ = okDeploymentData // 変数を使用したことにする（テストの意図を明示するため）
+}
+
+// TestApplyService_ApplyProject_他ユーザーのprojectはErrForbiddenになる は他ユーザーの project に対する一括 apply が ErrForbidden になることを確認する
+func TestApplyService_ApplyProject_他ユーザーのprojectはErrForbiddenになる(t *testing.T) {
+	db := setupApplyTestDB(t)                                                    // テスト用 DB を準備する
+	projectData := createApplyTestProject(t, db, "test-ns-project-apply-forbid") // テスト用 Project を作成する
+
+	applyService := newApplyServiceForTest(db, &mockWorkflowStarter{}) // テスト用サービスを生成する
+
+	_, err := applyService.ApplyProject(context.Background(), "other-user-id", projectData.ID) // 別ユーザーで実行する
+	if !errors.Is(err, ErrForbidden) {                                                          // ErrForbidden が返ることを確認する
+		t.Errorf("期待するエラー: ErrForbidden, 実際: %v", err)
+	}
+}
+
+// TestApplyService_GetProjectPendingSummary_pendingを正しく集計する は pending 集計が Deployment の pending 有無を正しく反映することを確認する
+func TestApplyService_GetProjectPendingSummary_pendingを正しく集計する(t *testing.T) {
+	db := setupApplyTestDB(t)                                                     // テスト用 DB を準備する
+	projectData := createApplyTestProject(t, db, "test-ns-project-summary")      // テスト用 Project を作成する
+	createApplyTestDeployment(t, db, projectData.ID, "test-app-summary-pending") // pending ありの Deployment を作成する
+
+	applyService := newApplyServiceForTest(db, &mockWorkflowStarter{}) // テスト用サービスを生成する
+
+	summary, err := applyService.GetProjectPendingSummary(context.Background(), "test-user-id", projectData.ID) // pending 集計を実行する
+	if err != nil {
+		t.Fatalf("GetProjectPendingSummary がエラーを返しました: %v", err)
+	}
+	if !summary.HasPending { // pending ありと判定されることを確認する
+		t.Error("HasPending が true であるべきですが、false でした")
+	}
+	if summary.PendingDeploymentCount != 1 { // pending がある Deployment が1件であることを確認する
+		t.Errorf("期待する PendingDeploymentCount: 1, 実際: %d", summary.PendingDeploymentCount)
+	}
+	if summary.PendingIngressRouteCount != 0 { // IngressRoute は作成していないため0件であることを確認する
+		t.Errorf("期待する PendingIngressRouteCount: 0, 実際: %d", summary.PendingIngressRouteCount)
+	}
+}
+
+// TestApplyService_GetProjectPendingSummary_pendingがない場合falseになる は pending が一切ない場合に HasPending が false になることを確認する
+func TestApplyService_GetProjectPendingSummary_pendingがない場合falseになる(t *testing.T) {
+	db := setupApplyTestDB(t)                                                          // テスト用 DB を準備する
+	projectData := createApplyTestProject(t, db, "test-ns-project-summary-nopending") // テスト用 Project を作成する
+
+	// pending なしの Deployment を作成する
+	deploymentData := &models.Deployment{
+		ProjectID: projectData.ID,                 // プロジェクト ID を設定する
+		Name:      "test-app-summary-nopending",   // デプロイメント名を設定する
+		Type:      models.DeploymentTypeImageURL,  // タイプを設定する
+		Status:    models.DeploymentStatusRunning, // ステータスを running に設定する
+		AppStatus: models.AppStatusRunning,        // アプリステータスを running に設定する
+		Replicas:  1,                              // current replicas を設定する
+	}
+	if err := db.Create(deploymentData).Error; err != nil {
+		t.Fatalf("テスト用 Deployment の作成に失敗しました: %v", err) // 作成失敗時はテスト失敗とする
+	}
+	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
+
+	applyService := newApplyServiceForTest(db, &mockWorkflowStarter{}) // テスト用サービスを生成する
+
+	summary, err := applyService.GetProjectPendingSummary(context.Background(), "test-user-id", projectData.ID) // pending 集計を実行する
+	if err != nil {
+		t.Fatalf("GetProjectPendingSummary がエラーを返しました: %v", err)
+	}
+	if summary.HasPending { // pending なしと判定されることを確認する
+		t.Error("HasPending が false であるべきですが、true でした")
+	}
+}
+
+// TestApplyService_GetProjectPendingSummary_他ユーザーのprojectはErrForbiddenになる は他ユーザーの project の pending 集計が ErrForbidden になることを確認する
+func TestApplyService_GetProjectPendingSummary_他ユーザーのprojectはErrForbiddenになる(t *testing.T) {
+	db := setupApplyTestDB(t)                                                     // テスト用 DB を準備する
+	projectData := createApplyTestProject(t, db, "test-ns-project-summary-forbid") // テスト用 Project を作成する
+
+	applyService := newApplyServiceForTest(db, &mockWorkflowStarter{}) // テスト用サービスを生成する
+
+	_, err := applyService.GetProjectPendingSummary(context.Background(), "other-user-id", projectData.ID) // 別ユーザーで実行する
+	if !errors.Is(err, ErrForbidden) {                                                                      // ErrForbidden が返ることを確認する
 		t.Errorf("期待するエラー: ErrForbidden, 実際: %v", err)
 	}
 }

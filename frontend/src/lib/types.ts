@@ -159,6 +159,23 @@ export type ApplyHistory = {
   applied_at: string
 }
 
+export type ProjectPendingSummary = {
+  has_pending: boolean
+  pending_deployment_count: number
+  pending_ingress_route_count: number
+}
+
+export type ApplyProjectFailure = {
+  deployment_id: string
+  error: string
+}
+
+export type ApplyProjectResult = {
+  applied_deployment_count: number
+  failed_deployment_list: ApplyProjectFailure[]
+  ingress_route_applied: boolean
+}
+
 // ── Logs ──────────────────────────────────────────────────────
 
 export type PodLogEntry = {
