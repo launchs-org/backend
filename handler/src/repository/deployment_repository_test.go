@@ -1,10 +1,10 @@
 package repository
 
 import (
-	"handler/models"
 	"context"
 	"encoding/json"
 	"fmt"
+	"handler/models"
 	"os"
 	"testing"
 
@@ -49,6 +49,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		&models.EnvVarMount{},
 		&models.Volume{},
 		&models.VolumeMount{},
+		&models.CliToken{},
 	); err != nil {
 		t.Fatalf("マイグレーションに失敗しました: %v", err) // マイグレーション失敗時はテスト失敗とする
 	}
@@ -68,10 +69,10 @@ func getEnvOrDefault(key, defaultValue string) string {
 func createTestProject(t *testing.T, db *gorm.DB) *models.Project {
 	t.Helper()
 	projectData := &models.Project{
-		UserID:    "test-user-id",                // テスト用ユーザー ID を設定する
-		Name:      "test-project",                // テスト用プロジェクト名を設定する
-		Namespace: "test-namespace",              // テスト用 namespace を設定する
-		Status:    models.ProjectStatusActive,    // ステータスを active に設定する
+		UserID:    "test-user-id",             // テスト用ユーザー ID を設定する
+		Name:      "test-project",             // テスト用プロジェクト名を設定する
+		Namespace: "test-namespace",           // テスト用 namespace を設定する
+		Status:    models.ProjectStatusActive, // ステータスを active に設定する
 	}
 	if err := db.Create(projectData).Error; err != nil {
 		t.Fatalf("テスト用 Project の作成に失敗しました: %v", err) // 作成失敗時はテスト失敗とする
@@ -96,20 +97,20 @@ func createTestImage(t *testing.T, db *gorm.DB, projectID string, imageURL strin
 
 // TestDeploymentRepository_Create_正常に作成される は Deployment レコードが作成されることを確認する
 func TestDeploymentRepository_Create_正常に作成される(t *testing.T) {
-	db := setupTestDB(t)                     // テスト用 DB を準備する
+	db := setupTestDB(t)                    // テスト用 DB を準備する
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
-	repo := NewDeploymentRepository(db) // リポジトリを生成する
+	repo := NewDeploymentRepository(db)                                      // リポジトリを生成する
 	imageData := createTestImage(t, db, projectData.ID, "nginx:create-test") // pending_image_id に設定する Image を作成する
 	deploymentData := &models.Deployment{
-		ProjectID:           projectData.ID,                // プロジェクト ID を設定する
-		Name:                "test-app",                    // デプロイメント名を設定する
-		Type:                models.DeploymentTypeImageURL, // タイプを設定する
+		ProjectID:           projectData.ID,                 // プロジェクト ID を設定する
+		Name:                "test-app",                     // デプロイメント名を設定する
+		Type:                models.DeploymentTypeImageURL,  // タイプを設定する
 		Status:              models.DeploymentStatusPending, // ステータスを設定する
-		AppStatus:           models.AppStatusPending,       // アプリステータスを設定する
-		PendingImageID:      &imageData.ID,                 // pending image_id を設定する
-		PendingInstanceSize: "small",                       // pending instance_size を設定する
-		PendingReplicas:     1,                             // pending replicas を設定する
+		AppStatus:           models.AppStatusPending,        // アプリステータスを設定する
+		PendingImageID:      &imageData.ID,                  // pending image_id を設定する
+		PendingInstanceSize: "small",                        // pending instance_size を設定する
+		PendingReplicas:     1,                              // pending replicas を設定する
 	}
 
 	err := repo.Create(context.Background(), deploymentData) // リポジトリを実行する
@@ -123,7 +124,7 @@ func TestDeploymentRepository_Create_正常に作成される(t *testing.T) {
 
 	// DB から取得して値を確認する
 	var fetched models.Deployment
-	db.First(&fetched, "id = ?", deploymentData.ID) // 作成したレコードを取得する
+	db.First(&fetched, "id = ?", deploymentData.ID)       // 作成したレコードを取得する
 	if fetched.Status != models.DeploymentStatusPending { // status が pending であることを確認する
 		t.Errorf("期待する status: pending, 実際の status: %s", fetched.Status)
 	}
@@ -134,7 +135,7 @@ func TestDeploymentRepository_Create_正常に作成される(t *testing.T) {
 
 // TestDeploymentRepository_FindByID_正常に取得される は FindByID で Deployment が取得されることを確認する
 func TestDeploymentRepository_FindByID_正常に取得される(t *testing.T) {
-	db := setupTestDB(t)                     // テスト用 DB を準備する
+	db := setupTestDB(t)                    // テスト用 DB を準備する
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	// テスト用 Deployment を作成する
@@ -145,10 +146,10 @@ func TestDeploymentRepository_FindByID_正常に取得される(t *testing.T) {
 		Status:    models.DeploymentStatusPending,
 		AppStatus: models.AppStatusPending,
 	}
-	db.Create(deploymentData)                                                      // テスト用レコードを作成する
+	db.Create(deploymentData)                                  // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
 
-	repo := NewDeploymentRepository(db)                                            // リポジトリを生成する
+	repo := NewDeploymentRepository(db)                                   // リポジトリを生成する
 	result, err := repo.FindByID(context.Background(), deploymentData.ID) // リポジトリを実行する
 	if err != nil {
 		t.Fatalf("FindByID がエラーを返しました: %v", err)
@@ -163,12 +164,12 @@ func TestDeploymentRepository_FindByID_正常に取得される(t *testing.T) {
 
 // TestDeploymentRepository_FindByID_ImageがPreloadされる は ImageID/PendingImageID に対応する Image が Preload されて返ることを確認する
 func TestDeploymentRepository_FindByID_ImageがPreloadされる(t *testing.T) {
-	db := setupTestDB(t)                     // テスト用 DB を準備する
+	db := setupTestDB(t)                    // テスト用 DB を準備する
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	imageData := &models.Image{
-		ProjectID: projectData.ID,           // プロジェクト ID を設定する
-		ImageURL:  "nginx:preload-test",     // イメージ URL を設定する
+		ProjectID: projectData.ID,       // プロジェクト ID を設定する
+		ImageURL:  "nginx:preload-test", // イメージ URL を設定する
 	}
 	if err := db.Create(imageData).Error; err != nil { // テスト用 Image を作成する
 		t.Fatalf("テスト用イメージレコードの作成に失敗しました: %v", err)
@@ -184,10 +185,10 @@ func TestDeploymentRepository_FindByID_ImageがPreloadされる(t *testing.T) {
 		AppStatus: models.AppStatusRunning,
 		ImageID:   &imageData.ID, // 作成した Image を紐づける
 	}
-	db.Create(deploymentData)                                                      // テスト用レコードを作成する
+	db.Create(deploymentData)                                  // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
 
-	repo := NewDeploymentRepository(db)                                            // リポジトリを生成する
+	repo := NewDeploymentRepository(db)                                   // リポジトリを生成する
 	result, err := repo.FindByID(context.Background(), deploymentData.ID) // リポジトリを実行する
 	if err != nil {
 		t.Fatalf("FindByID がエラーを返しました: %v", err)
@@ -202,18 +203,18 @@ func TestDeploymentRepository_FindByID_ImageがPreloadされる(t *testing.T) {
 
 // TestDeploymentRepository_FindByID_存在しないIDはエラーを返す は存在しない ID でエラーが返ることを確認する
 func TestDeploymentRepository_FindByID_存在しないIDはエラーを返す(t *testing.T) {
-	db := setupTestDB(t)                     // テスト用 DB を準備する
-	repo := NewDeploymentRepository(db)      // リポジトリを生成する
+	db := setupTestDB(t)                // テスト用 DB を準備する
+	repo := NewDeploymentRepository(db) // リポジトリを生成する
 
 	_, err := repo.FindByID(context.Background(), "00000000-0000-0000-0000-000000000000") // 存在しない ID で検索する
-	if err == nil { // エラーが返ることを確認する
+	if err == nil {                                                                       // エラーが返ることを確認する
 		t.Fatal("存在しない ID でエラーが返るべきですが nil が返りました")
 	}
 }
 
 // TestDeploymentRepository_FindAllByProjectID_正常に一覧が取得される は FindAllByProjectID で一覧が取得されることを確認する
 func TestDeploymentRepository_FindAllByProjectID_正常に一覧が取得される(t *testing.T) {
-	db := setupTestDB(t)                     // テスト用 DB を準備する
+	db := setupTestDB(t)                    // テスト用 DB を準備する
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	// テスト用 Deployment を2件作成する
@@ -226,7 +227,7 @@ func TestDeploymentRepository_FindAllByProjectID_正常に一覧が取得され�
 		db.Unscoped().Delete(deploymentData2) // テスト終了後にレコードを削除する
 	})
 
-	repo := NewDeploymentRepository(db)                                                           // リポジトリを生成する
+	repo := NewDeploymentRepository(db)                                          // リポジトリを生成する
 	result, err := repo.FindAllByProjectID(context.Background(), projectData.ID) // リポジトリを実行する
 	if err != nil {
 		t.Fatalf("FindAllByProjectID がエラーを返しました: %v", err)
@@ -238,7 +239,7 @@ func TestDeploymentRepository_FindAllByProjectID_正常に一覧が取得され�
 
 // TestDeploymentRepository_Save_正常に更新される は Save で Deployment が更新されることを確認する
 func TestDeploymentRepository_Save_正常に更新される(t *testing.T) {
-	db := setupTestDB(t)                     // テスト用 DB を準備する
+	db := setupTestDB(t)                    // テスト用 DB を準備する
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	// テスト用 Deployment を作成する
@@ -251,20 +252,20 @@ func TestDeploymentRepository_Save_正常に更新される(t *testing.T) {
 		AppStatus:      models.AppStatusPending,
 		PendingImageID: &oldImage.ID, // 更新前の値を設定する
 	}
-	db.Create(deploymentData)                                          // テスト用レコードを作成する
+	db.Create(deploymentData)                                  // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
 
-	repo := NewDeploymentRepository(db) // リポジトリを生成する
+	repo := NewDeploymentRepository(db)                                  // リポジトリを生成する
 	newImage := createTestImage(t, db, projectData.ID, "nginx:save-new") // 更新後の Image を作成する
-	deploymentData.PendingImageID = &newImage.ID // pending_image_id を更新する
-	err := repo.Save(context.Background(), deploymentData) // リポジトリを実行する
+	deploymentData.PendingImageID = &newImage.ID                         // pending_image_id を更新する
+	err := repo.Save(context.Background(), deploymentData)               // リポジトリを実行する
 	if err != nil {
 		t.Fatalf("Save がエラーを返しました: %v", err)
 	}
 
 	// DB から取得して更新を確認する
 	var fetched models.Deployment
-	db.First(&fetched, "id = ?", deploymentData.ID) // 更新後のレコードを取得する
+	db.First(&fetched, "id = ?", deploymentData.ID)                              // 更新後のレコードを取得する
 	if fetched.PendingImageID == nil || *fetched.PendingImageID != newImage.ID { // 更新されていることを確認する
 		t.Errorf("期待する pending_image_id: %s, 実際の pending_image_id: %v", newImage.ID, fetched.PendingImageID)
 	}
@@ -272,7 +273,7 @@ func TestDeploymentRepository_Save_正常に更新される(t *testing.T) {
 
 // TestServiceRepository_Create_正常に作成される は Service レコードが作成されることを確認する
 func TestServiceRepository_Create_正常に作成される(t *testing.T) {
-	db := setupTestDB(t)                     // テスト用 DB を準備する
+	db := setupTestDB(t)                    // テスト用 DB を準備する
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	// テスト用 Deployment を作成する（Service の外部キーとして必要）
@@ -283,7 +284,7 @@ func TestServiceRepository_Create_正常に作成される(t *testing.T) {
 		Status:    models.DeploymentStatusPending,
 		AppStatus: models.AppStatusPending,
 	}
-	db.Create(deploymentData)                                          // テスト用レコードを作成する
+	db.Create(deploymentData)                                  // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
 
 	repo := NewServiceRepository(db) // リポジトリを生成する
@@ -303,7 +304,7 @@ func TestServiceRepository_Create_正常に作成される(t *testing.T) {
 
 	// DB から取得して値を確認する
 	var fetched models.Service
-	db.First(&fetched, "id = ?", serviceData.ID) // 作成したレコードを取得する
+	db.First(&fetched, "id = ?", serviceData.ID)   // 作成したレコードを取得する
 	if fetched.DeploymentID != deploymentData.ID { // deployment_id が一致することを確認する
 		t.Errorf("期待する deployment_id: %s, 実際の deployment_id: %s", deploymentData.ID, fetched.DeploymentID)
 	}
@@ -314,7 +315,7 @@ func TestServiceRepository_Create_正常に作成される(t *testing.T) {
 
 // TestServiceRepository_FindByDeploymentID_正常に取得される は FindByDeploymentID で Service が取得されることを確認する
 func TestServiceRepository_FindByDeploymentID_正常に取得される(t *testing.T) {
-	db := setupTestDB(t)                     // テスト用 DB を準備する
+	db := setupTestDB(t)                    // テスト用 DB を準備する
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	// テスト用 Deployment を作成する
@@ -325,7 +326,7 @@ func TestServiceRepository_FindByDeploymentID_正常に取得される(t *testin
 		Status:    models.DeploymentStatusPending,
 		AppStatus: models.AppStatusPending,
 	}
-	db.Create(deploymentData)                                          // テスト用レコードを作成する
+	db.Create(deploymentData)                                  // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
 
 	// テスト用 Service を作成する
@@ -335,10 +336,10 @@ func TestServiceRepository_FindByDeploymentID_正常に取得される(t *testin
 		TargetPort:   3000,                        // ターゲットポートを設定する
 		Status:       models.ServiceStatusPending, // ステータスを設定する
 	}
-	db.Create(serviceData)                                          // テスト用レコードを作成する
+	db.Create(serviceData)                                  // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(serviceData) }) // テスト終了後にレコードを削除する
 
-	repo := NewServiceRepository(db)                                                                          // リポジトリを生成する
+	repo := NewServiceRepository(db)                                                // リポジトリを生成する
 	result, err := repo.FindByDeploymentID(context.Background(), deploymentData.ID) // リポジトリを実行する
 	if err != nil {
 		t.Fatalf("FindByDeploymentID がエラーを返しました: %v", err)
@@ -353,18 +354,18 @@ func TestServiceRepository_FindByDeploymentID_正常に取得される(t *testin
 
 // TestServiceRepository_FindByDeploymentID_存在しないIDはエラーを返す は存在しない ID でエラーが返ることを確認する
 func TestServiceRepository_FindByDeploymentID_存在しないIDはエラーを返す(t *testing.T) {
-	db := setupTestDB(t)                // テスト用 DB を準備する
-	repo := NewServiceRepository(db)   // リポジトリを生成する
+	db := setupTestDB(t)             // テスト用 DB を準備する
+	repo := NewServiceRepository(db) // リポジトリを生成する
 
 	_, err := repo.FindByDeploymentID(context.Background(), "00000000-0000-0000-0000-000000000000") // 存在しない ID で検索する
-	if err == nil { // エラーが返ることを確認する
+	if err == nil {                                                                                 // エラーが返ることを確認する
 		t.Fatal("存在しない deployment_id でエラーが返るべきですが nil が返りました")
 	}
 }
 
 // TestServiceRepository_Update_正常に更新される は Update で Service が更新されることを確認する
 func TestServiceRepository_Update_正常に更新される(t *testing.T) {
-	db := setupTestDB(t)                     // テスト用 DB を準備する
+	db := setupTestDB(t)                    // テスト用 DB を準備する
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	// テスト用 Deployment を作成する
@@ -375,7 +376,7 @@ func TestServiceRepository_Update_正常に更新される(t *testing.T) {
 		Status:    models.DeploymentStatusPending,
 		AppStatus: models.AppStatusPending,
 	}
-	db.Create(deploymentData)                                          // テスト用レコードを作成する
+	db.Create(deploymentData)                                  // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
 
 	// テスト用 Service を作成する
@@ -385,11 +386,11 @@ func TestServiceRepository_Update_正常に更新される(t *testing.T) {
 		PendingTargetPort: 3000,                        // 更新前の pending target port を設定する
 		Status:            models.ServiceStatusPending, // ステータスを設定する
 	}
-	db.Create(serviceData)                                          // テスト用レコードを作成する
+	db.Create(serviceData)                                  // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(serviceData) }) // テスト終了後にレコードを削除する
 
-	repo := NewServiceRepository(db)   // リポジトリを生成する
-	serviceData.PendingPort = 9090    // pending_port を更新する
+	repo := NewServiceRepository(db)                      // リポジトリを生成する
+	serviceData.PendingPort = 9090                        // pending_port を更新する
 	err := repo.Update(context.Background(), serviceData) // リポジトリを実行する
 	if err != nil {
 		t.Fatalf("Update がエラーを返しました: %v", err)
@@ -398,7 +399,7 @@ func TestServiceRepository_Update_正常に更新される(t *testing.T) {
 	// DB から取得して更新を確認する
 	var fetched models.Service
 	db.First(&fetched, "id = ?", serviceData.ID) // 更新後のレコードを取得する
-	if fetched.PendingPort != 9090 {              // pending_port が更新されていることを確認する
+	if fetched.PendingPort != 9090 {             // pending_port が更新されていることを確認する
 		t.Errorf("期待する pending_port: 9090, 実際の pending_port: %d", fetched.PendingPort)
 	}
 	if fetched.PendingTargetPort != 3000 { // pending_target_port が変化していないことを確認する
@@ -408,17 +409,17 @@ func TestServiceRepository_Update_正常に更新される(t *testing.T) {
 
 // TestDeploymentRepository_UpdateAppStatus_正常に更新される は UpdateAppStatus で app_status が更新されることを確認する
 func TestDeploymentRepository_UpdateAppStatus_正常に更新される(t *testing.T) {
-	db := setupTestDB(t)                     // テスト用 DB を準備する
+	db := setupTestDB(t)                    // テスト用 DB を準備する
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	deploymentData := &models.Deployment{ // テスト用 Deployment を作成する
-		ProjectID: projectData.ID,            // プロジェクト ID を設定する
-		Name:      "test-watcher-app",        // デプロイメント名を設定する
-		Type:      models.DeploymentTypeImageURL, // タイプを設定する
+		ProjectID: projectData.ID,                 // プロジェクト ID を設定する
+		Name:      "test-watcher-app",             // デプロイメント名を設定する
+		Type:      models.DeploymentTypeImageURL,  // タイプを設定する
 		Status:    models.DeploymentStatusPending, // ステータスを設定する
-		AppStatus: models.AppStatusPending,   // 初期 app_status を設定する
+		AppStatus: models.AppStatusPending,        // 初期 app_status を設定する
 	}
-	db.Create(deploymentData)                                                // テスト用レコードを作成する
+	db.Create(deploymentData)                                  // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
 
 	repo := NewDeploymentRepository(db) // リポジトリを生成する
@@ -429,7 +430,7 @@ func TestDeploymentRepository_UpdateAppStatus_正常に更新される(t *testin
 	}
 
 	var fetchedDeployment models.Deployment
-	db.First(&fetchedDeployment, "id = ?", deploymentData.ID) // 更新後のレコードを取得する
+	db.First(&fetchedDeployment, "id = ?", deploymentData.ID)   // 更新後のレコードを取得する
 	if fetchedDeployment.AppStatus != models.AppStatusRunning { // app_status が running に更新されていることを確認する
 		t.Errorf("期待する app_status: running, 実際の app_status: %s", fetchedDeployment.AppStatus)
 	}
@@ -442,24 +443,24 @@ func TestDeploymentRepository_UpdateAppStatus_存在しないIDはエラーを�
 	repo := NewDeploymentRepository(db) // リポジトリを生成する
 
 	err := repo.UpdateAppStatus(context.Background(), "00000000-0000-0000-0000-000000000000", models.AppStatusRunning) // 存在しない ID で更新する
-	if err == nil { // エラーが返ることを確認する
+	if err == nil {                                                                                                    // エラーが返ることを確認する
 		t.Fatal("存在しない deploymentID でエラーが返るべきですが nil が返りました")
 	}
 }
 
 // TestDeploymentRepository_UpdateK8sStatus_正常に更新される は UpdateK8sStatus で k8s_status が更新されることを確認する
 func TestDeploymentRepository_UpdateK8sStatus_正常に更新される(t *testing.T) {
-	db := setupTestDB(t)                     // テスト用 DB を準備する
+	db := setupTestDB(t)                    // テスト用 DB を準備する
 	projectData := createTestProject(t, db) // テスト用 Project を作成する
 
 	deploymentData := &models.Deployment{ // テスト用 Deployment を作成する
-		ProjectID: projectData.ID,               // プロジェクト ID を設定する
-		Name:      "test-k8s-status-app",        // デプロイメント名を設定する
-		Type:      models.DeploymentTypeImageURL, // タイプを設定する
+		ProjectID: projectData.ID,                 // プロジェクト ID を設定する
+		Name:      "test-k8s-status-app",          // デプロイメント名を設定する
+		Type:      models.DeploymentTypeImageURL,  // タイプを設定する
 		Status:    models.DeploymentStatusPending, // ステータスを設定する
-		AppStatus: models.AppStatusPending,       // 初期 app_status を設定する
+		AppStatus: models.AppStatusPending,        // 初期 app_status を設定する
 	}
-	db.Create(deploymentData)                                                // テスト用レコードを作成する
+	db.Create(deploymentData)                                  // テスト用レコードを作成する
 	t.Cleanup(func() { db.Unscoped().Delete(deploymentData) }) // テスト終了後にレコードを削除する
 
 	repo := NewDeploymentRepository(db) // リポジトリを生成する
@@ -502,7 +503,7 @@ func TestDeploymentRepository_UpdateK8sStatus_存在しないIDはエラーを�
 	k8sStatusJSON := datatypes.JSON([]byte(`{"replicas":1}`)) // テスト用 k8s_status JSON を生成する
 
 	err := repo.UpdateK8sStatus(context.Background(), "00000000-0000-0000-0000-000000000000", k8sStatusJSON) // 存在しない ID で更新する
-	if err == nil { // エラーが返ることを確認する
+	if err == nil {                                                                                          // エラーが返ることを確認する
 		t.Fatal("存在しない deploymentID でエラーが返るべきですが nil が返りました")
 	}
 }

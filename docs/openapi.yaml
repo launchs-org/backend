@@ -1307,6 +1307,62 @@ components:
           description: 新しいイメージ URL（空文字は 400 エラー）
           example: "registry.example.com/org/app:v1.2.3"
 
+    # ─── CliToken ────────────────────────────────────────────────────────────
+    CliToken:
+      type: object
+      description: |
+        CLIトークンのメタ情報（平文トークンは含まれない）。
+        失効はレコードの削除によって行うため、一覧には有効なトークンのみが含まれる。
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: トークンID（JWTのjtiクレームと一致する）
+        user_id:
+          type: string
+        name:
+          type: string
+          description: トークンの用途を識別するためのラベル
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: 有効期限（nullの場合は無期限）
+        created_at:
+          type: string
+          format: date-time
+
+    CreateCliTokenRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "my-laptop"
+        expires_in_days:
+          type: integer
+          description: 有効期限（日数）。0または未指定の場合は無期限
+          example: 365
+
+    CreateCliTokenResponse:
+      type: object
+      description: 発行直後のみ平文トークンを含むレスポンス
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        token:
+          type: string
+          description: 平文のCLIトークン。この発行時のみ返却され、以後は再取得できない
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
     # ─── UserQuota / Plan ────────────────────────────────────────────────────
     QuotaResponse:
       type: object
@@ -4218,6 +4274,117 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /api/v1/cli-tokens:
+    post:
+      summary: CLIトークン発行
+      description: |
+        CLI から API を利用するための長期トークンを発行します。
+        レスポンスの `token` は発行時にのみ返却され、以後は再取得できません。
+        ブラウザ用 JWT でのみ呼び出し可能で、CLIトークン自身での発行はできません。
+      tags: [CliTokens]
+      security:
+        - jwtAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCliTokenRequest"
+            example:
+              name: "my-laptop"
+              expires_in_days: 365
+      responses:
+        "201":
+          description: 発行されたCLIトークン（token を含む）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateCliTokenResponse"
+        "400":
+          description: リクエストが不正
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: CLIトークンを使ってCLIトークンを発行しようとした場合
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    get:
+      summary: CLIトークン一覧取得
+      description: 認証ユーザー自身が発行したCLIトークンの一覧を返します（平文トークンは含まれません）。
+      tags: [CliTokens]
+      security:
+        - jwtAuth: []
+      responses:
+        "200":
+          description: CLIトークン一覧
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CliToken"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/cli-tokens/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: CLIトークン ID（jti）
+
+    delete:
+      summary: CLIトークン削除（失効）
+      description: 指定したCLIトークンを削除します。削除により以後そのトークンでの認証は拒否されます。
+      tags: [CliTokens]
+      security:
+        - jwtAuth: []
+      responses:
+        "200":
+          description: 削除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+              example:
+                message: "削除しました"
+        "403":
+          description: アクセスが拒否されました
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: CLIトークンが見つかりません
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 tags:
   - name: Quota
     description: 認証ユーザー自身のリソースクォータ管理
@@ -4249,3 +4416,5 @@ tags:
     description: ボリュームのデプロイメントへのマウント
   - name: DeploymentTemplates
     description: デプロイメントテンプレート（プリセット）管理。作成・更新・削除は管理者専用
+  - name: CliTokens
+    description: CLI から API を利用するための長期トークンの発行・一覧・失効管理
