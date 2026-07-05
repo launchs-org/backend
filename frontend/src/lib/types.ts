@@ -172,6 +172,7 @@ export type ApplyProjectFailure = {
 
 export type ApplyProjectResult = {
   applied_deployment_count: number
+  applied_deployment_id_list: string[]
   failed_deployment_list: ApplyProjectFailure[]
   ingress_route_applied: boolean
 }

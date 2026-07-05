@@ -56,9 +56,10 @@ type ApplyProjectFailure struct {
 
 // ApplyProjectResult は ApplyProject 処理の結果を表す構造体
 type ApplyProjectResult struct {
-	AppliedDeploymentCount int                   `json:"applied_deployment_count"` // apply に成功した deployment 件数
-	FailedDeploymentList   []ApplyProjectFailure `json:"failed_deployment_list"`   // apply に失敗した deployment 一覧
-	IngressRouteApplied    bool                  `json:"ingress_route_applied"`    // IngressRoute の apply を実行したか
+	AppliedDeploymentCount  int                   `json:"applied_deployment_count"`   // apply に成功した deployment 件数
+	AppliedDeploymentIDList []string              `json:"applied_deployment_id_list"` // apply に成功した deployment ID 一覧（完了待機のポーリング対象）
+	FailedDeploymentList    []ApplyProjectFailure `json:"failed_deployment_list"`     // apply に失敗した deployment 一覧
+	IngressRouteApplied     bool                  `json:"ingress_route_applied"`      // IngressRoute の apply を実行したか
 }
 
 // WorkflowStarter は Temporal Workflow を起動・操作するための最小インターフェース（テストモック用）
@@ -213,7 +214,8 @@ func (applyService *ApplyService) ApplyProject(ctx context.Context, userID strin
 	}
 
 	result := &ApplyProjectResult{ // 結果を格納する構造体を初期化する
-		FailedDeploymentList: []ApplyProjectFailure{},
+		AppliedDeploymentIDList: []string{},
+		FailedDeploymentList:    []ApplyProjectFailure{},
 	}
 
 	deploymentList, err := applyService.DeploymentRepo.FindAllByProjectID(ctx, projectID) // project 配下の全 deployment を取得する
@@ -232,7 +234,8 @@ func (applyService *ApplyService) ApplyProject(ctx context.Context, userID strin
 			})
 			continue
 		}
-		result.AppliedDeploymentCount++ // apply 成功件数をカウントする
+		result.AppliedDeploymentCount++                                                          // apply 成功件数をカウントする
+		result.AppliedDeploymentIDList = append(result.AppliedDeploymentIDList, deploymentData.ID) // apply 成功した deployment ID を記録する（完了待機のポーリング対象）
 	}
 
 	ingressRouteList, err := applyService.IngressRouteRepo.FindAllByProjectID(ctx, projectID) // 全 IngressRoute を取得する

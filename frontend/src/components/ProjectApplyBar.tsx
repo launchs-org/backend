@@ -4,6 +4,7 @@ interface ProjectApplyBarProps {
   pendingDeploymentCount: number // pending中のDeployment件数
   pendingIngressRouteCount: number // pending中のIngressRoute件数
   applying: boolean // 一括Apply実行中フラグ
+  progress: { done: number; total: number } | null // 完了待機の進捗（完了件数/対象件数）
   onApply: () => void // Applyボタン押下時のハンドラー
   onShowDetails: () => void // Detailsボタン押下時のハンドラー
 }
@@ -13,6 +14,7 @@ export function ProjectApplyBar({
   pendingDeploymentCount,
   pendingIngressRouteCount,
   applying,
+  progress,
   onApply,
   onShowDetails,
 }: ProjectApplyBarProps) {
@@ -22,11 +24,12 @@ export function ProjectApplyBar({
     <div className="fixed top-16 left-1/2 -translate-x-1/2 z-[60] animate-in fade-in slide-in-from-top-4 duration-300">
       <div className="flex items-center gap-3 rounded-2xl border border-[#00C2D1]/30 bg-white/95 backdrop-blur-md px-5 py-3 shadow-2xl shadow-cyan-900/10">
         <span className="text-sm font-medium text-[#00C2D1]">
-          {totalChanges}件の変更を適用
+          {progress ? `適用完了を待機中... (${progress.done}/${progress.total})` : `${totalChanges}件の変更を適用`}
         </span>
         <button
           onClick={onShowDetails}
-          className="text-sm text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition-colors"
+          disabled={applying}
+          className="text-sm text-gray-600 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition-colors disabled:opacity-50"
         >
           詳細
         </button>

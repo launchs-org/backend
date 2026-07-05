@@ -365,6 +365,9 @@ func TestApplyService_ApplyProject_pendingのあるDeploymentのみapplyされ�
 	if len(appliedDeploymentIDList) != 1 || appliedDeploymentIDList[0] != expectedWorkflowID {
 		t.Errorf("期待する apply 対象 WorkflowID: [%s], 実際: %v", expectedWorkflowID, appliedDeploymentIDList)
 	}
+	if len(result.AppliedDeploymentIDList) != 1 || result.AppliedDeploymentIDList[0] != pendingDeploymentData.ID { // 完了待機のポーリング対象として deployment ID が返ることを確認する
+		t.Errorf("期待する AppliedDeploymentIDList: [%s], 実際: %v", pendingDeploymentData.ID, result.AppliedDeploymentIDList)
+	}
 }
 
 // TestApplyService_ApplyProject_一部Deploymentが失敗しても他は継続する は一部の Deployment の apply が失敗しても他の Deployment・IngressRoute の apply が継続することを確認する
