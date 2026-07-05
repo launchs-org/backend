@@ -141,7 +141,8 @@ func (ingressRouteHandler *IngressRouteHandler) ApplyProject(echoCtx echo.Contex
 	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
 	projectID := echoCtx.Param("id")         // パスパラメータから project ID を取得する
 
-	if err := ingressRouteHandler.applyService.ApplyProject(echoCtx.Request().Context(), userID, projectID); err != nil { // サービスを呼び出して IngressRoute を apply する
+	applyResult, err := ingressRouteHandler.applyService.ApplyProject(echoCtx.Request().Context(), userID, projectID) // サービスを呼び出して Deployment・IngressRoute を一括 apply する
+	if err != nil {                                                                                                    // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
 			logger.PrintHandlerError("IngressRouteHandler", "ApplyProject", echoCtx.Request().URL.Path, http.StatusForbidden, err)
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{"error": "アクセスが禁止されています"})
@@ -153,7 +154,28 @@ func (ingressRouteHandler *IngressRouteHandler) ApplyProject(echoCtx echo.Contex
 		logger.PrintHandlerError("IngressRouteHandler", "ApplyProject", echoCtx.Request().URL.Path, http.StatusInternalServerError, err)
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
-	return echoCtx.NoContent(http.StatusNoContent) // 204 No Content を返す
+	return echoCtx.JSON(http.StatusOK, applyResult) // 一括 apply の結果を返す
+}
+
+// GetProjectPendingSummary は GET /projects/:id/pending-summary のハンドラー
+func (ingressRouteHandler *IngressRouteHandler) GetProjectPendingSummary(echoCtx echo.Context) error {
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
+	projectID := echoCtx.Param("id")         // パスパラメータから project ID を取得する
+
+	summary, err := ingressRouteHandler.applyService.GetProjectPendingSummary(echoCtx.Request().Context(), userID, projectID) // サービスを呼び出して pending 件数を集計する
+	if err != nil {                                                                                                             // エラーが発生した場合
+		if errors.Is(err, service.ErrForbidden) { // 所有者でない場合は 403 を返す
+			logger.PrintHandlerError("IngressRouteHandler", "GetProjectPendingSummary", echoCtx.Request().URL.Path, http.StatusForbidden, err)
+			return echoCtx.JSON(http.StatusForbidden, map[string]string{"error": "アクセスが禁止されています"})
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) { // project が存在しない場合は 404 を返す
+			logger.PrintHandlerError("IngressRouteHandler", "GetProjectPendingSummary", echoCtx.Request().URL.Path, http.StatusNotFound, err)
+			return echoCtx.JSON(http.StatusNotFound, map[string]string{"error": "リソースが見つかりません"})
+		}
+		logger.PrintHandlerError("IngressRouteHandler", "GetProjectPendingSummary", echoCtx.Request().URL.Path, http.StatusInternalServerError, err)
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{"error": "内部サーバーエラー"})
+	}
+	return echoCtx.JSON(http.StatusOK, summary) // pending 集計結果を返す
 }
 
 // ListPathRules は GET /ingress-routes/:id/path-rules のハンドラー

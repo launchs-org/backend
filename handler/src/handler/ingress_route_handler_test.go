@@ -55,14 +55,27 @@ func (mock *mockIngressRouteService) DeletePathRule(ctx context.Context, userID 
 }
 
 // mockApplyServiceForIngress は ApplyServiceInterface のテスト用スタブ実装
-type mockApplyServiceForIngress struct{}
+type mockApplyServiceForIngress struct {
+	applyProjectFunc             func(ctx context.Context, userID string, projectID string) (*service.ApplyProjectResult, error)
+	getProjectPendingSummaryFunc func(ctx context.Context, userID string, projectID string) (*service.ProjectPendingSummary, error)
+}
 
 func (mock *mockApplyServiceForIngress) Apply(ctx context.Context, userID string, deploymentID string) (*service.ApplyResult, error) {
 	return &service.ApplyResult{}, nil // テストでは使用しないためデフォルト実装を返す
 }
 
-func (mock *mockApplyServiceForIngress) ApplyProject(ctx context.Context, userID string, projectID string) error {
-	return nil // テストでは使用しないためデフォルト実装を返す
+func (mock *mockApplyServiceForIngress) ApplyProject(ctx context.Context, userID string, projectID string) (*service.ApplyProjectResult, error) {
+	if mock.applyProjectFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.applyProjectFunc(ctx, userID, projectID)
+	}
+	return &service.ApplyProjectResult{}, nil // デフォルトは空の結果を返す
+}
+
+func (mock *mockApplyServiceForIngress) GetProjectPendingSummary(ctx context.Context, userID string, projectID string) (*service.ProjectPendingSummary, error) {
+	if mock.getProjectPendingSummaryFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.getProjectPendingSummaryFunc(ctx, userID, projectID)
+	}
+	return &service.ProjectPendingSummary{}, nil // デフォルトは空の結果を返す
 }
 
 func (mock *mockApplyServiceForIngress) ListApplyHistories(ctx context.Context, userID string, deploymentID string) ([]*models.ApplyHistory, error) {
@@ -386,5 +399,119 @@ func TestIngressRouteHandler_CreatePathRule_サービスエラーで500になる
 	}
 	if responseRecorder.Code != http.StatusInternalServerError { // 500 が返ることを確認する
 		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusInternalServerError, responseRecorder.Code)
+	}
+}
+
+// TestIngressRouteHandler_ApplyProject_正常に結果が返る は POST /projects/:id/apply で 200 と ApplyProjectResult が返ることを確認する
+func TestIngressRouteHandler_ApplyProject_正常に結果が返る(t *testing.T) {
+	mockApplySvc := &mockApplyServiceForIngress{
+		applyProjectFunc: func(ctx context.Context, userID string, projectID string) (*service.ApplyProjectResult, error) {
+			return &service.ApplyProjectResult{ // 一括 apply の結果を返す
+				AppliedDeploymentCount: 2,
+				FailedDeploymentList:   []service.ApplyProjectFailure{{DeploymentID: "deployment-id-1", Error: "quota exceeded"}},
+				IngressRouteApplied:    true,
+			}, nil
+		},
+	}
+
+	ingressRouteHandler := NewIngressRouteHandler(&mockIngressRouteService{}, mockApplySvc) // ハンドラーを生成する
+	echoCtx, responseRecorder := setupIngressRouteEchoContext(
+		http.MethodPost, "/api/v1/projects/project-id-1/apply", "", map[string]string{"id": "project-id-1"},
+	) // テスト用コンテキストを生成する
+
+	if err := ingressRouteHandler.ApplyProject(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
+	}
+	if responseRecorder.Code != http.StatusOK { // 200 が返ることを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusOK, responseRecorder.Code)
+	}
+
+	var actualResult service.ApplyProjectResult
+	if err := json.NewDecoder(responseRecorder.Body).Decode(&actualResult); err != nil { // レスポンスをデコードする
+		t.Fatalf("レスポンスのデコードに失敗しました: %v", err)
+	}
+	if actualResult.AppliedDeploymentCount != 2 { // 成功件数が正しいことを確認する
+		t.Errorf("期待する AppliedDeploymentCount: 2, 実際: %d", actualResult.AppliedDeploymentCount)
+	}
+	if len(actualResult.FailedDeploymentList) != 1 { // 失敗件数が正しいことを確認する
+		t.Errorf("期待する FailedDeploymentList件数: 1, 実際: %d", len(actualResult.FailedDeploymentList))
+	}
+}
+
+// TestIngressRouteHandler_ApplyProject_権限がない場合は403になる は 403 が返ることを確認する
+func TestIngressRouteHandler_ApplyProject_権限がない場合は403になる(t *testing.T) {
+	mockApplySvc := &mockApplyServiceForIngress{
+		applyProjectFunc: func(ctx context.Context, userID string, projectID string) (*service.ApplyProjectResult, error) {
+			return nil, service.ErrForbidden // 権限なしエラーを返す
+		},
+	}
+
+	ingressRouteHandler := NewIngressRouteHandler(&mockIngressRouteService{}, mockApplySvc) // ハンドラーを生成する
+	echoCtx, responseRecorder := setupIngressRouteEchoContext(
+		http.MethodPost, "/api/v1/projects/project-id-1/apply", "", map[string]string{"id": "project-id-1"},
+	) // テスト用コンテキストを生成する
+
+	if err := ingressRouteHandler.ApplyProject(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
+	}
+	if responseRecorder.Code != http.StatusForbidden { // 403 が返ることを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusForbidden, responseRecorder.Code)
+	}
+}
+
+// TestIngressRouteHandler_GetProjectPendingSummary_正常に集計結果が返る は GET /projects/:id/pending-summary で 200 と集計結果が返ることを確認する
+func TestIngressRouteHandler_GetProjectPendingSummary_正常に集計結果が返る(t *testing.T) {
+	mockApplySvc := &mockApplyServiceForIngress{
+		getProjectPendingSummaryFunc: func(ctx context.Context, userID string, projectID string) (*service.ProjectPendingSummary, error) {
+			return &service.ProjectPendingSummary{ // pending 集計結果を返す
+				HasPending:               true,
+				PendingDeploymentCount:   3,
+				PendingIngressRouteCount: 1,
+			}, nil
+		},
+	}
+
+	ingressRouteHandler := NewIngressRouteHandler(&mockIngressRouteService{}, mockApplySvc) // ハンドラーを生成する
+	echoCtx, responseRecorder := setupIngressRouteEchoContext(
+		http.MethodGet, "/api/v1/projects/project-id-1/pending-summary", "", map[string]string{"id": "project-id-1"},
+	) // テスト用コンテキストを生成する
+
+	if err := ingressRouteHandler.GetProjectPendingSummary(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
+	}
+	if responseRecorder.Code != http.StatusOK { // 200 が返ることを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusOK, responseRecorder.Code)
+	}
+
+	var actualSummary service.ProjectPendingSummary
+	if err := json.NewDecoder(responseRecorder.Body).Decode(&actualSummary); err != nil { // レスポンスをデコードする
+		t.Fatalf("レスポンスのデコードに失敗しました: %v", err)
+	}
+	if !actualSummary.HasPending { // HasPending が正しいことを確認する
+		t.Error("HasPending が true であるべきですが、false でした")
+	}
+	if actualSummary.PendingDeploymentCount != 3 { // PendingDeploymentCount が正しいことを確認する
+		t.Errorf("期待する PendingDeploymentCount: 3, 実際: %d", actualSummary.PendingDeploymentCount)
+	}
+}
+
+// TestIngressRouteHandler_GetProjectPendingSummary_権限がない場合は403になる は 403 が返ることを確認する
+func TestIngressRouteHandler_GetProjectPendingSummary_権限がない場合は403になる(t *testing.T) {
+	mockApplySvc := &mockApplyServiceForIngress{
+		getProjectPendingSummaryFunc: func(ctx context.Context, userID string, projectID string) (*service.ProjectPendingSummary, error) {
+			return nil, service.ErrForbidden // 権限なしエラーを返す
+		},
+	}
+
+	ingressRouteHandler := NewIngressRouteHandler(&mockIngressRouteService{}, mockApplySvc) // ハンドラーを生成する
+	echoCtx, responseRecorder := setupIngressRouteEchoContext(
+		http.MethodGet, "/api/v1/projects/project-id-1/pending-summary", "", map[string]string{"id": "project-id-1"},
+	) // テスト用コンテキストを生成する
+
+	if err := ingressRouteHandler.GetProjectPendingSummary(echoCtx); err != nil { // ハンドラーを実行する
+		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
+	}
+	if responseRecorder.Code != http.StatusForbidden { // 403 が返ることを確認する
+		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusForbidden, responseRecorder.Code)
 	}
 }

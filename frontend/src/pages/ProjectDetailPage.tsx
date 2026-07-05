@@ -21,10 +21,11 @@ import { InternetNode } from '@/components/flow/InternetNode'
 import { VolumeNode } from '@/components/flow/VolumeNode'
 import { EnvVarNode } from '@/components/flow/EnvVarNode'
 import { get, post, put, del, patch } from '@/lib/api'
-import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar, VolumeMount, EnvVarMount, Image, ProjectQuota } from '@/lib/types'
-import { SIDEBAR_INITIAL_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, FLOW_ROW_HEIGHT } from '@/lib/config'
+import type { Project, Deployment, K8sService, IngressRoute, PathRule, Volume, EnvVar, VolumeMount, EnvVarMount, Image, ProjectQuota, ProjectPendingSummary, ApplyProjectResult } from '@/lib/types'
+import { SIDEBAR_INITIAL_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH, FLOW_ROW_HEIGHT, APPLY_PROJECT_POLL_INTERVAL, APPLY_PROJECT_POLL_TIMEOUT } from '@/lib/config'
 import { toast } from 'sonner' // トースト通知をインポートする
 import { ConfirmDialog } from '@/components/ui/confirm-dialog' // 確認ダイアログをインポートする
+import { ProjectApplyBar } from '@/components/ProjectApplyBar' // 一括Applyフローティングバーをインポートする
 import { useTutorialContext } from '@/tutorial/TutorialContext' // チュートリアル Context をインポートする
 
 const NODE_TYPES = {
@@ -90,6 +91,10 @@ export function ProjectDetailPage() {
   const [envVarList, setEnvVarList] = useState<EnvVar[]>([]) // プロジェクトの環境変数一覧を管理する
   const [deletingEnvVarId, setDeletingEnvVarId] = useState<string | null>(null) // 削除中の環境変数ID
   const [deleteProjectConfirmOpen, setDeleteProjectConfirmOpen] = useState(false) // プロジェクト削除確認ダイアログの表示フラグ
+  const [pendingSummary, setPendingSummary] = useState<ProjectPendingSummary | null>(null) // プロジェクト配下のpending集計を管理する
+  const [applyProjectDetailsOpen, setApplyProjectDetailsOpen] = useState(false) // 一括Apply詳細ダイアログの表示フラグ
+  const [applyProjectProgress, setApplyProjectProgress] = useState<{ done: number; total: number } | null>(null) // 一括Apply完了待機の進捗（完了件数/対象件数）
+  const [applyingProject, setApplyingProject] = useState(false) // 一括Apply実行中フラグ
   const [deleteVolumeConfirmId, setDeleteVolumeConfirmId] = useState<string | null>(null) // ボリューム削除確認ダイアログ対象ID
   const [deleteEnvVarConfirmId, setDeleteEnvVarConfirmId] = useState<string | null>(null) // 環境変数削除確認ダイアログ対象ID
   const [createIngressDialogOpen, setCreateIngressDialogOpen] = useState(false) // IngressRoute作成ダイアログの表示フラグ
@@ -370,6 +375,71 @@ export function ProjectDetailPage() {
 
     return () => clearInterval(intervalId) // クリーンアップ
   }, [fetchData])
+
+  const fetchPendingSummary = useCallback(async () => {
+    if (!projectId) return
+    const summary = await get<ProjectPendingSummary>(`/projects/${projectId}/pending-summary`).catch(() => null) // pending集計を取得する
+    setPendingSummary(summary) // pending集計を更新する
+  }, [projectId])
+
+  useEffect(() => {
+    void fetchPendingSummary() // 初回pending集計取得
+
+    const intervalId = setInterval(() => {
+      void fetchPendingSummary() // 10秒ごとにポーリングする
+    }, 10_000)
+
+    return () => clearInterval(intervalId) // クリーンアップ
+  }, [fetchPendingSummary])
+
+  // waitForDeploymentsCompletion は対象 Deployment 一覧の app_status が deploying でなくなるまでポーリングして待機する
+  const waitForDeploymentsCompletion = async (deploymentIdList: string[]) => {
+    const pendingIdSet = new Set(deploymentIdList) // 未完了の deployment ID を管理する
+    setApplyProjectProgress({ done: 0, total: deploymentIdList.length }) // 進捗を初期化する
+    const startedAt = Date.now()
+
+    while (pendingIdSet.size > 0) {
+      if (Date.now() - startedAt > APPLY_PROJECT_POLL_TIMEOUT) { // タイムアウトした場合は待機を打ち切る
+        toast.warning('一部のDeploymentの完了確認がタイムアウトしました。状況は画面上で確認してください')
+        break
+      }
+      await new Promise(resolve => setTimeout(resolve, APPLY_PROJECT_POLL_INTERVAL)) // 一定間隔で待機する
+
+      await Promise.all(
+        Array.from(pendingIdSet).map(async (deploymentId) => {
+          const deploymentData = await get<Deployment>(`/deployments/${deploymentId}`).catch(() => null) // 最新のDeployment情報を取得する
+          if (deploymentData && deploymentData.app_status !== 'deploying') { // deploying でなくなったら完了扱いにする
+            pendingIdSet.delete(deploymentId)
+          }
+        })
+      )
+      setApplyProjectProgress({ done: deploymentIdList.length - pendingIdSet.size, total: deploymentIdList.length }) // 進捗を更新する
+    }
+  }
+
+  const handleApplyProject = async () => {
+    if (!projectId) return
+    setApplyingProject(true) // 一括Apply実行中フラグを立てる
+    try {
+      const result = await post<ApplyProjectResult>(`/projects/${projectId}/apply`) // プロジェクト配下を一括applyする
+      if (result && result.applied_deployment_id_list.length > 0) { // apply起動が成功したDeploymentの完了を待つ
+        await waitForDeploymentsCompletion(result.applied_deployment_id_list)
+      }
+      if (result && result.failed_deployment_list.length > 0) { // 一部失敗した場合は警告を表示する
+        toast.warning(`${result.applied_deployment_count}件完了、${result.failed_deployment_list.length}件失敗しました`)
+      } else {
+        toast.success('プロジェクトの変更を一括適用しました')
+      }
+      await fetchData() // データを再取得する
+      await fetchPendingSummary() // pending集計を再取得する
+    } catch (applyError) {
+      console.error(applyError)
+      toast.error(applyError instanceof Error ? applyError.message : 'Apply に失敗しました') // エラートーストを表示する
+    } finally {
+      setApplyingProject(false) // 一括Apply実行中フラグを下げる
+      setApplyProjectProgress(null) // 進捗表示をクリアする
+    }
+  }
 
   // selectedEnvVarId が変わったらハイライト状態でグラフを再描画する
   useEffect(() => {
@@ -927,6 +997,33 @@ export function ProjectDetailPage() {
       </div>
 
     </Layout>
+
+    {/* プロジェクト一括Apply詳細ダイアログ */}
+    <ConfirmDialog
+      open={applyProjectDetailsOpen}
+      onOpenChange={setApplyProjectDetailsOpen}
+      title="保留中の変更"
+      description={`Deployment ${pendingSummary?.pending_deployment_count ?? 0}件、IngressRoute ${pendingSummary?.pending_ingress_route_count ?? 0}件の変更が保留中です。\nApply を実行すると Kubernetes に反映され、実行中のアプリケーションに影響する場合があります。`}
+      confirmLabel="Deploy"
+      variant="default"
+      loading={applyingProject}
+      onConfirm={async () => {
+        await handleApplyProject() // プロジェクトを一括applyする
+        setApplyProjectDetailsOpen(false) // ダイアログを閉じる
+      }}
+    />
+
+    {/* プロジェクト一括Applyフローティングバー */}
+    {(pendingSummary?.has_pending || applyingProject) && ( // pendingが1件以上ある場合、またはApply完了待機中は表示する
+      <ProjectApplyBar
+        pendingDeploymentCount={pendingSummary?.pending_deployment_count ?? 0}
+        pendingIngressRouteCount={pendingSummary?.pending_ingress_route_count ?? 0}
+        applying={applyingProject}
+        progress={applyProjectProgress}
+        onApply={handleApplyProject}
+        onShowDetails={() => setApplyProjectDetailsOpen(true)}
+      />
+    )}
 
     {/* プロジェクト削除確認ダイアログ */}
     <ConfirmDialog
