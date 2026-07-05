@@ -2,11 +2,12 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"handler/models"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // TestCliTokenRepository_Create_正常に作成される は Create でCLIトークンが作成できることを確認する
@@ -60,8 +61,8 @@ func TestCliTokenRepository_FindByID_正常に取得される(t *testing.T) {
 	}
 }
 
-// TestCliTokenRepository_Revoke_失効日時が更新される は Revoke で revoked_at が更新されることを確認する
-func TestCliTokenRepository_Revoke_失効日時が更新される(t *testing.T) {
+// TestCliTokenRepository_Delete_レコードが削除される は Delete でレコードが物理削除されることを確認する
+func TestCliTokenRepository_Delete_レコードが削除される(t *testing.T) {
 	db := setupTestDB(t) // テスト用 DB を準備する
 	repo := NewCliTokenRepository(db)
 
@@ -76,19 +77,13 @@ func TestCliTokenRepository_Revoke_失効日時が更新される(t *testing.T) 
 	}
 	t.Cleanup(func() { db.Unscoped().Delete(cliTokenData) })
 
-	if err := repo.Revoke(context.Background(), jti); err != nil {
-		t.Fatalf("Revoke がエラーを返しました: %v", err)
+	if err := repo.Delete(context.Background(), jti); err != nil {
+		t.Fatalf("Delete がエラーを返しました: %v", err)
 	}
 
-	fetchedToken, err := repo.FindByID(context.Background(), jti)
-	if err != nil {
-		t.Fatalf("失効後のCLIトークン取得に失敗しました: %v", err)
-	}
-	if fetchedToken.RevokedAt == nil { // revoked_at が設定されていることを確認する
-		t.Errorf("RevokedAt が nil です。失効処理が反映されていません")
-	}
-	if fetchedToken.RevokedAt != nil && fetchedToken.RevokedAt.After(time.Now()) { // 未来時刻でないことを確認する
-		t.Errorf("RevokedAt が未来の時刻になっています: %v", fetchedToken.RevokedAt)
+	_, err := repo.FindByID(context.Background(), jti)
+	if !errors.Is(err, gorm.ErrRecordNotFound) { // 削除後はレコードが見つからないことを確認する
+		t.Errorf("期待するエラー: gorm.ErrRecordNotFound, 実際のエラー: %v", err)
 	}
 }
 

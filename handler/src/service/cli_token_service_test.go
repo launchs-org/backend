@@ -17,7 +17,7 @@ type mockCliTokenRepository struct {
 	createFunc          func(ctx context.Context, cliTokenData *models.CliToken) error
 	findByIDFunc        func(ctx context.Context, cliTokenID string) (*models.CliToken, error)
 	findAllByUserIDFunc func(ctx context.Context, userID string) ([]*models.CliToken, error)
-	revokeFunc          func(ctx context.Context, cliTokenID string) error
+	deleteFunc          func(ctx context.Context, cliTokenID string) error
 }
 
 func (mock *mockCliTokenRepository) Create(ctx context.Context, cliTokenData *models.CliToken) error {
@@ -41,9 +41,9 @@ func (mock *mockCliTokenRepository) FindAllByUserID(ctx context.Context, userID 
 	return []*models.CliToken{}, nil
 }
 
-func (mock *mockCliTokenRepository) Revoke(ctx context.Context, cliTokenID string) error {
-	if mock.revokeFunc != nil {
-		return mock.revokeFunc(ctx, cliTokenID)
+func (mock *mockCliTokenRepository) Delete(ctx context.Context, cliTokenID string) error {
+	if mock.deleteFunc != nil {
+		return mock.deleteFunc(ctx, cliTokenID)
 	}
 	return nil
 }
@@ -103,30 +103,30 @@ func TestCliTokenService_IssueToken_無期限指定(t *testing.T) {
 	}
 }
 
-// TestCliTokenService_RevokeToken_所有者本人は失効できる は RevokeToken が所有者本人からの失効を許可することを確認する
-func TestCliTokenService_RevokeToken_所有者本人は失効できる(t *testing.T) {
-	revoked := false
+// TestCliTokenService_DeleteToken_所有者本人は削除できる は DeleteToken が所有者本人からの削除を許可することを確認する
+func TestCliTokenService_DeleteToken_所有者本人は削除できる(t *testing.T) {
+	deleted := false
 	mockRepo := &mockCliTokenRepository{
 		findByIDFunc: func(ctx context.Context, cliTokenID string) (*models.CliToken, error) {
 			return &models.CliToken{ID: cliTokenID, UserID: "user-1"}, nil
 		},
-		revokeFunc: func(ctx context.Context, cliTokenID string) error {
-			revoked = true
+		deleteFunc: func(ctx context.Context, cliTokenID string) error {
+			deleted = true
 			return nil
 		},
 	}
 	svc := NewCliTokenService(mockRepo)
 
-	if err := svc.RevokeToken(context.Background(), "user-1", "token-1"); err != nil {
-		t.Fatalf("RevokeToken がエラーを返しました: %v", err)
+	if err := svc.DeleteToken(context.Background(), "user-1", "token-1"); err != nil {
+		t.Fatalf("DeleteToken がエラーを返しました: %v", err)
 	}
-	if !revoked { // Revoke が呼ばれていることを確認する
-		t.Errorf("CliTokenRepository.Revoke が呼ばれていません")
+	if !deleted { // Delete が呼ばれていることを確認する
+		t.Errorf("CliTokenRepository.Delete が呼ばれていません")
 	}
 }
 
-// TestCliTokenService_RevokeToken_他ユーザーは失効できない は RevokeToken が所有者以外からの失効を拒否することを確認する
-func TestCliTokenService_RevokeToken_他ユーザーは失効できない(t *testing.T) {
+// TestCliTokenService_DeleteToken_他ユーザーは削除できない は DeleteToken が所有者以外からの削除を拒否することを確認する
+func TestCliTokenService_DeleteToken_他ユーザーは削除できない(t *testing.T) {
 	mockRepo := &mockCliTokenRepository{
 		findByIDFunc: func(ctx context.Context, cliTokenID string) (*models.CliToken, error) {
 			return &models.CliToken{ID: cliTokenID, UserID: "owner-user"}, nil
@@ -134,7 +134,7 @@ func TestCliTokenService_RevokeToken_他ユーザーは失効できない(t *tes
 	}
 	svc := NewCliTokenService(mockRepo)
 
-	err := svc.RevokeToken(context.Background(), "other-user", "token-1")
+	err := svc.DeleteToken(context.Background(), "other-user", "token-1")
 	if err != ErrForbidden { // ErrForbidden が返ることを確認する
 		t.Errorf("期待するエラー: ErrForbidden, 実際のエラー: %v", err)
 	}

@@ -60,13 +60,11 @@ func requireCliAuth(ctx echo.Context, next echo.HandlerFunc, token string) error
 		return ctx.JSON(http.StatusUnauthorized, echo.Map{"error": "unauthorized"})
 	}
 
-	// DBでCLIトークンの有効性（失効・期限）を照合する
+	// DBでCLIトークンの存在（失効されていないか）・有効期限を照合する
+	// 失効済みトークンはレコードごと削除されるため、FindByIDのエラーがそのまま失効判定になる
 	cliTokenRecord, err := cliTokenRepo.FindByID(ctx.Request().Context(), claim.ID)
 	if err != nil {
 		logger.PrintErr(err)
-		return ctx.JSON(http.StatusUnauthorized, echo.Map{"error": "unauthorized"})
-	}
-	if cliTokenRecord.RevokedAt != nil {
 		return ctx.JSON(http.StatusUnauthorized, echo.Map{"error": "unauthorized"})
 	}
 	if cliTokenRecord.ExpiresAt != nil && cliTokenRecord.ExpiresAt.Before(time.Now()) {

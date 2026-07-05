@@ -121,8 +121,8 @@ function CliTokenSection() {
   const [newExpiresInDays, setNewExpiresInDays] = useState('') // 新規トークンの有効期限（日数、空欄は無期限）
   const [issuedToken, setIssuedToken] = useState<CreateCliTokenResponse | null>(null) // 発行直後の平文トークン
   const [copied, setCopied] = useState(false) // 発行直後トークンのコピー完了フィードバック
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null) // 失効確認ダイアログ対象ID
-  const [revokingId, setRevokingId] = useState<string | null>(null) // 失効処理中ID
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null) // 削除確認ダイアログ対象ID
+  const [deletingId, setDeletingId] = useState<string | null>(null) // 削除処理中ID
 
   const fetchTokenList = () => {
     setLoading(true)
@@ -164,21 +164,20 @@ function CliTokenSection() {
     setTimeout(() => setCopied(false), 1500) // 1.5秒後にフィードバックをリセットする
   }
 
-  const handleRevoke = async (cliTokenId: string) => {
-    setRevokingId(cliTokenId) // 失効処理中IDを設定する
+  const handleDelete = async (cliTokenId: string) => {
+    setDeletingId(cliTokenId) // 削除処理中IDを設定する
     try {
-      await del(`/cli-tokens/${cliTokenId}`) // トークンを失効させる
-      fetchTokenList() // 一覧を再取得する
-      toast.success('CLIトークンを失効しました') // 成功トーストを表示する
-    } catch (revokeError) {
-      console.error(revokeError)
-      toast.error(revokeError instanceof Error ? revokeError.message : 'CLIトークンの失効に失敗しました') // エラートーストを表示する
+      await del(`/cli-tokens/${cliTokenId}`) // トークンを削除する（削除により失効させる）
+      fetchTokenList() // 一覧を再取得する（削除済みトークンは一覧から自然に消える）
+      toast.success('CLIトークンを削除しました') // 成功トーストを表示する
+    } catch (deleteError) {
+      console.error(deleteError)
+      toast.error(deleteError instanceof Error ? deleteError.message : 'CLIトークンの削除に失敗しました') // エラートーストを表示する
     } finally {
-      setRevokingId(null) // 失効処理中フラグを下げる
+      setDeletingId(null) // 削除処理中フラグを下げる
     }
   }
 
-  const isRevoked = (cliTokenData: CliToken) => cliTokenData.revoked_at !== null // 失効済みかどうかを判定する
   const isExpired = (cliTokenData: CliToken) =>
     cliTokenData.expires_at !== null && new Date(cliTokenData.expires_at) < new Date() // 期限切れかどうかを判定する
 
@@ -235,10 +234,7 @@ function CliTokenSection() {
               <div className="min-w-0 flex-1 space-y-0.5">
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm font-medium text-[#111827] truncate">{cliTokenData.name}</span>
-                  {isRevoked(cliTokenData) && (
-                    <span className="text-[10px] bg-red-50 text-red-500 px-1.5 py-0.5 rounded shrink-0">失効済み</span>
-                  )}
-                  {!isRevoked(cliTokenData) && isExpired(cliTokenData) && (
+                  {isExpired(cliTokenData) && (
                     <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded shrink-0">期限切れ</span>
                   )}
                 </div>
@@ -248,16 +244,14 @@ function CliTokenSection() {
                     : '無期限'}
                 </p>
               </div>
-              {!isRevoked(cliTokenData) && (
-                <button
-                  onClick={() => setDeleteConfirmId(cliTokenData.id)}
-                  disabled={revokingId === cliTokenData.id}
-                  className="p-1.5 rounded text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors disabled:opacity-50 shrink-0"
-                  title="失効"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              )}
+              <button
+                onClick={() => setDeleteConfirmId(cliTokenData.id)}
+                disabled={deletingId === cliTokenData.id}
+                className="p-1.5 rounded text-gray-300 hover:text-red-400 hover:bg-red-50 transition-colors disabled:opacity-50 shrink-0"
+                title="削除"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
             </div>
           ))
         )}
@@ -292,18 +286,18 @@ function CliTokenSection() {
         </div>
       </div>
 
-      {/* 失効確認ダイアログ */}
+      {/* 削除確認ダイアログ */}
       <ConfirmDialog
         open={deleteConfirmId !== null}
         onOpenChange={open => { if (!open) setDeleteConfirmId(null) }}
-        title="CLIトークンを失効"
-        description="このCLIトークンを失効しますか？失効後はこのトークンでの認証ができなくなります。この操作は取り消せません。"
-        confirmLabel="失効"
+        title="CLIトークンを削除"
+        description="このCLIトークンを削除しますか？削除後はこのトークンでの認証ができなくなります。この操作は取り消せません。"
+        confirmLabel="削除"
         variant="destructive"
         onConfirm={async () => {
-          const targetId = deleteConfirmId // 失効対象IDを保持する
+          const targetId = deleteConfirmId // 削除対象IDを保持する
           setDeleteConfirmId(null) // ダイアログを閉じる
-          if (targetId) await handleRevoke(targetId) // トークンを失効させる
+          if (targetId) await handleDelete(targetId) // トークンを削除する
         }}
       />
     </div>

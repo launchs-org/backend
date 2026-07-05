@@ -349,7 +349,6 @@ export type CliToken = {
   user_id: string
   name: string
   expires_at: string | null
-  revoked_at: string | null
   created_at: string
 }
 

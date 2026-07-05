@@ -103,35 +103,35 @@ func (cliTokenHandler *CliTokenHandler) ListCliTokens(echoCtx echo.Context) erro
 	return echoCtx.JSON(http.StatusOK, cliTokenList) // 一覧を返す（平文トークンは含まれない）
 }
 
-// RevokeCliToken は DELETE /api/v1/cli-tokens/:id のハンドラー
-func (cliTokenHandler *CliTokenHandler) RevokeCliToken(echoCtx echo.Context) error {
+// DeleteCliToken は DELETE /api/v1/cli-tokens/:id のハンドラー（削除により失効とする）
+func (cliTokenHandler *CliTokenHandler) DeleteCliToken(echoCtx echo.Context) error {
 	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
 	cliTokenID := echoCtx.Param("id")        // パスパラメータから CLIトークン ID を取得する
 
-	err := cliTokenHandler.cliTokenService.RevokeToken( // サービスを呼び出して失効させる
+	err := cliTokenHandler.cliTokenService.DeleteToken( // サービスを呼び出して削除する
 		echoCtx.Request().Context(),
 		userID,
 		cliTokenID,
 	)
 	if err != nil { // エラーが発生した場合
 		if errors.Is(err, service.ErrForbidden) { // 認可エラーの場合
-			logger.PrintHandlerError("CliTokenHandler", "RevokeCliToken", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			logger.PrintHandlerError("CliTokenHandler", "DeleteCliToken", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusForbidden, map[string]string{
 				"error": "アクセスが拒否されました",
 			})
 		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが存在しない場合
-			logger.PrintHandlerError("CliTokenHandler", "RevokeCliToken", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
+			logger.PrintHandlerError("CliTokenHandler", "DeleteCliToken", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
 				"error": "リソースが見つかりません",
 			})
 		}
-		logger.PrintHandlerError("CliTokenHandler", "RevokeCliToken", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
+		logger.PrintHandlerError("CliTokenHandler", "DeleteCliToken", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
 		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
 			"error": "内部サーバーエラー",
 		})
 	}
 	return echoCtx.JSON(http.StatusOK, map[string]string{
-		"message": "失効しました",
+		"message": "削除しました",
 	})
 }

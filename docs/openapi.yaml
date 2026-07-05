@@ -1310,7 +1310,9 @@ components:
     # ─── CliToken ────────────────────────────────────────────────────────────
     CliToken:
       type: object
-      description: CLIトークンのメタ情報（平文トークンは含まれない）
+      description: |
+        CLIトークンのメタ情報（平文トークンは含まれない）。
+        失効はレコードの削除によって行うため、一覧には有効なトークンのみが含まれる。
       properties:
         id:
           type: string
@@ -1326,11 +1328,6 @@ components:
           format: date-time
           nullable: true
           description: 有効期限（nullの場合は無期限）
-        revoked_at:
-          type: string
-          format: date-time
-          nullable: true
-          description: 失効日時（nullの場合は有効）
         created_at:
           type: string
           format: date-time
@@ -4355,20 +4352,20 @@ paths:
         description: CLIトークン ID（jti）
 
     delete:
-      summary: CLIトークン失効
-      description: 指定したCLIトークンを失効させます。以後そのトークンでの認証は拒否されます。
+      summary: CLIトークン削除（失効）
+      description: 指定したCLIトークンを削除します。削除により以後そのトークンでの認証は拒否されます。
       tags: [CliTokens]
       security:
         - jwtAuth: []
       responses:
         "200":
-          description: 失効成功
+          description: 削除成功
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/MessageResponse"
               example:
-                message: "失効しました"
+                message: "削除しました"
         "403":
           description: アクセスが拒否されました
           content:

@@ -14,7 +14,7 @@ import (
 type CliTokenService interface {
 	IssueToken(ctx context.Context, userID string, name string, expiresAt *time.Time) (*models.CliToken, string, error) // CLIトークンを発行する（平文トークンを一度だけ返す）
 	ListTokens(ctx context.Context, userID string) ([]*models.CliToken, error)                                          // ユーザーの発行済みCLIトークン一覧を返す
-	RevokeToken(ctx context.Context, userID string, cliTokenID string) error                                            // CLIトークンを失効させる
+	DeleteToken(ctx context.Context, userID string, cliTokenID string) error                                            // CLIトークンを削除する（削除により失効とする）
 }
 
 // cliTokenServiceImpl は CliTokenService の実装
@@ -56,8 +56,8 @@ func (svc *cliTokenServiceImpl) ListTokens(ctx context.Context, userID string) (
 	return svc.cliTokenRepo.FindAllByUserID(ctx, userID) // リポジトリ経由で一覧を取得する
 }
 
-// RevokeToken は所有者チェックを行った上でCLIトークンを失効させる
-func (svc *cliTokenServiceImpl) RevokeToken(ctx context.Context, userID string, cliTokenID string) error {
+// DeleteToken は所有者チェックを行った上でCLIトークンを削除する（削除により失効とする）
+func (svc *cliTokenServiceImpl) DeleteToken(ctx context.Context, userID string, cliTokenID string) error {
 	cliTokenData, err := svc.cliTokenRepo.FindByID(ctx, cliTokenID) // CLIトークンを取得する
 	if err != nil {
 		return err // 取得エラーを返す
@@ -65,5 +65,5 @@ func (svc *cliTokenServiceImpl) RevokeToken(ctx context.Context, userID string, 
 	if cliTokenData.UserID != userID { // ユーザーIDが一致しない場合はforbiddenを返す
 		return ErrForbidden // アクセス拒否エラーを返す
 	}
-	return svc.cliTokenRepo.Revoke(ctx, cliTokenID) // リポジトリ経由で失効させる
+	return svc.cliTokenRepo.Delete(ctx, cliTokenID) // リポジトリ経由で削除する
 }

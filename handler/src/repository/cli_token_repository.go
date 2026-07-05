@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"handler/models"
-	"time"
 
 	"gorm.io/gorm"
 )
@@ -13,7 +12,7 @@ type CliTokenRepository interface {
 	Create(ctx context.Context, cliTokenData *models.CliToken) error                // CLIトークンを作成する
 	FindByID(ctx context.Context, cliTokenID string) (*models.CliToken, error)      // jtiでCLIトークンを取得する
 	FindAllByUserID(ctx context.Context, userID string) ([]*models.CliToken, error) // ユーザーIDに紐づくCLIトークン一覧を取得する
-	Revoke(ctx context.Context, cliTokenID string) error                            // CLIトークンを失効させる
+	Delete(ctx context.Context, cliTokenID string) error                            // CLIトークンを削除する（物理削除により失効とする）
 }
 
 // cliTokenRepositoryImpl は CliTokenRepository の GORM 実装
@@ -49,11 +48,7 @@ func (repo *cliTokenRepositoryImpl) FindAllByUserID(ctx context.Context, userID 
 	return cliTokenList, nil // CLIトークン一覧を返す
 }
 
-// Revoke は id（jti）に対応する CLIトークンを失効させる
-func (repo *cliTokenRepositoryImpl) Revoke(ctx context.Context, cliTokenID string) error {
-	revokedAt := time.Now() // 失効日時を現在時刻にする
-	return repo.db.WithContext(ctx).
-		Model(&models.CliToken{}).
-		Where("id = ?", cliTokenID).
-		Update("revoked_at", revokedAt).Error // revoked_at を更新する
+// Delete は id（jti）に対応する CLIトークンを削除する
+func (repo *cliTokenRepositoryImpl) Delete(ctx context.Context, cliTokenID string) error {
+	return repo.db.WithContext(ctx).Delete(&models.CliToken{}, "id = ?", cliTokenID).Error // db から削除する
 }

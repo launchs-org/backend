@@ -139,7 +139,7 @@ func New(opts RouterOptions) *echo.Echo {
 	// cli-tokens エンドポイントを登録する（ブラウザJWTでのみ操作可能。CLIトークン自身での発行は拒否する）
 	apiGroup.POST("/cli-tokens", opts.CliTokenHandler.CreateCliToken)       // CLIトークン発行エンドポイント
 	apiGroup.GET("/cli-tokens", opts.CliTokenHandler.ListCliTokens)         // CLIトークン一覧取得エンドポイント
-	apiGroup.DELETE("/cli-tokens/:id", opts.CliTokenHandler.RevokeCliToken) // CLIトークン失効エンドポイント
+	apiGroup.DELETE("/cli-tokens/:id", opts.CliTokenHandler.DeleteCliToken) // CLIトークン削除（失効）エンドポイント
 
 	return router
 }
