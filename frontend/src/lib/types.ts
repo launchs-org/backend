@@ -341,3 +341,27 @@ export type DeploymentMetrics = {
 export type DeploymentMetricsResponse = {
   metrics: DeploymentMetrics[]
 }
+
+// ── CliToken ──────────────────────────────────────────────────
+
+export type CliToken = {
+  id: string
+  user_id: string
+  name: string
+  expires_at: string | null
+  revoked_at: string | null
+  created_at: string
+}
+
+export type CreateCliTokenRequest = {
+  name: string
+  expires_in_days: number // 0または未指定の場合は無期限
+}
+
+export type CreateCliTokenResponse = {
+  id: string
+  name: string
+  token: string // 発行時のみ返却される平文トークン
+  expires_at: string | null
+  created_at: string
+}
