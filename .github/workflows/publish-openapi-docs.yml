@@ -1,0 +1,85 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Publish OpenAPI Docs
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - "docs/openapi.yaml"
+      - ".github/workflows/publish-openapi-docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ドキュメントをビルド
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: 公開用ディレクトリを作成する
+        run: mkdir -p site
+
+      - name: openapi.yaml を公開用ディレクトリにコピーする
+        run: cp docs/openapi.yaml site/openapi.yaml
+
+      - name: Swagger UI の index.html を生成する
+        run: |
+          cat > site/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html lang="ja">
+            <head>
+              <meta charset="UTF-8" />
+              <title>backend-mini API ドキュメント</title>
+              <link
+                rel="stylesheet"
+                href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css"
+              />
+            </head>
+            <body>
+              <div id="swagger-ui"></div>
+              <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+              <script>
+                window.onload = () => {
+                  window.ui = SwaggerUIBundle({
+                    url: "./openapi.yaml",
+                    dom_id: "#swagger-ui",
+                    presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+                  });
+                };
+              </script>
+            </body>
+          </html>
+          EOF
+
+      - name: GitHub Pages 用の設定を行う
+        uses: actions/configure-pages@v5
+
+      - name: 公開用ディレクトリをアップロードする
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: GitHub Pages にデプロイ
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: GitHub Pages にデプロイする
+        id: deployment
+        uses: actions/deploy-pages@v4
