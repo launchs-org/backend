@@ -11,17 +11,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  contents: write
 
 jobs:
   build:
-    name: ドキュメントをビルド
+    name: ドキュメントをビルドしてコミットする
     runs-on: ubuntu-latest
 
     steps:
@@ -29,14 +23,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: 公開用ディレクトリを作成する
-        run: mkdir -p site
+        run: mkdir -p docs/site
 
       - name: openapi.yaml を公開用ディレクトリにコピーする
-        run: cp docs/openapi.yaml site/openapi.yaml
+        run: cp docs/openapi.yaml docs/site/openapi.yaml
 
       - name: Swagger UI の index.html を生成する
         run: |
-          cat > site/index.html <<'EOF'
+          cat > docs/site/index.html <<'EOF'
           <!DOCTYPE html>
           <html lang="ja">
             <head>
@@ -63,23 +57,14 @@ jobs:
           </html>
           EOF
 
-      - name: GitHub Pages 用の設定を行う
-        uses: actions/configure-pages@v5
-
-      - name: 公開用ディレクトリをアップロードする
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-  deploy:
-    name: GitHub Pages にデプロイ
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
-    steps:
-      - name: GitHub Pages にデプロイする
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: 生成した成果物をコミットする
+        run: |
+          git config user.name "github-actions[bot]" # コミット用のユーザー名を設定する
+          git config user.email "github-actions[bot]@users.noreply.github.com" # コミット用のメールアドレスを設定する
+          git add docs/site # 生成した成果物をステージングする
+          if git diff --staged --quiet; then # 差分がない場合は何もしない
+            echo "変更なし"
+          else
+            git commit -m "docs: openapi.yamlの公開用ファイルを更新する" # 成果物をコミットする
+            git push # developブランチにpushする
+          fi
