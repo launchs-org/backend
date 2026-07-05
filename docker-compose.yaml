@@ -69,6 +69,8 @@ services:
     env_file:
       - ./config/app.env
       - ./openssl/jwtKeys/public.env
+      - ./openssl/cliTokenKeys/private.env
+      - ./openssl/cliTokenKeys/public.env
     environment:
       - TEMPORAL_HOST=temporal:7233
     tty: true
