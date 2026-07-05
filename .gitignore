@@ -10,6 +10,11 @@ nginx/logs/*
 openssl/jwtKeys/*
 !openssl/jwtKeys/readme.md
 
+# CLIトークンの鍵フォルダを除外
+openssl/cliTokenKeys/*
+!openssl/cliTokenKeys/genkey.sh
+!openssl/cliTokenKeys/dockerfile
+
 # 自動ビルドフォルダ除外
 app/src/tmp/
 
