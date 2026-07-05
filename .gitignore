@@ -15,8 +15,8 @@ openssl/cliTokenKeys/*
 !openssl/cliTokenKeys/genkey.sh
 !openssl/cliTokenKeys/dockerfile
 
-# 自動ビルドフォルダ除外
-app/src/tmp/
+# 自動ビルド（air）の成果物を除外
+*/src/tmp/
 
 # その他
 .DS_Store

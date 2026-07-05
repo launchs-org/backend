@@ -61,6 +61,10 @@ SSL 証明書と JWT キーの生成・Docker イメージのビルド・全サ�
 
 自己署名証明書を使用しているため、ブラウザの警告は無視して進んでください。
 
+## API ドキュメント
+
+OpenAPI 仕様書は [https://launchs-org.github.io/backend-mini/](https://launchs-org.github.io/backend-mini/) で公開されています（`develop` ブランチの `docs/openapi.yaml` 更新時に自動反映）。
+
 ## コマンド一覧
 
 | コマンド | 説明 |
