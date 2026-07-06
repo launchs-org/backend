@@ -89,7 +89,7 @@ func seedMasterData() error {
 	freePlanAttrs := models.Plan{
 		MaxProjects:              3,     // プロジェクト上限
 		MaxDeployments:           5,     // デプロイメント上限
-		MaxReplicasPerDeployment: 2,     // レプリカ上限
+		MaxReplicasPerDeployment: 5,     // レプリカ上限
 		MaxVolumes:               5,     // ボリューム数上限
 		MaxVolumeSizeMB:          10240, // 1ボリューム最大サイズ（10GB）
 		MaxTotalVolumeMB:         10240, // ボリューム総容量上限（10GB）
@@ -100,31 +100,31 @@ func seedMasterData() error {
 	}
 	FreePlanID = freePlan.ID // free プランの ID をパッケージ変数に保持する
 
-	// pro プランを挿入する（存在しない場合のみ）
-	proPlan := models.Plan{
-		Name:                     "pro",  // プラン名
+	// pro プランを挿入または更新する
+	proPlanAttrs := models.Plan{
 		MaxProjects:              20,     // プロジェクト上限
 		MaxDeployments:           50,     // デプロイメント上限
-		MaxReplicasPerDeployment: 5,      // レプリカ上限
+		MaxReplicasPerDeployment: 10,     // レプリカ上限
 		MaxVolumes:               20,     // ボリューム数上限
 		MaxVolumeSizeMB:          102400, // 1ボリューム最大サイズ（100GB）
 		MaxTotalVolumeMB:         512000, // ボリューム総容量上限（500GB）
 	}
-	if err := Database.Where(models.Plan{Name: "pro"}).FirstOrCreate(&proPlan).Error; err != nil {
+	proPlan := models.Plan{Name: "pro"} // 検索キー
+	if err := Database.Where(models.Plan{Name: "pro"}).Assign(proPlanAttrs).FirstOrCreate(&proPlan).Error; err != nil {
 		return fmt.Errorf("plans (pro) シードデータの挿入に失敗しました: %w", err) // シードエラーを返す
 	}
 
-	// enterprise プランを挿入する（存在しない場合のみ）
-	enterprisePlan := models.Plan{
-		Name:                     "enterprise", // プラン名
-		MaxProjects:              100,          // プロジェクト上限
-		MaxDeployments:           500,          // デプロイメント上限
-		MaxReplicasPerDeployment: 20,           // レプリカ上限
-		MaxVolumes:               100,          // ボリューム数上限
-		MaxVolumeSizeMB:          1048576,      // 1ボリューム最大サイズ（1TB）
-		MaxTotalVolumeMB:         10485760,     // ボリューム総容量上限（10TB）
+	// enterprise プランを挿入または更新する
+	enterprisePlanAttrs := models.Plan{
+		MaxProjects:              100,      // プロジェクト上限
+		MaxDeployments:           500,      // デプロイメント上限
+		MaxReplicasPerDeployment: 20,       // レプリカ上限
+		MaxVolumes:               100,      // ボリューム数上限
+		MaxVolumeSizeMB:          1048576,  // 1ボリューム最大サイズ（1TB）
+		MaxTotalVolumeMB:         10485760, // ボリューム総容量上限（10TB）
 	}
-	if err := Database.Where(models.Plan{Name: "enterprise"}).FirstOrCreate(&enterprisePlan).Error; err != nil {
+	enterprisePlan := models.Plan{Name: "enterprise"} // 検索キー
+	if err := Database.Where(models.Plan{Name: "enterprise"}).Assign(enterprisePlanAttrs).FirstOrCreate(&enterprisePlan).Error; err != nil {
 		return fmt.Errorf("plans (enterprise) シードデータの挿入に失敗しました: %w", err) // シードエラーを返す
 	}
 
