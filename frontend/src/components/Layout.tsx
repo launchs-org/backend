@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Cloud, Settings, LogOut, ChevronRight } from 'lucide-react'
+import { Cloud, Settings, LogOut, ChevronRight, RefreshCw } from 'lucide-react'
 import { logout, get } from '@/lib/api'
 import type { Quota } from '@/lib/types'
 
@@ -19,10 +19,21 @@ export function Layout({ children, breadcrumbs, actions, fullWidth }: LayoutProp
   const navigate = useNavigate() // ナビゲーションフックを取得する
   const isEmbedded = window.self !== window.top // iframeで表示されているかどうかを判定する
   const [quota, setQuota] = useState<Quota | null>(null) // フッター表示用 quota
+  const [quotaRefreshing, setQuotaRefreshing] = useState(false) // 手動更新中フラグ
+
+  const fetchQuota = () => get<Quota>('/users/quota').then(setQuota).catch(() => {}) // quota を取得する（失敗は無視）
+
+  const handleQuotaRefresh = async () => {
+    setQuotaRefreshing(true) // 更新中表示にする
+    await fetchQuota() // quota を再取得する
+    setQuotaRefreshing(false) // 更新中表示を解除する
+  }
 
   useEffect(() => {
     if (isEmbedded) return // iframe 内ではフッターを表示しないので取得不要
-    get<Quota>('/users/quota').then(setQuota).catch(() => {}) // quota を取得する（失敗は無視）
+    void fetchQuota() // 初回取得を行う
+    const intervalId = setInterval(() => { void fetchQuota() }, 30000) // 30秒ごとに自動更新する
+    return () => clearInterval(intervalId) // アンマウント時にタイマーを解除する
   }, [isEmbedded])
 
   const handleLogout = async () => {
@@ -140,6 +151,15 @@ export function Layout({ children, breadcrumbs, actions, fullWidth }: LayoutProp
           <span className="text-xs font-mono text-gray-500">
             最大レプリカ: {quota.max_replicas_per_deployment}
           </span>
+          <div className="w-px h-3 bg-gray-200 shrink-0" />
+          <button
+            onClick={() => void handleQuotaRefresh()}
+            disabled={quotaRefreshing}
+            title="使用状況を更新する"
+            className="text-gray-400 hover:text-gray-600 disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw className={`w-3 h-3 ${quotaRefreshing ? 'animate-spin' : ''}`} />
+          </button>
         </footer>
       )}
     </div>
