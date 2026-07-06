@@ -1,6 +1,6 @@
 name: redis
 description: "Redis キャッシュ・メッセージブローカーテンプレート"
-image_url: redis:7-alpine
+image_url: bitnami/redis:latest
 instance_size: small
 replicas: 1
 command: []
@@ -11,7 +11,12 @@ service:
   target_port: 6379
   type: ClusterIP
 
+env_vars:
+  - key: ALLOW_EMPTY_PASSWORD
+    value: "yes"
+    is_secret: false
+
 volumes:
   - name: redis-data
     size_mb: 1024
-    mount_path: /data
+    mount_path: /bitnami/redis/data

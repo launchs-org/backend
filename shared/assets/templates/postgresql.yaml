@@ -1,6 +1,6 @@
 name: postgresql
 description: "PostgreSQL データベーステンプレート"
-image_url: postgres:16
+image_url: bitnami/postgresql:latest
 instance_size: small
 replicas: 1
 command: []
@@ -12,21 +12,15 @@ service:
   type: ClusterIP
 
 env_vars:
-  - key: POSTGRES_PASSWORD
+  - key: POSTGRESQL_POSTGRES_PASSWORD
     auto_generate: true
     length: 32
     is_secret: true
-  - key: POSTGRES_DB
+  - key: POSTGRESQL_DATABASE
     value: app
-    is_secret: false
-  - key: POSTGRES_USER
-    value: postgres
-    is_secret: false
-  - key: PGDATA
-    value: /var/lib/postgresql/data/pgdata
     is_secret: false
 
 volumes:
   - name: postgres-data
     size_mb: 3072
-    mount_path: /var/lib/postgresql/data
+    mount_path: /bitnami/postgresql

@@ -1,6 +1,6 @@
-name: mysql
-description: "MySQL データベーステンプレート"
-image_url: mysql:8.0
+name: mariadb
+description: "MariaDB データベーステンプレート"
+image_url: bitnami/mariadb:latest
 instance_size: small
 replicas: 1
 command: []
@@ -12,15 +12,15 @@ service:
   type: ClusterIP
 
 env_vars:
-  - key: MYSQL_ROOT_PASSWORD
+  - key: MARIADB_ROOT_PASSWORD
     auto_generate: true
     length: 32
     is_secret: true
-  - key: MYSQL_DATABASE
+  - key: MARIADB_DATABASE
     value: app
     is_secret: false
 
 volumes:
-  - name: mysql-data
+  - name: mariadb-data
     size_mb: 3072
-    mount_path: /var/lib/mysql
+    mount_path: /bitnami/mariadb
