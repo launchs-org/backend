@@ -6,7 +6,7 @@ import { get, post, QuotaExceededApiError } from '@/lib/api'
 import type { Deployment, DeploymentType, DeploymentTemplate, EnvVar } from '@/lib/types'
 import { useTutorialContext } from '@/tutorial/TutorialContext' // チュートリアル Context をインポートする
 
-type Step = 'type' | 'form' | 'template'
+type Step = 'type' | 'form' | 'templateList' | 'templateForm'
 
 // 暗号学的に安全な32文字のランダム文字列を生成する
 function generateSecureRandom(): string {
@@ -177,9 +177,9 @@ export function DeploymentNewPage() {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // テンプレート一覧を取得する（templateステップ表示時）
+  // テンプレート一覧を取得する（templateListステップ表示時）
   useEffect(() => {
-    if (step !== 'template') return
+    if (step !== 'templateList') return
     setTemplatesLoading(true)
     void get<DeploymentTemplate[]>('/deployment-templates')
       .then(setTemplates)
@@ -223,6 +223,7 @@ export function DeploymentNewPage() {
     setTmplNewEnvKey('')
     setTmplNewEnvValue('')
     setTmplNewEnvSecret(false)
+    setStep('templateForm') // 設定ステップへ進む
   }
 
   // テンプレートからデプロイメントを作成する
@@ -342,7 +343,7 @@ export function DeploymentNewPage() {
         { label: '新規デプロイメント' },
       ]}
     >
-      <div className={step === 'template' ? 'w-full' : 'max-w-2xl mx-auto'}>
+      <div className={step === 'templateList' ? 'w-full' : 'max-w-2xl mx-auto'}>
         {/* ステップインジケーター */}
         <div className="flex items-center gap-2 mb-8 text-sm">
           <span className={`flex items-center gap-1.5 ${step === 'type' ? 'text-[#00C2D1] font-medium' : 'text-gray-400'}`}>
@@ -350,10 +351,24 @@ export function DeploymentNewPage() {
             タイプ選択
           </span>
           <span className="text-gray-300">→</span>
-          <span className={`flex items-center gap-1.5 ${step === 'form' || step === 'template' ? 'text-[#00C2D1] font-medium' : 'text-gray-400'}`}>
-            <span className={`w-5 h-5 rounded-full text-xs flex items-center justify-center ${step === 'form' || step === 'template' ? 'bg-[#00C2D1] text-white' : 'bg-gray-200 text-gray-500'}`}>2</span>
-            設定
-          </span>
+          {step === 'templateList' || step === 'templateForm' ? (
+            <>
+              <span className={`flex items-center gap-1.5 ${step === 'templateList' ? 'text-[#00C2D1] font-medium' : 'text-gray-400'}`}>
+                <span className={`w-5 h-5 rounded-full text-xs flex items-center justify-center ${step === 'templateList' ? 'bg-[#00C2D1] text-white' : 'bg-gray-200 text-gray-500'}`}>2</span>
+                テンプレート選択
+              </span>
+              <span className="text-gray-300">→</span>
+              <span className={`flex items-center gap-1.5 ${step === 'templateForm' ? 'text-[#00C2D1] font-medium' : 'text-gray-400'}`}>
+                <span className={`w-5 h-5 rounded-full text-xs flex items-center justify-center ${step === 'templateForm' ? 'bg-[#00C2D1] text-white' : 'bg-gray-200 text-gray-500'}`}>3</span>
+                設定
+              </span>
+            </>
+          ) : (
+            <span className={`flex items-center gap-1.5 ${step === 'form' ? 'text-[#00C2D1] font-medium' : 'text-gray-400'}`}>
+              <span className={`w-5 h-5 rounded-full text-xs flex items-center justify-center ${step === 'form' ? 'bg-[#00C2D1] text-white' : 'bg-gray-200 text-gray-500'}`}>2</span>
+              設定
+            </span>
+          )}
         </div>
 
         {/* ステップ1: タイプ選択 */}
@@ -363,7 +378,7 @@ export function DeploymentNewPage() {
             <div className="grid grid-cols-1 gap-3">
               {/* テンプレートから作成 */}
               <button
-                onClick={() => setStep('template')}
+                onClick={() => setStep('templateList')}
                 className="flex items-start gap-4 p-4 bg-white rounded-lg border border-[#00C2D1]/40 text-left hover:border-[#00C2D1] hover:shadow-sm transition-all group"
               >
                 <span className="p-2.5 rounded-lg bg-[#00C2D1]/10 text-[#00C2D1] group-hover:bg-[#00C2D1]/20 transition-colors shrink-0">
@@ -394,268 +409,267 @@ export function DeploymentNewPage() {
           </div>
         )}
 
-        {/* テンプレートステップ */}
-        {step === 'template' && (
-          <div className="flex gap-6 h-[calc(100vh-180px)] min-h-0">
-            {/* 左カラム：テンプレート一覧 */}
-            <div className="w-72 shrink-0 flex flex-col min-h-0">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-semibold text-[#111827]">テンプレート</h2>
+        {/* ステップ2: テンプレート選択 */}
+        {step === 'templateList' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h1 className="text-xl font-semibold text-[#111827]">テンプレートを選択</h1>
+              <button
+                onClick={() => { setStep('type'); setSelectedTemplate(null); setTemplateError(null) }}
+                className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                ← 戻る
+              </button>
+            </div>
+            {templatesLoading && (
+              <p className="text-sm text-gray-400">読み込み中...</p>
+            )}
+            {!templatesLoading && templates.length === 0 && (
+              <p className="text-sm text-gray-400">テンプレートがありません</p>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {!templatesLoading && templates.map((template) => (
                 <button
-                  onClick={() => { setStep('type'); setSelectedTemplate(null); setTemplateError(null) }}
-                  className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                  key={template.id}
+                  onClick={() => handleTemplateSelect(template)}
+                  className="flex items-start gap-3 p-4 bg-white rounded-lg border border-gray-200 text-left hover:border-[#00C2D1] hover:shadow-sm transition-all"
                 >
-                  ← 戻る
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1">
-                {templatesLoading && (
-                  <p className="text-sm text-gray-400">読み込み中...</p>
-                )}
-                {!templatesLoading && templates.length === 0 && (
-                  <p className="text-sm text-gray-400">テンプレートがありません</p>
-                )}
-                {!templatesLoading && templates.map((template) => (
-                  <button
-                    key={template.id}
-                    onClick={() => handleTemplateSelect(template)}
-                    className={`w-full flex items-start gap-3 p-3 bg-white rounded-lg border text-left hover:shadow-sm transition-all ${selectedTemplate?.id === template.id ? 'border-[#00C2D1] ring-2 ring-[#00C2D1]/20' : 'border-gray-200 hover:border-[#00C2D1]'}`}
-                  >
-                    <span className={`p-2 rounded-lg shrink-0 mt-0.5 ${selectedTemplate?.id === template.id ? 'bg-[#00C2D1]/10 text-[#00C2D1]' : 'bg-gray-50 text-gray-400'}`}>
-                      <LayoutTemplate className="w-4 h-4" />
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-[#111827]">{template.name}</p>
-                      {template.description && (
-                        <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{template.description}</p>
-                      )}
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-mono">{template.image_url}</span>
-                      </div>
+                  <span className="p-2 rounded-lg shrink-0 mt-0.5 bg-gray-50 text-gray-400">
+                    <LayoutTemplate className="w-4 h-4" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-[#111827]">{template.name}</p>
+                    {template.description && (
+                      <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{template.description}</p>
+                    )}
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-mono truncate max-w-full">{template.image_url}</span>
                     </div>
-                  </button>
-                ))}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ステップ3: テンプレート設定 */}
+        {step === 'templateForm' && selectedTemplate && (
+          <div className="space-y-5">
+            <div className="mb-2">
+              <button
+                onClick={() => { setStep('templateList'); setSelectedTemplate(null); setTemplateError(null) }}
+                className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                ← テンプレート選択に戻る
+              </button>
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold text-[#111827]">{selectedTemplate.name} の設定</h1>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-400 mt-1">
+                <span className="font-mono truncate max-w-full">{selectedTemplate.image_url}</span>
+                <span>·</span>
+                <span>{selectedTemplate.instance_size}</span>
+                <span>·</span>
+                <span>{selectedTemplate.replicas} レプリカ</span>
+                {selectedTemplate.service_port > 0 && (
+                  <>
+                    <span>·</span>
+                    <span>:{selectedTemplate.service_port}</span>
+                  </>
+                )}
               </div>
             </div>
 
-            {/* 右カラム：設定フォーム */}
-            <div className="flex-1 min-w-0 flex flex-col min-h-0">
-              {!selectedTemplate ? (
-                <div className="flex-1 flex items-center justify-center">
-                  <p className="text-sm text-gray-400">左からテンプレートを選択してください</p>
-                </div>
-              ) : (
-                <div className="flex-1 flex flex-col min-h-0">
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-sm font-semibold text-[#111827]">{selectedTemplate.name} の設定</h2>
-                    <div className="flex items-center gap-2 text-xs text-gray-400">
-                      <span className="font-mono">{selectedTemplate.image_url}</span>
-                      <span>·</span>
-                      <span>{selectedTemplate.instance_size}</span>
-                      <span>·</span>
-                      <span>{selectedTemplate.replicas} レプリカ</span>
-                      {selectedTemplate.service_port > 0 && (
-                        <>
-                          <span>·</span>
-                          <span>:{selectedTemplate.service_port}</span>
-                        </>
+            <div className="space-y-5">
+              {/* デプロイメント名 */}
+              <div className="bg-white rounded-lg border border-gray-200 p-4">
+                <label className={labelClass}>デプロイメント名 *</label>
+                <input
+                  type="text"
+                  value={templateName}
+                  onChange={(event) => setTemplateName(event.target.value)}
+                  placeholder="my-app"
+                  maxLength={63}
+                  className={inputClass}
+                  autoFocus
+                />
+                <p className="text-xs text-gray-400 mt-1">英小文字・数字・ハイフンのみ、最大63文字</p>
+              </div>
+
+            {/* 環境変数 */}
+            {(selectedTemplate.env_vars ?? []).length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+                <p className="text-xs font-semibold text-[#111827]">環境変数</p>
+                <div className="space-y-2">
+                  {(selectedTemplate.env_vars ?? []).map((envVar) => (
+                    <div key={envVar.key} className="flex items-center gap-3">
+                      <div className="w-40 shrink-0 flex items-center gap-1.5">
+                        <span className="font-mono text-xs text-[#111827] truncate">{envVar.key}</span>
+                        {envVar.is_secret && <span className="text-[10px] bg-purple-50 text-purple-500 px-1 py-0.5 rounded shrink-0">secret</span>}
+                      </div>
+                      {envVar.auto_generate ? (
+                        <div className="flex-1 flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            value={tmplEnvVarOverrides[envVar.key] ?? ''}
+                            onChange={overrideEv => setTmplEnvVarOverrides(prev => ({ ...prev, [envVar.key]: overrideEv.target.value }))}
+                            className={`flex-1 ${inputClass} font-mono text-xs`}
+                            placeholder=""
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setTmplEnvVarOverrides(prev => ({ ...prev, [envVar.key]: generateSecureRandom() }))}
+                            className="p-1.5 rounded border border-gray-200 hover:border-amber-400 hover:bg-amber-50 text-gray-400 hover:text-amber-500 transition-colors shrink-0"
+                            title="ランダム生成"
+                          >
+                            <Dice6 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <input
+                          type={envVar.is_secret ? 'password' : 'text'}
+                          value={tmplEnvVarOverrides[envVar.key] ?? envVar.value}
+                          onChange={overrideEv => setTmplEnvVarOverrides(prev => ({ ...prev, [envVar.key]: overrideEv.target.value }))}
+                          className={`flex-1 ${inputClass} font-mono text-xs`}
+                          placeholder={envVar.value || '(空)'}
+                        />
                       )}
                     </div>
-                  </div>
+                  ))}
+                </div>
 
-                  <div className="flex-1 overflow-y-auto space-y-5 pr-1">
-                    {/* デプロイメント名 */}
-                    <div className="bg-white rounded-lg border border-gray-200 p-4">
-                      <label className={labelClass}>デプロイメント名 *</label>
-                      <input
-                        type="text"
-                        value={templateName}
-                        onChange={(event) => setTemplateName(event.target.value)}
-                        placeholder="my-app"
-                        maxLength={63}
-                        className={inputClass}
-                        autoFocus
-                      />
-                      <p className="text-xs text-gray-400 mt-1">英小文字・数字・ハイフンのみ、最大63文字</p>
-                    </div>
-
-                    {/* 環境変数 */}
-                    {(selectedTemplate.env_vars ?? []).length > 0 && (
-                      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
-                        <p className="text-xs font-semibold text-[#111827]">環境変数</p>
-                        <div className="space-y-2">
-                          {(selectedTemplate.env_vars ?? []).map((envVar) => (
-                            <div key={envVar.key} className="flex items-center gap-3">
-                              <div className="w-40 shrink-0 flex items-center gap-1.5">
-                                <span className="font-mono text-xs text-[#111827] truncate">{envVar.key}</span>
-                                {envVar.is_secret && <span className="text-[10px] bg-purple-50 text-purple-500 px-1 py-0.5 rounded shrink-0">secret</span>}
-                              </div>
-                              {envVar.auto_generate ? (
-                                <div className="flex-1 flex items-center gap-1.5">
-                                  <input
-                                    type="text"
-                                    value={tmplEnvVarOverrides[envVar.key] ?? ''}
-                                    onChange={overrideEv => setTmplEnvVarOverrides(prev => ({ ...prev, [envVar.key]: overrideEv.target.value }))}
-                                    className={`flex-1 ${inputClass} font-mono text-xs`}
-                                    placeholder=""
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => setTmplEnvVarOverrides(prev => ({ ...prev, [envVar.key]: generateSecureRandom() }))}
-                                    className="p-1.5 rounded border border-gray-200 hover:border-amber-400 hover:bg-amber-50 text-gray-400 hover:text-amber-500 transition-colors shrink-0"
-                                    title="ランダム生成"
-                                  >
-                                    <Dice6 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <input
-                                  type={envVar.is_secret ? 'password' : 'text'}
-                                  value={tmplEnvVarOverrides[envVar.key] ?? envVar.value}
-                                  onChange={overrideEv => setTmplEnvVarOverrides(prev => ({ ...prev, [envVar.key]: overrideEv.target.value }))}
-                                  className={`flex-1 ${inputClass} font-mono text-xs`}
-                                  placeholder={envVar.value || '(空)'}
-                                />
-                              )}
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* 追加の環境変数 */}
-                        {tmplExtraEnvVars.length > 0 && (
-                          <div className="pt-2 border-t border-gray-100 space-y-1.5">
-                            <p className="text-[10px] text-gray-400 font-medium">追加の環境変数</p>
-                            {tmplExtraEnvVars.map((entry, entryIndex) => (
-                              <div key={entryIndex} className="flex items-center gap-2 bg-blue-50 rounded px-2.5 py-1.5 border border-blue-100">
-                                <span className="font-mono text-xs text-[#111827]">{entry.key}</span>
-                                {entry.is_secret ? (
-                                  <span className="text-[10px] bg-purple-50 text-purple-500 px-1.5 py-0.5 rounded shrink-0">secret</span>
-                                ) : (
-                                  <span className="font-mono text-xs text-gray-400 truncate">{entry.value || '(空)'}</span>
-                                )}
-                                <button
-                                  onClick={() => setTmplExtraEnvVars(prev => prev.filter((_, idx) => idx !== entryIndex))}
-                                  className="ml-auto p-0.5 rounded hover:bg-red-50 text-gray-300 hover:text-red-400 transition-colors shrink-0"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
+                {/* 追加の環境変数 */}
+                {tmplExtraEnvVars.length > 0 && (
+                  <div className="pt-2 border-t border-gray-100 space-y-1.5">
+                    <p className="text-[10px] text-gray-400 font-medium">追加の環境変数</p>
+                    {tmplExtraEnvVars.map((entry, entryIndex) => (
+                      <div key={entryIndex} className="flex items-center gap-2 bg-blue-50 rounded px-2.5 py-1.5 border border-blue-100">
+                        <span className="font-mono text-xs text-[#111827]">{entry.key}</span>
+                        {entry.is_secret ? (
+                          <span className="text-[10px] bg-purple-50 text-purple-500 px-1.5 py-0.5 rounded shrink-0">secret</span>
+                        ) : (
+                          <span className="font-mono text-xs text-gray-400 truncate">{entry.value || '(空)'}</span>
                         )}
-
-                        {/* 新規追加フォーム */}
-                        <div className="pt-2 border-t border-gray-100 space-y-1.5">
-                          <p className="text-[10px] text-gray-400 font-medium">新しい変数を追加</p>
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              value={tmplNewEnvKey}
-                              onChange={ev => setTmplNewEnvKey(ev.target.value)}
-                              placeholder="KEY"
-                              className={`flex-1 ${inputClass} font-mono text-xs`}
-                            />
-                            <input
-                              type={tmplNewEnvSecret ? 'password' : 'text'}
-                              value={tmplNewEnvValue}
-                              onChange={ev => setTmplNewEnvValue(ev.target.value)}
-                              placeholder="VALUE"
-                              className={`flex-1 ${inputClass} font-mono text-xs`}
-                            />
-                            <label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer select-none shrink-0">
-                              <input
-                                type="checkbox"
-                                checked={tmplNewEnvSecret}
-                                onChange={ev => setTmplNewEnvSecret(ev.target.checked)}
-                                className="rounded border-gray-300"
-                              />
-                              secret
-                            </label>
-                            <button
-                              onClick={() => {
-                                if (!tmplNewEnvKey.trim()) return
-                                setTmplExtraEnvVars(prev => [...prev, { key: tmplNewEnvKey.trim(), value: tmplNewEnvValue, is_secret: tmplNewEnvSecret }])
-                                setTmplNewEnvKey('')
-                                setTmplNewEnvValue('')
-                                setTmplNewEnvSecret(false)
-                              }}
-                              disabled={!tmplNewEnvKey.trim()}
-                              className="flex items-center gap-1 text-xs bg-[#111827] text-white px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50 shrink-0"
-                            >
-                              <Plus className="w-3 h-3" />
-                              追加
-                            </button>
-                          </div>
-                        </div>
+                        <button
+                          onClick={() => setTmplExtraEnvVars(prev => prev.filter((_, idx) => idx !== entryIndex))}
+                          className="ml-auto p-0.5 rounded hover:bg-red-50 text-gray-300 hover:text-red-400 transition-colors shrink-0"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
                       </div>
-                    )}
-
-                    {/* ボリューム */}
-                    {(selectedTemplate.volumes ?? []).length > 0 && (
-                      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-2">
-                        <p className="text-xs font-semibold text-[#111827]">ボリューム</p>
-                        <div className="space-y-1.5">
-                          {(selectedTemplate.volumes ?? []).map((vol) => (
-                            <label key={vol.name} className="flex items-center gap-3 rounded px-2.5 py-2 border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors">
-                              <input
-                                type="checkbox"
-                                checked={enabledVolumeNames.has(vol.name)}
-                                onChange={volEv => {
-                                  setEnabledVolumeNames(prev => {
-                                    const next = new Set(prev)
-                                    if (volEv.target.checked) {
-                                      next.add(vol.name)
-                                    } else {
-                                      next.delete(vol.name)
-                                    }
-                                    return next
-                                  })
-                                }}
-                                className="rounded border-gray-300"
-                              />
-                              <span className="text-xs font-medium text-[#111827]">{vol.name}</span>
-                              <div className="flex items-center gap-1 ml-auto" onClick={clickEv => clickEv.preventDefault()}>
-                                <input
-                                  type="number"
-                                  min={1}
-                                  value={volumeSizeOverrides[vol.name] ?? vol.size_mb}
-                                  onChange={sizeEv => {
-                                    const mb = parseInt(sizeEv.target.value, 10)
-                                    if (!isNaN(mb) && mb > 0) {
-                                      setVolumeSizeOverrides(prev => ({ ...prev, [vol.name]: mb }))
-                                    }
-                                  }}
-                                  className="w-20 text-xs text-right border border-gray-200 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-400"
-                                />
-                                <span className="text-xs text-gray-400">MB</span>
-                              </div>
-                              <span className="font-mono text-xs text-gray-400">→ {vol.mount_path}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    ))}
                   </div>
+                )}
 
-                  {/* エラー + ボタン */}
-                  <div className="mt-4 pt-4 border-t border-gray-100">
-                    {templateError && (
-                      <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 mb-3">
-                        {templateError}
-                      </div>
-                    )}
-                    <div className="flex items-center justify-end">
-                      <button
-                        onClick={() => void handleCreateFromTemplate()}
-                        disabled={templateCreating}
-                        className="bg-[#111827] text-white text-sm px-6 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
-                      >
-                        {templateCreating ? '作成中...' : 'デプロイメントを作成 →'}
-                      </button>
-                    </div>
+                {/* 新規追加フォーム */}
+                <div className="pt-2 border-t border-gray-100 space-y-1.5">
+                  <p className="text-[10px] text-gray-400 font-medium">新しい変数を追加</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={tmplNewEnvKey}
+                      onChange={ev => setTmplNewEnvKey(ev.target.value)}
+                      placeholder="KEY"
+                      className={`flex-1 ${inputClass} font-mono text-xs`}
+                    />
+                    <input
+                      type={tmplNewEnvSecret ? 'password' : 'text'}
+                      value={tmplNewEnvValue}
+                      onChange={ev => setTmplNewEnvValue(ev.target.value)}
+                      placeholder="VALUE"
+                      className={`flex-1 ${inputClass} font-mono text-xs`}
+                    />
+                    <label className="flex items-center gap-1 text-xs text-gray-500 cursor-pointer select-none shrink-0">
+                      <input
+                        type="checkbox"
+                        checked={tmplNewEnvSecret}
+                        onChange={ev => setTmplNewEnvSecret(ev.target.checked)}
+                        className="rounded border-gray-300"
+                      />
+                      secret
+                    </label>
+                    <button
+                      onClick={() => {
+                        if (!tmplNewEnvKey.trim()) return
+                        setTmplExtraEnvVars(prev => [...prev, { key: tmplNewEnvKey.trim(), value: tmplNewEnvValue, is_secret: tmplNewEnvSecret }])
+                        setTmplNewEnvKey('')
+                        setTmplNewEnvValue('')
+                        setTmplNewEnvSecret(false)
+                      }}
+                      disabled={!tmplNewEnvKey.trim()}
+                      className="flex items-center gap-1 text-xs bg-[#111827] text-white px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50 shrink-0"
+                    >
+                      <Plus className="w-3 h-3" />
+                      追加
+                    </button>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* ボリューム */}
+            {(selectedTemplate.volumes ?? []).length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-2">
+                <p className="text-xs font-semibold text-[#111827]">ボリューム</p>
+                <div className="space-y-1.5">
+                  {(selectedTemplate.volumes ?? []).map((vol) => (
+                    <label key={vol.name} className="flex items-center gap-3 rounded px-2.5 py-2 border border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={enabledVolumeNames.has(vol.name)}
+                        onChange={volEv => {
+                          setEnabledVolumeNames(prev => {
+                            const next = new Set(prev)
+                            if (volEv.target.checked) {
+                              next.add(vol.name)
+                            } else {
+                              next.delete(vol.name)
+                            }
+                            return next
+                          })
+                        }}
+                        className="rounded border-gray-300"
+                      />
+                      <span className="text-xs font-medium text-[#111827]">{vol.name}</span>
+                      <div className="flex items-center gap-1 ml-auto" onClick={clickEv => clickEv.preventDefault()}>
+                        <input
+                          type="number"
+                          min={1}
+                          value={volumeSizeOverrides[vol.name] ?? vol.size_mb}
+                          onChange={sizeEv => {
+                            const mb = parseInt(sizeEv.target.value, 10)
+                            if (!isNaN(mb) && mb > 0) {
+                              setVolumeSizeOverrides(prev => ({ ...prev, [vol.name]: mb }))
+                            }
+                          }}
+                          className="w-20 text-xs text-right border border-gray-200 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-400"
+                        />
+                        <span className="text-xs text-gray-400">MB</span>
+                      </div>
+                      <span className="font-mono text-xs text-gray-400">→ {vol.mount_path}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+            </div>
+
+            {/* エラー + ボタン */}
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              {templateError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 mb-3">
+                  {templateError}
+                </div>
               )}
+              <div className="flex items-center justify-end">
+                <button
+                  onClick={() => void handleCreateFromTemplate()}
+                  disabled={templateCreating}
+                  className="bg-[#111827] text-white text-sm px-6 py-2 rounded-md hover:bg-gray-800 transition-colors disabled:opacity-50"
+                >
+                  {templateCreating ? '作成中...' : 'デプロイメントを作成 →'}
+                </button>
+              </div>
             </div>
           </div>
         )}
