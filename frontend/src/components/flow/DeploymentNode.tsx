@@ -40,11 +40,11 @@ export function DeploymentNode({ data }: NodeProps) {
   const color = TYPE_COLOR[deployment.type] ?? TYPE_COLOR.image_url // タイプに対応するカラーを取得する
 
   const hasPending = !!(
-    deployment.pending_image_id ||
-    deployment.pending_github_repo_url ||
-    deployment.pending_replicas ||
-    deployment.pending_instance_size
-  ) // 保留中の変更があるかどうかを確認する
+    (deployment.pending_image_id && deployment.pending_image_id !== deployment.image_id) ||
+    (deployment.pending_github_repo_url && deployment.pending_github_repo_url !== deployment.github_repo_url) ||
+    (deployment.pending_replicas && deployment.pending_replicas !== deployment.replicas) ||
+    (deployment.pending_instance_size && deployment.pending_instance_size !== deployment.instance_size)
+  ) // 適用済み値と異なる保留中の変更があるかどうかを確認する
 
   // k8s_status から pod の ready 数を取得する
   const k8sStatus = deployment.k8s_status as Record<string, unknown> | null
