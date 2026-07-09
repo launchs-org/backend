@@ -311,3 +311,39 @@ func TestCreateDeploymentFromTemplate_ExtraEnvVarsはTemplateIDが設定され�
 		t.Errorf("ExtraEnvVars の TemplateID は nil であるべきですが、%v が設定されています", *capturedEnvVars[0].TemplateID)
 	}
 }
+
+// TestCreateDeploymentFromTemplate_日本語の名前はErrInvalidResourceNameを返す は日本語名がバリデーションエラーになることを確認する
+func TestCreateDeploymentFromTemplate_日本語の名前はErrInvalidResourceNameを返す_service(t *testing.T) {
+	templateRepo := &mockDeploymentTemplateRepository{}
+	deploymentRepo := &mockDeploymentRepositoryForTemplate{}
+	envVarRepo := &mockEnvVarRepository{}
+	projectRepo := &mockProjectRepository{}
+
+	svc := newTestDeploymentTemplateService(t, templateRepo, deploymentRepo, envVarRepo, projectRepo)
+
+	req := CreateDeploymentFromTemplateRequest{
+		ProjectID:  "project-id-1",
+		TemplateID: "template-id-1",
+		Name:       "テストデプロイ", // 日本語名を設定する
+	}
+	_, err := svc.CreateDeploymentFromTemplate(context.Background(), "test-user-id", req)
+	if err != ErrInvalidResourceName { // バリデーションエラーが返ることを確認する
+		t.Errorf("期待するエラー: ErrInvalidResourceName, 実際のエラー: %v", err)
+	}
+}
+
+// TestCreateTemplate_日本語の名前はErrInvalidResourceNameを返す は日本語名がバリデーションエラーになることを確認する
+func TestCreateTemplate_日本語の名前はErrInvalidResourceNameを返す_service(t *testing.T) {
+	templateRepo := &mockDeploymentTemplateRepository{}
+	deploymentRepo := &mockDeploymentRepositoryForTemplate{}
+	envVarRepo := &mockEnvVarRepository{}
+	projectRepo := &mockProjectRepository{}
+
+	svc := newTestDeploymentTemplateService(t, templateRepo, deploymentRepo, envVarRepo, projectRepo)
+
+	req := CreateTemplateRequest{Name: "テンプレート"} // 日本語名を設定する
+	_, err := svc.CreateTemplate(context.Background(), "admin-user-id", req)
+	if err != ErrInvalidResourceName { // バリデーションエラーが返ることを確認する
+		t.Errorf("期待するエラー: ErrInvalidResourceName, 実際のエラー: %v", err)
+	}
+}

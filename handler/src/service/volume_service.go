@@ -112,6 +112,9 @@ func (svc *volumeServiceImpl) ListVolumes(ctx context.Context, userID string, pr
 // CreateVolume は volume レコードを DB に pending 状態で作成し、
 // k8s PVC 作成は Temporal CreateVolumeWorkflow に委譲する（非同期）
 func (svc *volumeServiceImpl) CreateVolume(ctx context.Context, userID string, projectID string, req CreateVolumeRequest) (*models.Volume, error) {
+	if err := validateDNSLabelName(req.Name); err != nil { // 名前が DNS ラベル形式か検証する
+		return nil, err // バリデーションエラーを返す
+	}
 	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, projectID) // 所有者チェックのために project を取得する
 	if err != nil {
 		return nil, err // 取得エラーを返す

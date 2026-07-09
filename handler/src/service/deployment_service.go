@@ -128,6 +128,9 @@ func (svc *deploymentServiceImpl) ListDeployments(ctx context.Context, projectID
 
 // CreateDeployment は Deployment レコードを作成する
 func (svc *deploymentServiceImpl) CreateDeployment(ctx context.Context, req CreateDeploymentRequest) (*models.Deployment, error) {
+	if err := validateDNSLabelName(req.Name); err != nil { // 名前が DNS ラベル形式か検証する
+		return nil, err // バリデーションエラーを返す
+	}
 	projectData, err := svc.projectRepo.FindByIDNoTx(ctx, req.ProjectID) // project を取得してuserIDを解決する
 	if err != nil {
 		return nil, err // 取得エラーを返す

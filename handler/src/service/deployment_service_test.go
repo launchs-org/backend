@@ -388,6 +388,21 @@ func TestCreateDeployment_正常に作成されpendingフィールドに値が�
 	}
 }
 
+// TestCreateDeployment_日本語の名前はErrInvalidResourceNameを返す は日本語名がバリデーションエラーになることを確認する
+func TestCreateDeployment_日本語の名前はErrInvalidResourceNameを返す(t *testing.T) {
+	deploymentSvc := newTestDeploymentService(&mockDeploymentRepository{}, &mockServiceRepository{}, &mockProjectRepository{}) // サービスを生成する
+	req := CreateDeploymentRequest{
+		ProjectID: "project-id-1", // プロジェクト ID を設定する
+		Name:      "マイアプリ",       // 日本語名を設定する
+		Type:      "image_url",   // タイプを設定する
+	}
+
+	_, err := deploymentSvc.CreateDeployment(context.Background(), req) // サービスを実行する
+	if err != ErrInvalidResourceName { // バリデーションエラーが返ることを確認する
+		t.Errorf("期待するエラー: ErrInvalidResourceName, 実際のエラー: %v", err)
+	}
+}
+
 // TestCreateDeployment_デフォルト値が適用される はデフォルト値が正しく設定されることを確認する
 func TestCreateDeployment_デフォルト値が適用される(t *testing.T) {
 	var capturedDeployment *models.Deployment // キャプチャした deployment を格納する変数を定義する

@@ -134,6 +134,9 @@ func (svc *deploymentTemplateServiceImpl) GetTemplate(ctx context.Context, templ
 
 // CreateTemplate はテンプレートを作成する（管理者専用）
 func (svc *deploymentTemplateServiceImpl) CreateTemplate(ctx context.Context, createdBy string, req CreateTemplateRequest) (*models.DeploymentTemplate, error) {
+	if err := validateDNSLabelName(req.Name); err != nil { // 名前が DNS ラベル形式か検証する
+		return nil, err // バリデーションエラーを返す
+	}
 	envVarsJSON, err := marshalTemplateEnvVars(req.EnvVars) // 環境変数を JSON に変換する
 	if err != nil {
 		return nil, err // 変換エラーを返す
@@ -185,6 +188,9 @@ func (svc *deploymentTemplateServiceImpl) UpdateTemplate(ctx context.Context, te
 
 	// 各フィールドを更新する（nil でない場合のみ）
 	if req.Name != nil {
+		if err := validateDNSLabelName(*req.Name); err != nil { // 名前が DNS ラベル形式か検証する
+			return nil, err // バリデーションエラーを返す
+		}
 		templateData.Name = *req.Name // テンプレート名を更新する
 	}
 	if req.Description != nil {
@@ -242,6 +248,9 @@ func (svc *deploymentTemplateServiceImpl) DeleteTemplate(ctx context.Context, te
 
 // CreateDeploymentFromTemplate はテンプレートからデプロイメントを作成する
 func (svc *deploymentTemplateServiceImpl) CreateDeploymentFromTemplate(ctx context.Context, userID string, req CreateDeploymentFromTemplateRequest) (*models.Deployment, error) {
+	if err := validateDNSLabelName(req.Name); err != nil { // 名前が DNS ラベル形式か検証する
+		return nil, err // バリデーションエラーを返す
+	}
 	templateData, err := svc.templateRepo.FindByID(ctx, req.TemplateID) // テンプレートを取得する
 	if err != nil {
 		return nil, err // テンプレートが見つからない場合はエラーを返す

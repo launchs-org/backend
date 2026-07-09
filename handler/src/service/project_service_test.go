@@ -76,6 +76,19 @@ func (mock *mockHarborCredentialRepositoryForProjectService) FindByProjectIDNoTx
 	return nil, nil // テストでは使用しない
 }
 
+// TestCreateProject_日本語の名前はErrInvalidResourceNameを返す は日本語名がバリデーションエラーになることを確認する
+func TestCreateProject_日本語の名前はErrInvalidResourceNameを返す(t *testing.T) {
+	ctx := context.Background() // テスト用コンテキストを生成する
+
+	svc := &projectServiceImpl{} // 依存なしのサービスを生成する（バリデーションで即エラーになるため後続の依存は不要）
+
+	req := CreateProjectRequest{Name: "プロジェクト"} // 日本語名を設定する
+	_, err := svc.CreateProject(ctx, "test-user-id", req) // サービスを実行する
+	if err != ErrInvalidResourceName { // バリデーションエラーが返ることを確認する
+		t.Errorf("期待するエラー: ErrInvalidResourceName, 実際のエラー: %v", err)
+	}
+}
+
 // TestGetProjectQuota_403_他ユーザーはForbiddenを返す は他ユーザーのプロジェクトへのクォータ取得で ErrForbidden を返すことを確認する
 func TestGetProjectQuota_403_他ユーザーはForbiddenを返す(t *testing.T) {
 	ctx := context.Background() // テスト用コンテキストを生成する

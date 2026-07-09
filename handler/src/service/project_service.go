@@ -95,6 +95,9 @@ func NewProjectService(
 // CreateProject は Project レコードを DB に provisioning 状態で作成し、
 // Harbor・Namespace 作成は Temporal CreateProjectWorkflow に委譲する（非同期）
 func (svc *projectServiceImpl) CreateProject(ctx context.Context, userID string, req CreateProjectRequest) (*models.Project, error) {
+	if err := validateDNSLabelName(req.Name); err != nil { // 名前が DNS ラベル形式か検証する
+		return nil, err // バリデーションエラーを返す
+	}
 	if err := CheckProjectQuota(ctx, svc.userQuotaRepo, userID); err != nil { // プロジェクト数のQuotaチェックを行う
 		return nil, err // Quota超過エラーを返す
 	}
@@ -151,6 +154,9 @@ func (svc *projectServiceImpl) UpdateProject(ctx context.Context, projectID stri
 	}
 
 	if req.Name != nil {
+		if err := validateDNSLabelName(*req.Name); err != nil { // 名前が DNS ラベル形式か検証する
+			return nil, err // バリデーションエラーを返す
+		}
 		projectData.Name = *req.Name // 名前を更新する
 	}
 

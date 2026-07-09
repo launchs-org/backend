@@ -202,6 +202,26 @@ func TestCreateVolume_正常にvolumeが作成される_service(t *testing.T) {
 	}
 }
 
+// TestCreateVolume_日本語の名前はErrInvalidResourceNameを返す は日本語名がバリデーションエラーになることを確認する
+func TestCreateVolume_日本語の名前はErrInvalidResourceNameを返す_service(t *testing.T) {
+	volumeRepo := &mockVolumeRepository{}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return &models.Project{ID: projectID, UserID: "test-user-id"}, nil // 所有者として返す
+		},
+	}
+
+	db := setupApplyTestDB(t)                      // テスト用 DB を準備する
+	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
+	svc := NewVolumeService(db, volumeRepo, &mockVolumeMountRepository{}, &mockDeploymentRepository{}, projectRepo, &noopUserQuotaRepository{}, fakeK8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
+
+	req := CreateVolumeRequest{Name: "ボリューム", SizeMB: 512} // 日本語名のリクエストを定義する
+	_, err := svc.CreateVolume(context.Background(), "test-user-id", "project-id-1", req) // volume を作成する
+	if err != ErrInvalidResourceName { // バリデーションエラーが返ることを確認する
+		t.Errorf("期待するエラー: ErrInvalidResourceName, 実際のエラー: %v", err)
+	}
+}
+
 // TestCreateVolume_他ユーザーはErrForbiddenを返す は所有者でないユーザーが ErrForbidden を受け取ることを確認する
 func TestCreateVolume_他ユーザーはErrForbiddenを返す_service(t *testing.T) {
 	volumeRepo := &mockVolumeRepository{}
