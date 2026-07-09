@@ -300,6 +300,28 @@ func (svc *deploymentTemplateServiceImpl) CreateDeploymentFromTemplate(ctx conte
 			return err // 作成エラーを返してロールバックする
 		}
 
+		existingEnvVarList, err := svc.envVarRepo.FindAllByProjectID(ctx, req.ProjectID) // 既存キー一覧を取得する（トランザクション分離の問題を避けるためメモリ上で重複判定する）
+		if err != nil {
+			return err // 取得エラーを返してロールバックする
+		}
+		usedEnvVarKeySet := make(map[string]bool, len(existingEnvVarList)) // 使用済みキーの集合を構築する
+		for _, existingEnvVar := range existingEnvVarList {
+			usedEnvVarKeySet[existingEnvVar.Key] = true // 既存キーを登録する
+		}
+		resolveEnvVarKeyLocally := func(desiredKey string) string { // メモリ上の集合だけで重複を解決する
+			if !usedEnvVarKeySet[desiredKey] {
+				usedEnvVarKeySet[desiredKey] = true // 使用済みとして登録する
+				return desiredKey
+			}
+			for { // ランダムサフィックスが衝突しない候補が見つかるまで再抽選する
+				candidateKey := fmt.Sprintf("%s_%s", desiredKey, generateRandomEnvVarKeySuffix())
+				if !usedEnvVarKeySet[candidateKey] {
+					usedEnvVarKeySet[candidateKey] = true // 使用済みとして登録する
+					return candidateKey
+				}
+			}
+		}
+
 		imageData, err := svc.imageRepo.FindOrCreateWithTx(ctx, tx, &models.Image{ // (project_id, image_url) が既存であれば再利用し、なければトランザクション内で作成する
 			ProjectID: req.ProjectID, // プロジェクト ID を設定する
 			BuildID:   nil,           // ビルドを経由しない直接指定のため nil
@@ -350,10 +372,11 @@ func (svc *deploymentTemplateServiceImpl) CreateDeploymentFromTemplate(ctx conte
 				envVarValue = generated // 生成した値を使用する
 			}
 			envVarData := &models.EnvVar{
-				ProjectID: req.ProjectID,    // プロジェクト ID を設定する
-				Key:       envVarDef.Key,    // キーを設定する
-				Value:     envVarValue,      // 値を設定する
-				IsSecret:  envVarDef.IsSecret, // シークレットフラグを設定する
+				ProjectID:  req.ProjectID,                       // プロジェクト ID を設定する
+				Key:        resolveEnvVarKeyLocally(envVarDef.Key), // 重複していればランダムサフィックスで解決したキーを設定する
+				Value:      envVarValue,                         // 値を設定する
+				IsSecret:   envVarDef.IsSecret,                  // シークレットフラグを設定する
+				TemplateID: &templateData.ID,                    // テンプレート由来であることを記録する
 			}
 			if err := svc.envVarRepo.Create(ctx, tx, envVarData); err != nil { // 環境変数を作成する
 				return err // 作成エラーを返してロールバックする
@@ -403,10 +426,10 @@ func (svc *deploymentTemplateServiceImpl) CreateDeploymentFromTemplate(ctx conte
 
 		for _, extraEnvVar := range req.ExtraEnvVars { // 追加の環境変数をループして作成する
 			extraEnvVarData := &models.EnvVar{
-				ProjectID: req.ProjectID,       // プロジェクト ID を設定する
-				Key:       extraEnvVar.Key,     // キーを設定する
-				Value:     extraEnvVar.Value,   // 値を設定する
-				IsSecret:  extraEnvVar.IsSecret, // シークレットフラグを設定する
+				ProjectID: req.ProjectID,                          // プロジェクト ID を設定する
+				Key:       resolveEnvVarKeyLocally(extraEnvVar.Key), // 重複していればランダムサフィックスで解決したキーを設定する
+				Value:     extraEnvVar.Value,                      // 値を設定する
+				IsSecret:  extraEnvVar.IsSecret,                   // シークレットフラグを設定する（TemplateID は設定しない＝手動追加扱い）
 			}
 			if err := svc.envVarRepo.Create(ctx, tx, extraEnvVarData); err != nil { // 追加環境変数を作成する
 				return err // 作成エラーを返してロールバックする

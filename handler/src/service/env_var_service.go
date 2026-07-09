@@ -5,11 +5,46 @@ import (
 	"handler/repository"
 	"context"
 	"errors"
+	"fmt"
+	"math/rand"
 	"gorm.io/gorm"
 )
 
-// ErrDuplicateEnvVarKey は同一プロジェクト内でキーが重複している場合のエラー
+// ErrDuplicateEnvVarKey は同一プロジェクト内でキーが重複している場合のエラー（UpdateEnvVar でのみ使用する）
 var ErrDuplicateEnvVarKey = errors.New("同じキーの環境変数がすでに存在します")
+
+const envVarKeySuffixCharset = "abcdefghijklmnopqrstuvwxyz0123456789" // ランダムサフィックスの文字集合
+
+// generateRandomEnvVarKeySuffix は英数字6文字のランダムサフィックスを生成する
+func generateRandomEnvVarKeySuffix() string {
+	suffixBytes := make([]byte, 6) // サフィックス用バイト列を確保する
+	for charIndex := range suffixBytes {
+		suffixBytes[charIndex] = envVarKeySuffixCharset[rand.Intn(len(envVarKeySuffixCharset))] // ランダムに1文字選ぶ
+	}
+	return string(suffixBytes) // 文字列として返す
+}
+
+// resolveUniqueEnvVarKey は projectID 内で desiredKey が重複する場合、ランダムサフィックスを付けて重複しないキーを返す
+func resolveUniqueEnvVarKey(ctx context.Context, envVarRepo repository.EnvVarRepository, projectID string, desiredKey string) (string, error) {
+	exists, err := envVarRepo.ExistsByProjectIDAndKey(ctx, projectID, desiredKey, "") // 希望キーの重複を確認する
+	if err != nil {
+		return "", err // 確認エラーを返す
+	}
+	if !exists {
+		return desiredKey, nil // 重複がなければそのまま返す
+	}
+	for retryCount := 0; retryCount < 10; retryCount++ { // 安全のため再抽選の上限を設ける
+		candidateKey := fmt.Sprintf("%s_%s", desiredKey, generateRandomEnvVarKeySuffix()) // ランダムサフィックス付きの候補キーを生成する
+		candidateExists, err := envVarRepo.ExistsByProjectIDAndKey(ctx, projectID, candidateKey, "")
+		if err != nil {
+			return "", err // 確認エラーを返す
+		}
+		if !candidateExists {
+			return candidateKey, nil // 空いているキーが見つかったら返す
+		}
+	}
+	return "", errors.New("空いているキー名が見つかりませんでした") // 再抽選上限に達した場合のエラーを返す
+}
 
 // EnvVarService は環境変数 CRUD のビジネスロジックを定義するインターフェース
 type EnvVarService interface {
@@ -79,19 +114,16 @@ func (svc *envVarServiceImpl) CreateEnvVar(ctx context.Context, userID string, p
 		return nil, err // エラーを返す
 	}
 
-	exists, err := svc.envVarRepo.ExistsByProjectIDAndKey(ctx, projectID, req.Key, "") // 同一プロジェクト内でキーが重複しているか確認する
+	resolvedKey, err := resolveUniqueEnvVarKey(ctx, svc.envVarRepo, projectID, req.Key) // 重複していればランダムサフィックスで解決する
 	if err != nil {
-		return nil, err // チェックエラーを返す
-	}
-	if exists { // 重複が存在する場合はエラーを返す
-		return nil, ErrDuplicateEnvVarKey // 重複エラーを返す
+		return nil, err // 解決エラーを返す
 	}
 
 	var createdEnvVar *models.EnvVar                                               // 結果格納用変数を宣言する
 	err = svc.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {            // トランザクションを開始する
 		envVarData := &models.EnvVar{
 			ProjectID: projectID,   // プロジェクト ID を設定する
-			Key:       req.Key,     // キーを設定する
+			Key:       resolvedKey, // 解決済みキーを設定する
 			Value:     req.Value,   // 値を設定する
 			IsSecret:  req.IsSecret, // シークレットフラグを設定する
 		}

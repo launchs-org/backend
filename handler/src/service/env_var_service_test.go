@@ -3,6 +3,7 @@ package service
 import (
 	"handler/models"
 	"context"
+	"strings"
 	"testing"
 
 	"gorm.io/gorm"
@@ -10,11 +11,12 @@ import (
 
 // mockEnvVarRepository は EnvVarRepository のテスト用モック実装
 type mockEnvVarRepository struct {
-	createFunc             func(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error
-	findByIDFunc           func(ctx context.Context, envVarID string) (*models.EnvVar, error)
-	findAllByProjectIDFunc func(ctx context.Context, projectID string) ([]*models.EnvVar, error)
-	updateFunc             func(ctx context.Context, envVar *models.EnvVar) error // tx は省略したシグネチャで定義する
-	deleteFunc             func(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error
+	createFunc                  func(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error
+	findByIDFunc                func(ctx context.Context, envVarID string) (*models.EnvVar, error)
+	findAllByProjectIDFunc      func(ctx context.Context, projectID string) ([]*models.EnvVar, error)
+	updateFunc                  func(ctx context.Context, envVar *models.EnvVar) error // tx は省略したシグネチャで定義する
+	deleteFunc                  func(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error
+	existsByProjectIDAndKeyFunc func(ctx context.Context, projectID string, key string, excludeID string) (bool, error)
 }
 
 func (mock *mockEnvVarRepository) Create(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error {
@@ -57,6 +59,9 @@ func (mock *mockEnvVarRepository) Delete(ctx context.Context, tx *gorm.DB, envVa
 }
 
 func (mock *mockEnvVarRepository) ExistsByProjectIDAndKey(ctx context.Context, projectID string, key string, excludeID string) (bool, error) {
+	if mock.existsByProjectIDAndKeyFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.existsByProjectIDAndKeyFunc(ctx, projectID, key, excludeID)
+	}
 	return false, nil // デフォルトは重複なしを返す
 }
 
@@ -142,6 +147,50 @@ func TestCreateEnvVar_正常にenv_varが作成される_service(t *testing.T) {
 	}
 	if capturedEnvVar.ProjectID != "project-id-1" { // ProjectID が正しく設定されていることを確認する
 		t.Errorf("期待する ProjectID: project-id-1, 実際の ProjectID: %s", capturedEnvVar.ProjectID)
+	}
+}
+
+// TestCreateEnvVar_キーが重複する場合はランダムサフィックスでリネームされる は重複時にエラーを返さずリネームすることを確認する
+func TestCreateEnvVar_キーが重複する場合はランダムサフィックスでリネームされる_service(t *testing.T) {
+	var capturedEnvVar *models.EnvVar // キャプチャした env_var を格納する変数を定義する
+	existsCallCount := 0              // ExistsByProjectIDAndKey の呼び出し回数を記録する
+
+	envVarRepo := &mockEnvVarRepository{
+		createFunc: func(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error {
+			capturedEnvVar = envVar      // env_var をキャプチャする
+			envVar.ID = "new-env-var-id" // ID を付与する
+			return nil
+		},
+		existsByProjectIDAndKeyFunc: func(ctx context.Context, projectID string, key string, excludeID string) (bool, error) {
+			existsCallCount++
+			return key == "MY_KEY", nil // 希望キーのみ重複しているとみなす
+		},
+	}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return &models.Project{ID: projectID, UserID: "test-user-id"}, nil // 所有者として返す
+		},
+	}
+
+	db := setupApplyTestDB(t) // テスト用 DB を準備する
+	svc := NewEnvVarService(db, envVarRepo, projectRepo) // サービスを生成する
+
+	req := CreateEnvVarRequest{Key: "MY_KEY", Value: "my-value", IsSecret: false} // リクエストを定義する
+	result, err := svc.CreateEnvVar(context.Background(), "test-user-id", "project-id-1", req) // env_var を作成する
+	if err != nil {
+		t.Fatalf("CreateEnvVar がエラーを返しました: %v", err) // エラーではなくリネームされることを期待する
+	}
+	if capturedEnvVar.Key == "MY_KEY" { // リネームされていることを確認する
+		t.Error("キーがリネームされていません")
+	}
+	if !strings.HasPrefix(capturedEnvVar.Key, "MY_KEY_") { // "MY_KEY_" プレフィックスを持つことを確認する
+		t.Errorf("期待するプレフィックス: MY_KEY_, 実際のキー: %s", capturedEnvVar.Key)
+	}
+	if result.Key != capturedEnvVar.Key { // 返り値にもリネーム後のキーが反映されていることを確認する
+		t.Errorf("返り値のキーが一致しません: %s != %s", result.Key, capturedEnvVar.Key)
+	}
+	if existsCallCount < 2 { // 希望キーと候補キーの両方で確認していることを確認する
+		t.Errorf("ExistsByProjectIDAndKey の呼び出し回数が想定より少ないです: %d", existsCallCount)
 	}
 }
 
