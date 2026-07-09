@@ -30,7 +30,11 @@ func NewEnvVarRepository(db *gorm.DB) EnvVarRepository {
 
 // Create は env_var レコードを作成する
 func (repo *envVarRepositoryImpl) Create(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error {
-	return tx.WithContext(ctx).Create(envVar).Error // tx を使って作成する
+	db := repo.db // tx が nil の場合は repo.db を使う
+	if tx != nil {
+		db = tx
+	}
+	return db.WithContext(ctx).Create(envVar).Error // db を使って作成する
 }
 
 // FindByID は envVarID に対応する env_var を返す
@@ -75,10 +79,18 @@ func (repo *envVarRepositoryImpl) ExistsByProjectIDAndKey(ctx context.Context, p
 
 // Update は env_var レコードを更新する
 func (repo *envVarRepositoryImpl) Update(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error {
-	return tx.WithContext(ctx).Save(envVar).Error // tx を使って保存する
+	db := repo.db // tx が nil の場合は repo.db を使う
+	if tx != nil {
+		db = tx
+	}
+	return db.WithContext(ctx).Save(envVar).Error // db を使って保存する
 }
 
 // Delete は env_var レコードを削除する
 func (repo *envVarRepositoryImpl) Delete(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error {
-	return tx.WithContext(ctx).Delete(envVar).Error // tx を使って削除する
+	db := repo.db // tx が nil の場合は repo.db を使う
+	if tx != nil {
+		db = tx
+	}
+	return db.WithContext(ctx).Delete(envVar).Error // db を使って削除する
 }

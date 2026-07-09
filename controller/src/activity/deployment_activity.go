@@ -4,19 +4,23 @@ import (
 	"app/shared/models"
 	"app/shared/repository"
 	"context"
+	"errors"
 	"fmt"
 
 	"controller/k8s"
 
+	"gorm.io/gorm"
 	k8sclient "k8s.io/client-go/kubernetes"
 )
 
 // DeploymentActivities は Deployment 削除 Workflow で使われる Activity 群を保持する構造体
 type DeploymentActivities struct {
-	k8sClient      k8sclient.Interface                // k8s クライアント
-	deploymentRepo repository.DeploymentRepository    // deployment リポジトリ
-	projectRepo    repository.ProjectRepository       // project リポジトリ
+	k8sClient       k8sclient.Interface               // k8s クライアント
+	deploymentRepo  repository.DeploymentRepository   // deployment リポジトリ
+	projectRepo     repository.ProjectRepository      // project リポジトリ
 	volumeMountRepo repository.VolumeMountRepository  // volume_mount リポジトリ
+	envVarRepo      repository.EnvVarRepository       // env_var リポジトリ（削除時の後始末用）
+	envVarMountRepo repository.EnvVarMountRepository  // env_var_mount リポジトリ（削除時の後始末用）
 }
 
 // NewDeploymentActivities は DeploymentActivities を生成して返す
@@ -25,12 +29,16 @@ func NewDeploymentActivities(
 	deploymentRepo repository.DeploymentRepository,
 	projectRepo repository.ProjectRepository,
 	volumeMountRepo repository.VolumeMountRepository,
+	envVarRepo repository.EnvVarRepository,
+	envVarMountRepo repository.EnvVarMountRepository,
 ) *DeploymentActivities {
 	return &DeploymentActivities{ // 依存を注入して返す
 		k8sClient:       k8sClient,
 		deploymentRepo:  deploymentRepo,
 		projectRepo:     projectRepo,
 		volumeMountRepo: volumeMountRepo,
+		envVarRepo:      envVarRepo,
+		envVarMountRepo: envVarMountRepo,
 	}
 }
 
@@ -102,10 +110,47 @@ func (activities *DeploymentActivities) DeleteDeploymentRecordActivity(ctx conte
 		return fmt.Errorf("delete volume_mounts: %w", err) // 削除エラーを返す
 	}
 
+	// env_var_mount と、他のデプロイメントから参照されなくなった env_var 本体を削除する
+	if err := activities.deleteEnvVarsByDeploymentID(ctx, input.DeploymentID); err != nil {
+		return fmt.Errorf("delete env_vars: %w", err) // 削除エラーを返す
+	}
+
 	// deployment レコードを削除する
 	if err := activities.deploymentRepo.Delete(ctx, input.DeploymentID); err != nil { // deployment を削除する
 		return fmt.Errorf("delete deployment: %w", err) // 削除エラーを返す
 	}
 
 	return nil // 正常終了を返す
+}
+
+// deleteEnvVarsByDeploymentID は deploymentID に紐づく env_var_mount を全件削除し、
+// 他のデプロイメントから参照されなくなった env_var 本体も削除する
+func (activities *DeploymentActivities) deleteEnvVarsByDeploymentID(ctx context.Context, deploymentID string) error {
+	envVarMountList, err := activities.envVarMountRepo.FindAllByDeploymentID(ctx, deploymentID) // 紐づくマウント設定一覧を取得する
+	if err != nil {
+		return err // 取得エラーを返す
+	}
+	if err := activities.envVarMountRepo.DeleteAllByDeploymentID(ctx, nil, deploymentID); err != nil { // マウント設定を一括削除する
+		return err // 削除エラーを返す
+	}
+	for _, mountItem := range envVarMountList { // 各マウント設定が参照していた env_var を確認する
+		remainingCount, err := activities.envVarMountRepo.CountByEnvVarID(ctx, mountItem.EnvVarID) // 残存参照数を確認する
+		if err != nil {
+			return err // 確認エラーを返す
+		}
+		if remainingCount > 0 { // 他のデプロイメントからまだ参照されている場合は残す
+			continue
+		}
+		envVarData, err := activities.envVarRepo.FindByID(ctx, mountItem.EnvVarID) // env_var 本体を取得する
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) { // 既に削除済みなら何もしない
+				continue
+			}
+			return err // 取得エラーを返す
+		}
+		if err := activities.envVarRepo.Delete(ctx, nil, envVarData); err != nil { // env_var 本体を削除する
+			return err // 削除エラーを返す
+		}
+	}
+	return nil // 全て成功
 }

@@ -15,6 +15,8 @@ type EnvVarMountRepository interface {
 	FindByDeploymentIDAndEnvVarID(ctx context.Context, deploymentID string, envVarID string) (*models.EnvVarMount, error) // deploymentID と envVarID でマウント設定を取得する
 	UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount, status models.EnvVarMountStatus) error // ステータスを更新する
 	Delete(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error                                        // マウント設定を削除する
+	DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error                             // deploymentID に紐づくマウント設定を全件削除する
+	CountByEnvVarID(ctx context.Context, envVarID string) (int64, error)                                             // envVarID を参照しているマウント件数を数える
 }
 
 // envVarMountRepositoryImpl は EnvVarMountRepository の GORM 実装
@@ -76,4 +78,22 @@ func (repo *envVarMountRepositoryImpl) Delete(ctx context.Context, tx *gorm.DB, 
 		db = tx
 	}
 	return db.WithContext(ctx).Delete(mount).Error // db を使って削除する
+}
+
+// DeleteAllByDeploymentID は deploymentID に紐づくマウント設定を全件削除する
+func (repo *envVarMountRepositoryImpl) DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error {
+	db := repo.db // tx が nil の場合は repo.db を使う
+	if tx != nil {
+		db = tx
+	}
+	return db.WithContext(ctx).Where("deployment_id = ?", deploymentID).Delete(&models.EnvVarMount{}).Error // db を使って一括削除する
+}
+
+// CountByEnvVarID は envVarID を参照しているマウント件数を返す（他デプロイメントからの参照有無判定用）
+func (repo *envVarMountRepositoryImpl) CountByEnvVarID(ctx context.Context, envVarID string) (int64, error) {
+	var count int64                                                                                                          // 件数格納用変数を定義する
+	if err := repo.db.WithContext(ctx).Model(&models.EnvVarMount{}).Where("env_var_id = ?", envVarID).Count(&count).Error; err != nil { // db から件数を取得する
+		return 0, err // 取得エラーを返す
+	}
+	return count, nil // 件数を返す
 }

@@ -103,7 +103,7 @@ func main() {
 
 	imageRepo := repository.NewImageRepository(repository.Database) // image リポジトリを生成する
 
-	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, imageRepo, userQuotaRepo, k8sClient, temporalClient)               // deployment サービスを生成する
+	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, envVarRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, imageRepo, userQuotaRepo, k8sClient, temporalClient)               // deployment サービスを生成する
 	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, pathRuleRepo, userQuotaRepo, temporalClient, baseDomain) // apply サービスを生成する
 	deploymentHandler := handler.NewDeploymentHandler(deploymentServiceImpl, applyServiceImpl)                                                                                                                                        // deployment ハンドラーを生成する
 

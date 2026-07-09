@@ -251,10 +251,91 @@ func (mock *mockVolumeMountRepository) DeleteAllByDeploymentID(ctx context.Conte
 	return nil
 }
 
+// mockEnvVarRepository は EnvVarRepository のテスト用モック（controller activity 用）
+type mockEnvVarRepositoryForActivity struct {
+	findByIDFunc func(ctx context.Context, envVarID string) (*models.EnvVar, error)
+	deleteFunc   func(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error
+	deletedIDs   []string // 削除された envVarID を記録する
+}
+
+func (mock *mockEnvVarRepositoryForActivity) Create(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error {
+	return nil
+}
+func (mock *mockEnvVarRepositoryForActivity) FindByIDForUpdate(ctx context.Context, tx *gorm.DB, envVarID string) (*models.EnvVar, error) {
+	return nil, nil
+}
+func (mock *mockEnvVarRepositoryForActivity) FindByID(ctx context.Context, envVarID string) (*models.EnvVar, error) {
+	if mock.findByIDFunc != nil {
+		return mock.findByIDFunc(ctx, envVarID)
+	}
+	return &models.EnvVar{ID: envVarID}, nil
+}
+func (mock *mockEnvVarRepositoryForActivity) FindAllByProjectID(ctx context.Context, projectID string) ([]*models.EnvVar, error) {
+	return nil, nil
+}
+func (mock *mockEnvVarRepositoryForActivity) ExistsByProjectIDAndKey(ctx context.Context, projectID string, key string, excludeID string) (bool, error) {
+	return false, nil
+}
+func (mock *mockEnvVarRepositoryForActivity) Update(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error {
+	return nil
+}
+func (mock *mockEnvVarRepositoryForActivity) Delete(ctx context.Context, tx *gorm.DB, envVar *models.EnvVar) error {
+	mock.deletedIDs = append(mock.deletedIDs, envVar.ID) // 削除 ID を記録する
+	if mock.deleteFunc != nil {
+		return mock.deleteFunc(ctx, tx, envVar)
+	}
+	return nil
+}
+
+// mockEnvVarMountRepositoryForActivity は EnvVarMountRepository のテスト用モック（controller activity 用）
+type mockEnvVarMountRepositoryForActivity struct {
+	findAllByDeploymentIDFunc   func(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error)
+	deleteAllByDeploymentIDFunc func(ctx context.Context, deploymentID string) error
+	countByEnvVarIDFunc         func(ctx context.Context, envVarID string) (int64, error)
+	deletedAllDeploymentIDs     []string // DeleteAllByDeploymentID が呼ばれた deploymentID を記録する
+}
+
+func (mock *mockEnvVarMountRepositoryForActivity) Create(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error {
+	return nil
+}
+func (mock *mockEnvVarMountRepositoryForActivity) FindByID(ctx context.Context, mountID string) (*models.EnvVarMount, error) {
+	return nil, nil
+}
+func (mock *mockEnvVarMountRepositoryForActivity) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error) {
+	if mock.findAllByDeploymentIDFunc != nil {
+		return mock.findAllByDeploymentIDFunc(ctx, deploymentID)
+	}
+	return []*models.EnvVarMount{}, nil
+}
+func (mock *mockEnvVarMountRepositoryForActivity) FindByDeploymentIDAndEnvVarID(ctx context.Context, deploymentID string, envVarID string) (*models.EnvVarMount, error) {
+	return nil, nil
+}
+func (mock *mockEnvVarMountRepositoryForActivity) UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount, status models.EnvVarMountStatus) error {
+	return nil
+}
+func (mock *mockEnvVarMountRepositoryForActivity) Delete(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error {
+	return nil
+}
+func (mock *mockEnvVarMountRepositoryForActivity) DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error {
+	mock.deletedAllDeploymentIDs = append(mock.deletedAllDeploymentIDs, deploymentID) // 呼び出しを記録する
+	if mock.deleteAllByDeploymentIDFunc != nil {
+		return mock.deleteAllByDeploymentIDFunc(ctx, deploymentID)
+	}
+	return nil
+}
+func (mock *mockEnvVarMountRepositoryForActivity) CountByEnvVarID(ctx context.Context, envVarID string) (int64, error) {
+	if mock.countByEnvVarIDFunc != nil {
+		return mock.countByEnvVarIDFunc(ctx, envVarID)
+	}
+	return 0, nil
+}
+
 // インターフェース実装を静的に確認する
 var _ repository.DeploymentRepository = (*mockDeploymentRepository)(nil)
 var _ repository.ProjectRepository = (*mockProjectRepository)(nil)
 var _ repository.VolumeMountRepository = (*mockVolumeMountRepository)(nil)
+var _ repository.EnvVarRepository = (*mockEnvVarRepositoryForActivity)(nil)
+var _ repository.EnvVarMountRepository = (*mockEnvVarMountRepositoryForActivity)(nil)
 
 // TestSetDeploymentDeletingActivity_正常にステータスがdeletingになる は deployment ステータスが deleting に変更されることを確認する
 func TestSetDeploymentDeletingActivity_正常にステータスがdeletingになる(t *testing.T) {
@@ -280,6 +361,8 @@ func TestSetDeploymentDeletingActivity_正常にステータスがdeletingにな
 		deploymentRepo:  deploymentRepo,               // モックリポジトリを注入する
 		projectRepo:     &mockProjectRepository{},     // 空のモックを注入する
 		volumeMountRepo: &mockVolumeMountRepository{}, // 空のモックを注入する
+		envVarRepo:      &mockEnvVarRepositoryForActivity{},      // 空のモックを注入する
+		envVarMountRepo: &mockEnvVarMountRepositoryForActivity{}, // 空のモックを注入する
 	}
 
 	err := activities.SetDeploymentDeletingActivity(ctx, DeleteDeploymentInput{DeploymentID: "deployment-1"}) // Activity を実行する
@@ -309,6 +392,8 @@ func TestSetDeploymentDeletingActivity_deploymentが見つからない場合は�
 		deploymentRepo:  deploymentRepo,               // モックリポジトリを注入する
 		projectRepo:     &mockProjectRepository{},     // 空のモックを注入する
 		volumeMountRepo: &mockVolumeMountRepository{}, // 空のモックを注入する
+		envVarRepo:      &mockEnvVarRepositoryForActivity{},      // 空のモックを注入する
+		envVarMountRepo: &mockEnvVarMountRepositoryForActivity{}, // 空のモックを注入する
 	}
 
 	err := activities.SetDeploymentDeletingActivity(ctx, DeleteDeploymentInput{DeploymentID: "not-exists"}) // Activity を実行する
@@ -340,6 +425,8 @@ func TestDeleteDeploymentRecordActivity_正常にDBレコードが削除され�
 		deploymentRepo:  deploymentRepo,               // モックリポジトリを注入する
 		projectRepo:     &mockProjectRepository{},     // 空のモックを注入する
 		volumeMountRepo: &mockVolumeMountRepository{}, // 空のモックを注入する
+		envVarRepo:      &mockEnvVarRepositoryForActivity{},      // 空のモックを注入する
+		envVarMountRepo: &mockEnvVarMountRepositoryForActivity{}, // 空のモックを注入する
 	}
 
 	err := activities.DeleteDeploymentRecordActivity(ctx, DeleteDeploymentInput{DeploymentID: "deployment-1"}) // Activity を実行する
@@ -351,5 +438,74 @@ func TestDeleteDeploymentRecordActivity_正常にDBレコードが削除され�
 	}
 	if !deleteCalled { // Delete が呼ばれていない場合はテスト失敗
 		t.Error("Delete が呼ばれていません")
+	}
+}
+
+// TestDeleteDeploymentRecordActivity_他デプロイメントから参照されないenv_varは削除される は単独参照の env_var が削除されることを確認する
+func TestDeleteDeploymentRecordActivity_他デプロイメントから参照されないenv_varは削除される(t *testing.T) {
+	ctx := context.Background() // テスト用コンテキストを生成する
+
+	deploymentRepo := &mockDeploymentRepository{}
+	envVarMountRepo := &mockEnvVarMountRepositoryForActivity{
+		findAllByDeploymentIDFunc: func(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error) {
+			return []*models.EnvVarMount{{ID: "mount-1", EnvVarID: "env-var-1", DeploymentID: deploymentID}}, nil // 単独参照のマウントを返す
+		},
+		countByEnvVarIDFunc: func(ctx context.Context, envVarID string) (int64, error) {
+			return 0, nil // 他デプロイメントからの参照なしを返す
+		},
+	}
+	envVarRepo := &mockEnvVarRepositoryForActivity{}
+
+	activities := &DeploymentActivities{
+		k8sClient:       k8sfake.NewSimpleClientset(), // fake k8s クライアントを生成する
+		deploymentRepo:  deploymentRepo,               // モックリポジトリを注入する
+		projectRepo:     &mockProjectRepository{},     // 空のモックを注入する
+		volumeMountRepo: &mockVolumeMountRepository{}, // 空のモックを注入する
+		envVarRepo:      envVarRepo,                   // モックリポジトリを注入する
+		envVarMountRepo: envVarMountRepo,               // モックリポジトリを注入する
+	}
+
+	err := activities.DeleteDeploymentRecordActivity(ctx, DeleteDeploymentInput{DeploymentID: "deployment-1"}) // Activity を実行する
+	if err != nil {
+		t.Fatalf("DeleteDeploymentRecordActivity がエラーを返しました: %v", err) // エラーが発生した場合はテスト失敗
+	}
+	if len(envVarMountRepo.deletedAllDeploymentIDs) != 1 || envVarMountRepo.deletedAllDeploymentIDs[0] != "deployment-1" { // マウントが一括削除されたことを確認する
+		t.Errorf("期待する削除 deploymentID: deployment-1, 実際: %v", envVarMountRepo.deletedAllDeploymentIDs)
+	}
+	if len(envVarRepo.deletedIDs) != 1 || envVarRepo.deletedIDs[0] != "env-var-1" { // env_var 本体が削除されたことを確認する
+		t.Errorf("期待する削除 envVarID: env-var-1, 実際: %v", envVarRepo.deletedIDs)
+	}
+}
+
+// TestDeleteDeploymentRecordActivity_他デプロイメントから参照中のenv_varは残る は共有参照の env_var が削除されないことを確認する
+func TestDeleteDeploymentRecordActivity_他デプロイメントから参照中のenv_varは残る(t *testing.T) {
+	ctx := context.Background() // テスト用コンテキストを生成する
+
+	deploymentRepo := &mockDeploymentRepository{}
+	envVarMountRepo := &mockEnvVarMountRepositoryForActivity{
+		findAllByDeploymentIDFunc: func(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error) {
+			return []*models.EnvVarMount{{ID: "mount-1", EnvVarID: "env-var-shared", DeploymentID: deploymentID}}, nil // 共有参照のマウントを返す
+		},
+		countByEnvVarIDFunc: func(ctx context.Context, envVarID string) (int64, error) {
+			return 1, nil // 他デプロイメントからまだ参照されていることを返す
+		},
+	}
+	envVarRepo := &mockEnvVarRepositoryForActivity{}
+
+	activities := &DeploymentActivities{
+		k8sClient:       k8sfake.NewSimpleClientset(), // fake k8s クライアントを生成する
+		deploymentRepo:  deploymentRepo,               // モックリポジトリを注入する
+		projectRepo:     &mockProjectRepository{},     // 空のモックを注入する
+		volumeMountRepo: &mockVolumeMountRepository{}, // 空のモックを注入する
+		envVarRepo:      envVarRepo,                   // モックリポジトリを注入する
+		envVarMountRepo: envVarMountRepo,               // モックリポジトリを注入する
+	}
+
+	err := activities.DeleteDeploymentRecordActivity(ctx, DeleteDeploymentInput{DeploymentID: "deployment-1"}) // Activity を実行する
+	if err != nil {
+		t.Fatalf("DeleteDeploymentRecordActivity がエラーを返しました: %v", err) // エラーが発生した場合はテスト失敗
+	}
+	if len(envVarRepo.deletedIDs) != 0 { // env_var 本体が削除されていないことを確認する
+		t.Errorf("env_var は削除されないはずですが、削除されました: %v", envVarRepo.deletedIDs)
 	}
 }

@@ -11,11 +11,14 @@ import (
 
 // mockEnvVarMountRepository は EnvVarMountRepository のテスト用モック実装
 type mockEnvVarMountRepository struct {
-	createFunc                        func(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error
-	findByIDFunc                      func(ctx context.Context, mountID string) (*models.EnvVarMount, error)
-	findAllByDeploymentIDFunc         func(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error)
+	createFunc                  func(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error
+	findByIDFunc                func(ctx context.Context, mountID string) (*models.EnvVarMount, error)
+	findAllByDeploymentIDFunc   func(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error)
 	findByDeploymentIDAndEnvVarIDFunc func(ctx context.Context, deploymentID string, envVarID string) (*models.EnvVarMount, error)
-	deleteFunc                        func(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error
+	deleteFunc                  func(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error
+	deleteAllByDeploymentIDFunc func(ctx context.Context, deploymentID string) error
+	countByEnvVarIDFunc         func(ctx context.Context, envVarID string) (int64, error)
+	deletedAllDeploymentIDs     []string // DeleteAllByDeploymentID が呼ばれた deploymentID を記録する
 }
 
 func (mock *mockEnvVarMountRepository) Create(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error {
@@ -55,6 +58,21 @@ func (mock *mockEnvVarMountRepository) Delete(ctx context.Context, tx *gorm.DB, 
 		return mock.deleteFunc(ctx, tx, mount)
 	}
 	return nil // デフォルトは nil を返す
+}
+
+func (mock *mockEnvVarMountRepository) DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error {
+	mock.deletedAllDeploymentIDs = append(mock.deletedAllDeploymentIDs, deploymentID) // 呼び出しを記録する
+	if mock.deleteAllByDeploymentIDFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.deleteAllByDeploymentIDFunc(ctx, deploymentID)
+	}
+	return nil // デフォルトは nil を返す
+}
+
+func (mock *mockEnvVarMountRepository) CountByEnvVarID(ctx context.Context, envVarID string) (int64, error) {
+	if mock.countByEnvVarIDFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.countByEnvVarIDFunc(ctx, envVarID)
+	}
+	return 0, nil // デフォルトは参照なしを返す
 }
 
 // mockDeploymentRepositoryForMount は DeploymentRepository のテスト用モック実装（mount service テスト専用）

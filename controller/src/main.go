@@ -81,6 +81,8 @@ func main() {
 		deploymentRepo,
 		projectRepo,
 		volumeMountRepo,
+		envVarRepo,
+		envVarMountRepo,
 	)
 	projectActivities := activity.NewProjectActivities( // Project Activity を生成する
 		k8sClient,

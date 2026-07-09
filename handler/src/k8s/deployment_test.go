@@ -202,6 +202,12 @@ func (mock *mockEnvVarMountRepoForDeployment) Delete(ctx context.Context, tx *go
 	mock.deletedIDs = append(mock.deletedIDs, mount.ID) // 削除 ID を記録する
 	return nil
 }
+func (mock *mockEnvVarMountRepoForDeployment) DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error {
+	return nil // 使用しない
+}
+func (mock *mockEnvVarMountRepoForDeployment) CountByEnvVarID(ctx context.Context, envVarID string) (int64, error) {
+	return 0, nil // 使用しない
+}
 
 // mockVolumeMountRepoForDeployment は VolumeMountRepository のテスト用モック
 type mockVolumeMountRepoForDeployment struct{}

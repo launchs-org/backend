@@ -23,6 +23,7 @@ type mockDeploymentRepository struct {
 	saveFunc                          func(ctx context.Context, deployment *models.Deployment) error
 	updatesFunc                       func(ctx context.Context, tx *gorm.DB, deployment *models.Deployment, values map[string]interface{}) error
 	updatePendingGithubCommitSHAFunc  func(ctx context.Context, deploymentID string, commitSHA string) error
+	createWithTxFunc                  func(ctx context.Context, tx *gorm.DB, deployment *models.Deployment) error
 }
 
 func (mock *mockDeploymentRepository) Create(ctx context.Context, deployment *models.Deployment) error {
@@ -102,7 +103,10 @@ func (mock *mockDeploymentRepository) FindAllRunning(ctx context.Context) ([]mod
 	return nil, nil // テストでは使用しないためデフォルト nil を返す
 }
 func (mock *mockDeploymentRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, deployment *models.Deployment) error {
-	return nil // テストでは使用しないためデフォルト nil を返す
+	if mock.createWithTxFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.createWithTxFunc(ctx, tx, deployment)
+	}
+	return nil // デフォルトは nil を返す
 }
 
 // mockServiceRepository は ServiceRepository のテスト用モック実装
@@ -321,7 +325,7 @@ func (mock *mockImageRepository) Delete(ctx context.Context, image *models.Image
 // newTestDeploymentService はテスト用のデフォルト DeploymentService を生成するヘルパー関数
 func newTestDeploymentService(deploymentRepo *mockDeploymentRepository, serviceRepo *mockServiceRepository, projectRepo *mockProjectRepository) DeploymentService {
 	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
-	return NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &mockImageRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
+	return NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarRepository{}, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &mockImageRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
 }
 
 // TestCreateDeployment_正常に作成されpendingフィールドに値が入る は POST で全フィールドが pending_*** に入ることを確認する
@@ -350,7 +354,7 @@ func TestCreateDeployment_正常に作成されpendingフィールドに値が�
 	}
 
 	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
-	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, &mockProjectRepository{}, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, imageRepo, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, &mockProjectRepository{}, &mockEnvVarRepository{}, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, imageRepo, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
 	req := CreateDeploymentRequest{
 		ProjectID:    "project-id-1",  // プロジェクト ID を設定する
 		Name:         "my-app",        // デプロイメント名を設定する
@@ -478,7 +482,7 @@ func TestUpdateDeployment_送ったフィールドのみpendingが更新され�
 	}
 
 	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
-	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, &mockProjectRepository{}, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, imageRepo, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, &mockProjectRepository{}, &mockEnvVarRepository{}, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, imageRepo, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
 	newImageURL := "nginx:1.25"                                        // 更新する image_url を設定する
 	req := UpdateDeploymentRequest{
 		ImageURL: &newImageURL, // image_url のみ送る
@@ -549,7 +553,7 @@ func TestDeleteDeployment_statusがdeletingになる(t *testing.T) {
 	// k8s Deployment が存在することを示すために fake client に登録する
 	fakeK8sClient := k8sfake.NewSimpleClientset(makeK8sDeployment("test-ns", "test-deploy")) // fake k8s クライアントを生成する
 
-	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &mockImageRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarRepository{}, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &mockImageRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
 
 	result, err := deploymentSvc.DeleteDeployment(context.Background(), "test-user-id", "deployment-id-1") // サービスを実行する
 	if err != nil {
@@ -580,6 +584,48 @@ func TestDeleteDeployment_存在しないdeploymentはエラーを返す(t *test
 	}
 }
 
+// TestDeleteDeployment_not_init状態で他から参照されないenv_varが削除される は not_init 即時削除パスで単独参照の env_var が削除されることを確認する
+func TestDeleteDeployment_not_init状態で他から参照されないenv_varが削除される(t *testing.T) {
+	originalDeployment := &models.Deployment{
+		ID:        "deployment-id-notinit",
+		Name:      "test-deploy",
+		ProjectID: "project-id-1",
+		Status:    models.DeploymentStatusNotInit, // not_init 状態を設定する
+	}
+
+	deploymentRepo := &mockDeploymentRepository{
+		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
+			return originalDeployment, nil // not_init の deployment を返す
+		},
+	}
+	serviceRepo := &mockServiceRepository{}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return &models.Project{UserID: "test-user-id", Namespace: "test-ns"}, nil // namespace 付きの project を返す
+		},
+	}
+	envVarMountRepo := &mockEnvVarMountRepository{
+		findAllByDeploymentIDFunc: func(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error) {
+			return []*models.EnvVarMount{{ID: "mount-1", EnvVarID: "env-var-1", DeploymentID: deploymentID}}, nil // 単独参照のマウントを返す
+		},
+		countByEnvVarIDFunc: func(ctx context.Context, envVarID string) (int64, error) {
+			return 0, nil // 他デプロイメントからの参照なしを返す
+		},
+	}
+	envVarRepo := &mockEnvVarRepository{}
+	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
+
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, envVarRepo, envVarMountRepo, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &mockImageRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
+
+	_, err := deploymentSvc.DeleteDeployment(context.Background(), "test-user-id", "deployment-id-notinit") // サービスを実行する
+	if err != nil {
+		t.Fatalf("DeleteDeployment がエラーを返しました: %v", err)
+	}
+	if len(envVarMountRepo.deletedAllDeploymentIDs) != 1 || envVarMountRepo.deletedAllDeploymentIDs[0] != "deployment-id-notinit" { // マウントが一括削除されたことを確認する
+		t.Errorf("期待する削除 deploymentID: deployment-id-notinit, 実際: %v", envVarMountRepo.deletedAllDeploymentIDs)
+	}
+}
+
 // TestDeleteDeployment_k8sリソースが削除される は DeleteDeployment で k8s Deployment が削除されることを確認する
 func TestDeleteDeployment_k8sリソースが削除される(t *testing.T) {
 	originalDeployment := &models.Deployment{
@@ -606,7 +652,7 @@ func TestDeleteDeployment_k8sリソースが削除される(t *testing.T) {
 
 	// k8s Deployment が存在することを示すために fake client に登録する
 	fakeK8sClient := k8sfake.NewSimpleClientset(makeK8sDeployment("test-ns", "test-deploy")) // fake k8s クライアントを生成する
-	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &mockImageRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, &mockEnvVarRepository{}, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, &mockImageRepository{}, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
 
 	result, err := deploymentSvc.DeleteDeployment(context.Background(), "test-user-id", "deployment-id-k8s") // サービスを実行する
 	if err != nil {
@@ -805,7 +851,7 @@ func TestCreateDeployment_同一イメージURLでImageが重複作成されな�
 	}
 	serviceRepo := &mockServiceRepository{}
 	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
-	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, &mockProjectRepository{}, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, imageRepo, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
+	deploymentSvc := NewDeploymentService(deploymentRepo, serviceRepo, &mockProjectRepository{}, &mockEnvVarRepository{}, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockBuildRepository{}, imageRepo, &noopUserQuotaRepository{}, fakeK8sClient, &mockWorkflowStarter{}) // サービスを生成する
 
 	req := CreateDeploymentRequest{
 		ProjectID: "project-id-1",

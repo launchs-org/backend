@@ -79,6 +79,7 @@ type deploymentServiceImpl struct {
 	deploymentRepo   repository.DeploymentRepository      // deployment リポジトリ
 	serviceRepo      repository.ServiceRepository         // service リポジトリ
 	projectRepo      repository.ProjectRepository         // project リポジトリ（所有権チェック用）
+	envVarRepo       repository.EnvVarRepository          // env_var リポジトリ（削除時の後始末用）
 	envVarMountRepo  repository.EnvVarMountRepository     // env_var_mount リポジトリ
 	volumeMountRepo  repository.VolumeMountRepository     // volume_mount リポジトリ
 	applyHistoryRepo repository.ApplyHistoryRepository    // apply_history リポジトリ（not_init 削除時の DB クリーンアップ用）
@@ -94,6 +95,7 @@ func NewDeploymentService(
 	deploymentRepo repository.DeploymentRepository,
 	serviceRepo repository.ServiceRepository,
 	projectRepo repository.ProjectRepository,
+	envVarRepo repository.EnvVarRepository,
 	envVarMountRepo repository.EnvVarMountRepository,
 	volumeMountRepo repository.VolumeMountRepository,
 	applyHistoryRepo repository.ApplyHistoryRepository,
@@ -107,6 +109,7 @@ func NewDeploymentService(
 		deploymentRepo:  deploymentRepo,   // deployment リポジトリを注入する
 		serviceRepo:     serviceRepo,      // service リポジトリを注入する
 		projectRepo:     projectRepo,      // project リポジトリを注入する
+		envVarRepo:      envVarRepo,       // env_var リポジトリを注入する
 		envVarMountRepo: envVarMountRepo,  // env_var_mount リポジトリを注入する
 		volumeMountRepo: volumeMountRepo,  // volume_mount リポジトリを注入する
 		applyHistoryRepo: applyHistoryRepo, // apply_history リポジトリを注入する
@@ -323,6 +326,9 @@ func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID s
 		if err := svc.volumeMountRepo.DeleteAllByDeploymentID(ctx, nil, deploymentData.ID); err != nil { // volume_mount レコードを削除する
 			return nil, err // 削除エラーを返す
 		}
+		if err := svc.deleteEnvVarsByDeploymentID(ctx, deploymentData.ID); err != nil { // env_var_mount と参照が切れた env_var を削除する
+			return nil, err // 削除エラーを返す
+		}
 		if err := svc.deploymentRepo.Delete(ctx, deploymentData.ID); err != nil { // deployment レコードを削除する
 			return nil, err // 削除エラーを返す
 		}
@@ -347,6 +353,38 @@ func (svc *deploymentServiceImpl) DeleteDeployment(ctx context.Context, userID s
 	}
 
 	return deploymentData, nil // 更新後の deployment を返す
+}
+
+// deleteEnvVarsByDeploymentID は deploymentID に紐づく env_var_mount を全件削除し、
+// 他のデプロイメントから参照されなくなった env_var 本体も削除する
+func (svc *deploymentServiceImpl) deleteEnvVarsByDeploymentID(ctx context.Context, deploymentID string) error {
+	envVarMountList, err := svc.envVarMountRepo.FindAllByDeploymentID(ctx, deploymentID) // 紐づくマウント設定一覧を取得する
+	if err != nil {
+		return err // 取得エラーを返す
+	}
+	if err := svc.envVarMountRepo.DeleteAllByDeploymentID(ctx, nil, deploymentID); err != nil { // マウント設定を一括削除する
+		return err // 削除エラーを返す
+	}
+	for _, mountItem := range envVarMountList { // 各マウント設定が参照していた env_var を確認する
+		remainingCount, err := svc.envVarMountRepo.CountByEnvVarID(ctx, mountItem.EnvVarID) // 残存参照数を確認する
+		if err != nil {
+			return err // 確認エラーを返す
+		}
+		if remainingCount > 0 { // 他のデプロイメントからまだ参照されている場合は残す
+			continue
+		}
+		envVarData, err := svc.envVarRepo.FindByID(ctx, mountItem.EnvVarID) // env_var 本体を取得する
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) { // 既に削除済みなら何もしない
+				continue
+			}
+			return err // 取得エラーを返す
+		}
+		if err := svc.envVarRepo.Delete(ctx, nil, envVarData); err != nil { // env_var 本体を削除する
+			return err // 削除エラーを返す
+		}
+	}
+	return nil // 全て成功
 }
 
 // GetService は deploymentID に紐づく service 設定を返す
