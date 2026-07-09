@@ -20,3 +20,7 @@ code, .font-mono {
     stroke-dashoffset: -18;
   }
 }
+
+html, body {
+  overscroll-behavior-y: none;
+}
