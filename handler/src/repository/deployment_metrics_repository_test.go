@@ -94,11 +94,11 @@ func TestDeploymentMetricsRepository_FindByDeploymentID_RecordedAt降順で取�
 
 	now := time.Now().Truncate(time.Second)  // 現在時刻を取得する
 
-	// 異なる RecordedAt で 3 件のメトリクスを保存する
+	// 同一 Pod（pod-a）について異なる RecordedAt で 3 件のメトリクスを保存する
 	metricsList := []*models.DeploymentMetrics{
 		{DeploymentID: deploymentData.ID, PodName: "pod-a", CPUMillicores: 100, MemoryBytes: 100, ReadyReplicas: 1, TotalReplicas: 1, RecordedAt: now.Add(-60 * time.Second)}, // 最古のレコード
-		{DeploymentID: deploymentData.ID, PodName: "pod-b", CPUMillicores: 200, MemoryBytes: 200, ReadyReplicas: 1, TotalReplicas: 1, RecordedAt: now.Add(-30 * time.Second)}, // 中間のレコード
-		{DeploymentID: deploymentData.ID, PodName: "pod-c", CPUMillicores: 300, MemoryBytes: 300, ReadyReplicas: 1, TotalReplicas: 1, RecordedAt: now},                        // 最新のレコード
+		{DeploymentID: deploymentData.ID, PodName: "pod-a", CPUMillicores: 200, MemoryBytes: 200, ReadyReplicas: 1, TotalReplicas: 1, RecordedAt: now.Add(-30 * time.Second)}, // 中間のレコード
+		{DeploymentID: deploymentData.ID, PodName: "pod-a", CPUMillicores: 300, MemoryBytes: 300, ReadyReplicas: 1, TotalReplicas: 1, RecordedAt: now},                        // 最新のレコード
 	}
 	db.Create(&metricsList) // テスト用レコードを作成する
 	t.Cleanup(func() { // テスト終了後にレコードを削除する
@@ -122,6 +122,49 @@ func TestDeploymentMetricsRepository_FindByDeploymentID_RecordedAt降順で取�
 	}
 	if result[1].CPUMillicores != 200 { // 2 番目のレコードを確認する
 		t.Errorf("2 件目は中間レコード（CPU=200）のはずですが、実際は CPU=%d", result[1].CPUMillicores)
+	}
+}
+
+// TestDeploymentMetricsRepository_FindByDeploymentID_消えたPodのレコードは除外される は直近のポーリングに存在しない Pod のレコードが結果から除外されることを確認する
+func TestDeploymentMetricsRepository_FindByDeploymentID_消えたPodのレコードは除外される(t *testing.T) {
+	db := setupTestDB(t) // テスト用 DB を準備する
+
+	// DeploymentMetrics テーブルをマイグレーションする
+	if err := db.AutoMigrate(&models.DeploymentMetrics{}); err != nil {
+		t.Fatalf("DeploymentMetrics マイグレーションに失敗しました: %v", err)
+	}
+
+	projectData := createTestProject(t, db)                                // テスト用 Project を作成する
+	deploymentData := createTestDeploymentForMetrics(t, db, projectData.ID) // テスト用 Deployment を作成する
+
+	now := time.Now().Truncate(time.Second) // 現在時刻を取得する
+
+	// pod-old は過去にのみ存在し、直近のポーリング（now）には含まれない Pod とする
+	metricsList := []*models.DeploymentMetrics{
+		{DeploymentID: deploymentData.ID, PodName: "pod-old", CPUMillicores: 100, MemoryBytes: 100, ReadyReplicas: 2, TotalReplicas: 2, RecordedAt: now.Add(-60 * time.Second)}, // スケールダウンで消えた Pod の過去レコード
+		{DeploymentID: deploymentData.ID, PodName: "pod-new", CPUMillicores: 200, MemoryBytes: 200, ReadyReplicas: 1, TotalReplicas: 1, RecordedAt: now.Add(-60 * time.Second)}, // 直近まで生存している Pod の過去レコード
+		{DeploymentID: deploymentData.ID, PodName: "pod-new", CPUMillicores: 300, MemoryBytes: 300, ReadyReplicas: 1, TotalReplicas: 1, RecordedAt: now},                        // 直近のポーリングで取得された最新レコード
+	}
+	db.Create(&metricsList) // テスト用レコードを作成する
+	t.Cleanup(func() {      // テスト終了後にレコードを削除する
+		for _, metricsRecord := range metricsList {
+			db.Unscoped().Delete(metricsRecord)
+		}
+	})
+
+	repo := NewDeploymentMetricsRepository(db) // リポジトリを生成する
+
+	result, err := repo.FindByDeploymentID(context.Background(), deploymentData.ID, 10) // 全件取得する
+	if err != nil {
+		t.Fatalf("FindByDeploymentID がエラーを返しました: %v", err)
+	}
+	if len(result) != 2 { // pod-new の 2 件のみ返ることを確認する
+		t.Errorf("期待する件数: 2, 実際の件数: %d", len(result))
+	}
+	for _, metricsRecord := range result { // 全レコードが pod-new であることを確認する
+		if metricsRecord.PodName != "pod-new" {
+			t.Errorf("消えた Pod（pod-old）のレコードが含まれています: %+v", metricsRecord)
+		}
 	}
 }
 
