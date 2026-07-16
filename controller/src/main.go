@@ -46,18 +46,19 @@ func main() {
 	)
 
 	// リポジトリを生成する
-	deploymentRepo := repository.NewDeploymentRepository(repository.Database)                     // deployment リポジトリを生成する
-	applyHistoryRepo := repository.NewApplyHistoryRepository(repository.Database)                 // apply_history リポジトリを生成する
-	projectRepo := repository.NewProjectRepository(repository.Database)                           // project リポジトリを生成する
-	serviceRepo := repository.NewServiceRepository(repository.Database)                           // service リポジトリを生成する
-	ingressRouteRepo := repository.NewIngressRouteRepository(repository.Database)                 // ingress_route リポジトリを生成する
-	pathRuleRepo := repository.NewPathRuleRepository(repository.Database)                         // path_rule リポジトリを生成する
-	envVarRepo := repository.NewEnvVarRepository(repository.Database)                             // env_var リポジトリを生成する
-	envVarMountRepo := repository.NewEnvVarMountRepository(repository.Database)                   // env_var_mount リポジトリを生成する
-	volumeRepo := repository.NewVolumeRepository(repository.Database)                             // volume リポジトリを生成する
-	volumeMountRepo := repository.NewVolumeMountRepository(repository.Database)                   // volume_mount リポジトリを生成する
-	harborCredentialRepo := repository.NewHarborCredentialRepository(repository.Database)         // harbor credential リポジトリを生成する
-	imageRepo := repository.NewImageRepository(repository.Database)                               // image リポジトリを生成する
+	deploymentRepo := repository.NewDeploymentRepository(repository.Database)                 // deployment リポジトリを生成する
+	applyHistoryRepo := repository.NewApplyHistoryRepository(repository.Database)             // apply_history リポジトリを生成する
+	applyProgressRepo := repository.NewDeploymentApplyProgressRepository(repository.Database) // deployment_apply_progress リポジトリを生成する
+	projectRepo := repository.NewProjectRepository(repository.Database)                       // project リポジトリを生成する
+	serviceRepo := repository.NewServiceRepository(repository.Database)                       // service リポジトリを生成する
+	ingressRouteRepo := repository.NewIngressRouteRepository(repository.Database)             // ingress_route リポジトリを生成する
+	pathRuleRepo := repository.NewPathRuleRepository(repository.Database)                     // path_rule リポジトリを生成する
+	envVarRepo := repository.NewEnvVarRepository(repository.Database)                         // env_var リポジトリを生成する
+	envVarMountRepo := repository.NewEnvVarMountRepository(repository.Database)               // env_var_mount リポジトリを生成する
+	volumeRepo := repository.NewVolumeRepository(repository.Database)                         // volume リポジトリを生成する
+	volumeMountRepo := repository.NewVolumeMountRepository(repository.Database)               // volume_mount リポジトリを生成する
+	harborCredentialRepo := repository.NewHarborCredentialRepository(repository.Database)     // harbor credential リポジトリを生成する
+	imageRepo := repository.NewImageRepository(repository.Database)                           // image リポジトリを生成する
 
 	// Activity を生成する
 	applyActivities := activity.NewApplyActivities( // Apply Activity を生成する
@@ -66,6 +67,7 @@ func main() {
 		dynamicClient,
 		deploymentRepo,
 		applyHistoryRepo,
+		applyProgressRepo,
 		projectRepo,
 		serviceRepo,
 		ingressRouteRepo,
@@ -116,21 +118,21 @@ func main() {
 	temporalWorker := worker.New(temporalClient, taskQueue, worker.Options{}) // Worker を生成する
 
 	// Workflow を登録する
-	temporalWorker.RegisterWorkflow(workflow.ApplyWorkflow)                     // Apply Workflow を登録する
-	temporalWorker.RegisterWorkflow(workflow.DeleteDeploymentWorkflow)          // Deployment 削除 Workflow を登録する
-	temporalWorker.RegisterWorkflow(workflow.CreateProjectWorkflow)             // Project 作成 Workflow を登録する
-	temporalWorker.RegisterWorkflow(workflow.DeleteProjectWorkflow)             // Project 削除 Workflow を登録する
-	temporalWorker.RegisterWorkflow(workflow.CreateVolumeWorkflow)              // Volume 作成 Workflow を登録する
-	temporalWorker.RegisterWorkflow(workflow.DeleteVolumeWorkflow)              // Volume 削除 Workflow を登録する
+	temporalWorker.RegisterWorkflow(workflow.ApplyWorkflow)            // Apply Workflow を登録する
+	temporalWorker.RegisterWorkflow(workflow.DeleteDeploymentWorkflow) // Deployment 削除 Workflow を登録する
+	temporalWorker.RegisterWorkflow(workflow.CreateProjectWorkflow)    // Project 作成 Workflow を登録する
+	temporalWorker.RegisterWorkflow(workflow.DeleteProjectWorkflow)    // Project 削除 Workflow を登録する
+	temporalWorker.RegisterWorkflow(workflow.CreateVolumeWorkflow)     // Volume 作成 Workflow を登録する
+	temporalWorker.RegisterWorkflow(workflow.DeleteVolumeWorkflow)     // Volume 削除 Workflow を登録する
 
 	// Activity を登録する
-	temporalWorker.RegisterActivity(applyActivities)        // Apply Activity を登録する
-	temporalWorker.RegisterActivity(deploymentActivities)   // Deployment Activity を登録する
-	temporalWorker.RegisterActivity(projectActivities)      // Project Activity を登録する
-	temporalWorker.RegisterActivity(volumeActivities)       // Volume Activity を登録する
+	temporalWorker.RegisterActivity(applyActivities)      // Apply Activity を登録する
+	temporalWorker.RegisterActivity(deploymentActivities) // Deployment Activity を登録する
+	temporalWorker.RegisterActivity(projectActivities)    // Project Activity を登録する
+	temporalWorker.RegisterActivity(volumeActivities)     // Volume Activity を登録する
 
 	log.Printf("Temporal Worker を起動します (taskQueue=%s, host=%s)", taskQueue, temporalHost) // 起動ログを出力する
-	if err := temporalWorker.Run(worker.InterruptCh()); err != nil {                        // Worker を起動してシグナルで停止を待つ
+	if err := temporalWorker.Run(worker.InterruptCh()); err != nil {                      // Worker を起動してシグナルで停止を待つ
 		log.Fatalf("Temporal Worker の起動に失敗しました: %v", err) // 起動失敗時はアプリを終了する
 	}
 }

@@ -27,10 +27,12 @@ func ApplyWorkflow(ctx workflow.Context, input ApplyWorkflowInput) error {
 	ctx = workflow.WithActivityOptions(ctx, activityOptions) // Activity オプションをコンテキストに設定する
 
 	// pending→current 昇格・Manifest生成・k8s Apply・ApplyHistory記録を実行する
-	var applyResult *activity.ApplyResultData                            // 結果を格納する変数を定義する
+	workflowID := workflow.GetInfo(ctx).WorkflowExecution.ID // apply 進捗記録のキーとして使う WorkflowID を取得する
+	var applyResult *activity.ApplyResultData                // 結果を格納する変数を定義する
 	if err := workflow.ExecuteActivity(ctx, (*activity.ApplyActivities).ExecuteApply, activity.ApplyActivityInput{
 		DeploymentID: input.DeploymentID,
 		BaseDomain:   input.BaseDomain,
+		WorkflowID:   workflowID,
 	}).Get(ctx, &applyResult); err != nil { // Apply Activity を実行する
 		return err // エラーを返す
 	}
