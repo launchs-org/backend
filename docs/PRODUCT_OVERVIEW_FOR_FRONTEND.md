@@ -38,11 +38,22 @@
 ## 3. 認証
 
 - 認証はJWTトークンで行う。**`Authorization` ヘッダーにJWT文字列をそのまま設定する**（`Bearer <token>` 形式ではない）。
-- トークンの発行元は本リポジトリの外にある別サービス（外部認証基盤）。フロントエンドはログイン画面/フローを別途外部認証サービスと連携して実装し、得られたJWTを全APIリクエストのヘッダーに付与する。
+- トークンの発行元は本リポジトリの外にある別サービス（外部認証基盤 `authbase`、Docker Composeの `auth` サービス。nginx経由で `/auth/` にプロキシされる）。
 - JWTのクレームには `userID`（所有権チェックに使う）、`labels`（`"admin"` を含むと管理者専用APIが使える）、`provCode`、`provUid` が入っている。フロントエンド側でJWTをデコードしてUIの出し分け（管理者機能の表示/非表示など）に使ってよい。
 - 認証失敗・ヘッダー欠如は全エンドポイントで `401` を返す。
 - 例外1: `POST /webhooks/{deployment_id}/*` の4エンドポイントはJWT不要。代わりに `X-Webhook-Secret` ヘッダーでデプロイメント固有のシークレットを検証する（CI/CD連携用途、後述）。
 - 例外2: 管理者専用（Deployment Templateの作成/更新/削除）は `labels` に `"admin"` がないユーザーには `403` を返す。
+
+### 認証フローの実装は既存フロントエンドを参照すること
+
+ログイン画面・トークン取得・保存・付与・リフレッシュの実装は、このバックエンド固有ではなく `authbase` 共通のプロトコルに従う。**新規フロントエンドでも同じ方式を再実装する必要がある**ため、ゼロから設計せず既存フロントエンド（`frontend/` ディレクトリ、Vite + React + TypeScript）の実装をそのまま参考にすること。
+
+- `frontend/src/App.tsx` — 未ログイン時に `/auth/login` へリダイレクトする認証ガードの実装
+- `frontend/src/lib/api.ts` — 認証の実体。トークンの保存（リフレッシュトークンは `localStorage`、アクセストークンは `sessionStorage` に5分キャッシュ）、`Authorization` ヘッダーの自動付与、`GET /auth/token` によるアクセストークン再取得（`refreshAccessToken()`）、401時の`clearTokens()`とログイン画面への再リダイレクトまで一式が実装されている
+- `frontend/src/hooks/useAuth.ts` — 起動時のログイン状態確認（`checkAuth()`）を呼び出すReact Hook
+- `frontend/src/pages/LoginPage.tsx` / `LoginRedirect` — ログイン導線のUI
+
+新規フロントエンドを実装するAIには、上記ファイルを読んで同じ認証方式（トークンの保存場所、ヘッダー付与、リフレッシュ、401時のリダイレクト）を再現するよう指示すること。バックエンド側のJWT検証仕様（クレーム構成、ヘッダー形式）は本ドキュメントの記述が正なので、両者を合わせて読む。
 
 ---
 
