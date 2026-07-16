@@ -1,15 +1,25 @@
 // Package railpack は Kubernetes 上で BuildKit を使ったコンテナイメージビルドを
 // シンプルに実行するためのライブラリです。
 //
-// 基本的な使い方:
+// 基本的な使い方（GitHubソース）:
 //
 //	client, err := railpack.New(clientset, railpack.BuildConfig{
 //	    GitRepo:        "https://github.com/org/repo",
 //	    ImageName:      "my-app",
 //	    ImageTag:        "v1.0.0",
-//	    UploadEndpoint: "http://10.10.11.8:8080/upload",
-//	    UploadToken:    "secret-token",
 //	    Namespace:      "buildkit",
+//	})
+//
+// アーカイブソース（zip/tar.gzアップロード）の場合:
+//
+//	client, err := railpack.New(clientset, railpack.BuildConfig{
+//	    SourceType:       "archive",
+//	    ArchiveURL:       "https://file.io/xxxx",
+//	    ArchiveEncKeyHex: "...",
+//	    ArchiveSHA256Hex: "...",
+//	    ImageName:        "my-app",
+//	    ImageTag:         "v1.0.0",
+//	    Namespace:        "buildkit",
 //	})
 //
 //	jobID, err    := client.Build(ctx)
@@ -39,8 +49,23 @@ func New(clientset kubernetes.Interface, config BuildConfig) (*Client, error) {
 	if clientset == nil { // nil チェックはインターフェース型でも有効
 		return nil, fmt.Errorf("clientset は必須です")
 	}
-	if config.GitRepo == "" {
-		return nil, fmt.Errorf("GitRepo は必須です")
+
+	config = applyDefaults(config) // SourceType の自動判定を先に適用する
+
+	if config.SourceType == "archive" { // アーカイブソースの必須項目を検証する
+		if config.ArchiveURL == "" {
+			return nil, fmt.Errorf("ArchiveURL は必須です")
+		}
+		if config.ArchiveEncKeyHex == "" {
+			return nil, fmt.Errorf("ArchiveEncKeyHex は必須です")
+		}
+		if config.ArchiveSHA256Hex == "" {
+			return nil, fmt.Errorf("ArchiveSHA256Hex は必須です")
+		}
+	} else { // Gitソースの必須項目を検証する
+		if config.GitRepo == "" {
+			return nil, fmt.Errorf("GitRepo は必須です")
+		}
 	}
 	if config.RegistryUsername == "" {
 		return nil, fmt.Errorf("RegistryUsername は必須です")
@@ -54,8 +79,6 @@ func New(clientset kubernetes.Interface, config BuildConfig) (*Client, error) {
 	if config.ImageTag == "" {
 		return nil, fmt.Errorf("ImageTag は必須です")
 	}
-
-	config = applyDefaults(config)
 
 	return &Client{
 		clientset: clientset,

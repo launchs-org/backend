@@ -46,6 +46,7 @@ services:
     depends_on:
       temporal-admin-tools:
         condition: service_completed_successfully
+    restart: always
 
   # ─── namespace 作成（一回限り実行）──────────────────────────────────────
   temporal-create-namespace:
@@ -75,3 +76,4 @@ services:
     depends_on:
       temporal:
         condition: service_healthy
+    restart: always

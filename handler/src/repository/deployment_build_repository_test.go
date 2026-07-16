@@ -199,3 +199,60 @@ func TestDeploymentBuildRepository_DeleteAllByProjectID(t *testing.T) {
 		t.Errorf("削除後のビルド件数 0 を期待しましたが、実際の件数は %d です", count)
 	}
 }
+
+// TestDeploymentBuildRepository_ArchiveFields はArchiveFileName/ArchiveSizeBytesがCreate/FindByIDで往復できることを確認する
+func TestDeploymentBuildRepository_ArchiveFields(t *testing.T) {
+	db := setupTestDB(t) // テスト用 DB を準備する
+	ctx := context.Background()
+
+	projectData := &models.Project{
+		Name:      "test-project-build-archive", // プロジェクト名を設定する
+		Namespace: "ns-build-archive",           // namespace を設定する
+		UserID:    "user-1",                     // ユーザー ID を設定する
+		Status:    models.ProjectStatusActive,   // ステータスを設定する
+	}
+	if err := db.Create(projectData).Error; err != nil { // プロジェクトを作成する
+		t.Fatalf("テスト用プロジェクトの作成に失敗しました: %v", err)
+	}
+	defer db.Delete(projectData) // テスト後にプロジェクトを削除する
+
+	deploymentData := &models.Deployment{
+		ProjectID: projectData.ID,              // プロジェクト ID を設定する
+		Name:      "test-deployment-build-archive", // デプロイメント名を設定する
+		Type:      models.DeploymentTypeArchive, // archive タイプを設定する
+		Status:    models.DeploymentStatusPending, // ステータスを設定する
+		AppStatus: models.AppStatusPending,       // アプリステータスを設定する
+	}
+	if err := db.Create(deploymentData).Error; err != nil { // デプロイメントを作成する
+		t.Fatalf("テスト用デプロイメントの作成に失敗しました: %v", err)
+	}
+	defer db.Delete(deploymentData) // テスト後にデプロイメントを削除する
+
+	buildRepo := NewDeploymentBuildRepository(db) // リポジトリを生成する
+
+	deploymentIDValue := deploymentData.ID // ポインタ用変数を宣言する
+	buildData := &models.DeploymentBuild{
+		ProjectID:        projectData.ID,           // プロジェクト ID を設定する
+		DeploymentID:     &deploymentIDValue,        // デプロイメント ID をポインタで設定する
+		BuildType:        models.BuildTypeRailpack,  // ビルドタイプを設定する
+		Status:           models.BuildStatusPending, // ステータスを設定する
+		ArchiveFileName:  "source.tar.gz",           // アーカイブファイル名を設定する
+		ArchiveSizeBytes: 12345,                     // アーカイブサイズを設定する
+	}
+
+	if err := buildRepo.Create(ctx, buildData); err != nil { // ビルドレコードを作成する
+		t.Fatalf("Create() がエラーを返しました: %v", err)
+	}
+	defer db.Delete(buildData) // テスト後にビルドレコードを削除する
+
+	foundBuild, err := buildRepo.FindByID(ctx, buildData.ID) // ビルドレコードを取得する
+	if err != nil {
+		t.Fatalf("FindByID() がエラーを返しました: %v", err)
+	}
+	if foundBuild.ArchiveFileName != "source.tar.gz" { // アーカイブファイル名が往復できることを確認する
+		t.Errorf("期待するArchiveFileName %s、実際の値 %s", "source.tar.gz", foundBuild.ArchiveFileName)
+	}
+	if foundBuild.ArchiveSizeBytes != 12345 { // アーカイブサイズが往復できることを確認する
+		t.Errorf("期待するArchiveSizeBytes %d、実際の値 %d", 12345, foundBuild.ArchiveSizeBytes)
+	}
+}

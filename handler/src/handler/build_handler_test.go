@@ -3,8 +3,11 @@ package handler
 import (
 	"handler/models"
 	"handler/service"
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,7 +18,8 @@ import (
 
 // mockBuildService は BuildService のテスト用モック実装
 type mockBuildService struct {
-	triggerBuildFunc        func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string) (*models.DeploymentBuild, error)
+	triggerBuildFunc        func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string, archiveUploadToken string, buildDirectory string) (*models.DeploymentBuild, error)
+	uploadBuildArchiveFunc  func(ctx context.Context, userID string, deploymentID string, fileName string, fileReader io.Reader, fileSize int64) (string, error)
 	cancelBuildFunc         func(ctx context.Context, userID string, buildID string) error
 	getBuildLogsFunc        func(ctx context.Context, userID string, buildID string, since *time.Time) (string, *time.Time, error)
 	getBuildFunc            func(ctx context.Context, userID string, buildID string) (*models.DeploymentBuild, error)
@@ -23,8 +27,15 @@ type mockBuildService struct {
 	listBuildsByProjectFunc func(ctx context.Context, userID string, projectID string) ([]models.DeploymentBuild, error)
 }
 
-func (mock *mockBuildService) TriggerBuild(ctx context.Context, userID string, deploymentID string, commitMessage string, author string) (*models.DeploymentBuild, error) {
-	return mock.triggerBuildFunc(ctx, userID, deploymentID, commitMessage, author) // モック関数を呼び出す
+func (mock *mockBuildService) TriggerBuild(ctx context.Context, userID string, deploymentID string, commitMessage string, author string, archiveUploadToken string, buildDirectory string) (*models.DeploymentBuild, error) {
+	return mock.triggerBuildFunc(ctx, userID, deploymentID, commitMessage, author, archiveUploadToken, buildDirectory) // モック関数を呼び出す
+}
+
+func (mock *mockBuildService) UploadBuildArchive(ctx context.Context, userID string, deploymentID string, fileName string, fileReader io.Reader, fileSize int64) (string, error) {
+	if mock.uploadBuildArchiveFunc != nil { // モック関数が設定されている場合は呼び出す
+		return mock.uploadBuildArchiveFunc(ctx, userID, deploymentID, fileName, fileReader, fileSize)
+	}
+	return "", nil // デフォルトは空文字を返す
 }
 
 func (mock *mockBuildService) CancelBuild(ctx context.Context, userID string, buildID string) error {
@@ -93,7 +104,7 @@ func TestTriggerBuild_正常系(t *testing.T) {
 	}
 
 	mockSvc := &mockBuildService{
-		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string) (*models.DeploymentBuild, error) {
+		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string, archiveUploadToken string, buildDirectory string) (*models.DeploymentBuild, error) {
 			return expectedBuild, nil // 正常なビルドレコードを返す
 		},
 	}
@@ -121,7 +132,7 @@ func TestTriggerBuild_正常系(t *testing.T) {
 // TestTriggerBuild_403_他ユーザーのデプロイメント は他ユーザーのデプロイメントに POST すると 403 が返ることを確認する
 func TestTriggerBuild_403_他ユーザーのデプロイメント(t *testing.T) {
 	mockSvc := &mockBuildService{
-		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string) (*models.DeploymentBuild, error) {
+		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string, archiveUploadToken string, buildDirectory string) (*models.DeploymentBuild, error) {
 			return nil, service.ErrForbidden // 所有権エラーを返す
 		},
 	}
@@ -141,7 +152,7 @@ func TestTriggerBuild_403_他ユーザーのデプロイメント(t *testing.T) 
 // TestTriggerBuild_409_ビルド中 はビルド中に再ビルドをトリガーすると 409 が返ることを確認する
 func TestTriggerBuild_409_ビルド中(t *testing.T) {
 	mockSvc := &mockBuildService{
-		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string) (*models.DeploymentBuild, error) {
+		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string, archiveUploadToken string, buildDirectory string) (*models.DeploymentBuild, error) {
 			return nil, service.ErrBuildConflict // コンフリクトエラーを返す
 		},
 	}
@@ -427,5 +438,123 @@ func TestListBuildsByProject_403_他ユーザー(t *testing.T) {
 
 	if recorder.Code != http.StatusForbidden { // ステータスコードを確認する
 		t.Errorf("期待するステータスコード %d、実際のコード %d", http.StatusForbidden, recorder.Code)
+	}
+}
+
+// newUploadBuildArchiveTestContext は UploadBuildArchive ハンドラーテスト用のmultipartリクエストによる Echo コンテキストを生成するヘルパー関数
+func newUploadBuildArchiveTestContext(deploymentID string, fileName string, fileContent []byte) (echo.Context, *httptest.ResponseRecorder) {
+	bodyBuffer := &bytes.Buffer{}
+	multipartWriter := multipart.NewWriter(bodyBuffer)
+	part, _ := multipartWriter.CreateFormFile("archive", fileName) // archiveフィールドを作成する
+	part.Write(fileContent)                                        // ファイル内容を書き込む
+	multipartWriter.Close()
+
+	echoInstance := echo.New()
+	request := httptest.NewRequest(http.MethodPost, "/", bodyBuffer)                        // テスト用リクエストを生成する
+	request.Header.Set("Content-Type", multipartWriter.FormDataContentType())               // Content-Typeを設定する
+	recorder := httptest.NewRecorder()
+	echoCtx := echoInstance.NewContext(request, recorder)
+	echoCtx.Set("UserID", "test-user-id")
+	echoCtx.SetParamNames("id")
+	echoCtx.SetParamValues(deploymentID)
+	return echoCtx, recorder
+}
+
+// TestUploadBuildArchive_正常系 はアーカイブアップロードが正常に処理されトークンが返ることを確認する
+func TestUploadBuildArchive_正常系(t *testing.T) {
+	mockSvc := &mockBuildService{
+		uploadBuildArchiveFunc: func(ctx context.Context, userID string, deploymentID string, fileName string, fileReader io.Reader, fileSize int64) (string, error) {
+			return "test-upload-token", nil // 正常なトークンを返す
+		},
+	}
+
+	buildHandler := NewBuildHandler(mockSvc)
+	echoCtx, recorder := newUploadBuildArchiveTestContext("deployment-1", "source.zip", []byte{0x50, 0x4b, 0x03, 0x04})
+
+	if err := buildHandler.UploadBuildArchive(echoCtx); err != nil {
+		t.Fatalf("UploadBuildArchive() がエラーを返しました: %v", err)
+	}
+
+	if recorder.Code != http.StatusOK {
+		t.Errorf("期待するステータスコード %d、実際のコード %d", http.StatusOK, recorder.Code)
+	}
+
+	var response map[string]string
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("レスポンスボディのデコードに失敗しました: %v", err)
+	}
+	if response["upload_token"] != "test-upload-token" {
+		t.Errorf("期待するトークン %s、実際のトークン %s", "test-upload-token", response["upload_token"])
+	}
+}
+
+// TestUploadBuildArchive_不正な拡張子 は不正な拡張子のファイルで400が返ることを確認する
+func TestUploadBuildArchive_不正な拡張子(t *testing.T) {
+	mockSvc := &mockBuildService{}
+
+	buildHandler := NewBuildHandler(mockSvc)
+	echoCtx, recorder := newUploadBuildArchiveTestContext("deployment-1", "source.txt", []byte("plain text"))
+
+	if err := buildHandler.UploadBuildArchive(echoCtx); err != nil {
+		t.Fatalf("UploadBuildArchive() がエラーを返しました: %v", err)
+	}
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Errorf("期待するステータスコード %d、実際のコード %d", http.StatusBadRequest, recorder.Code)
+	}
+}
+
+// TestUploadBuildArchive_デプロイメントタイプ不一致 はサービス層のエラーが400にマッピングされることを確認する
+func TestUploadBuildArchive_デプロイメントタイプ不一致(t *testing.T) {
+	mockSvc := &mockBuildService{
+		uploadBuildArchiveFunc: func(ctx context.Context, userID string, deploymentID string, fileName string, fileReader io.Reader, fileSize int64) (string, error) {
+			return "", service.ErrDeploymentTypeMismatch
+		},
+	}
+
+	buildHandler := NewBuildHandler(mockSvc)
+	echoCtx, recorder := newUploadBuildArchiveTestContext("deployment-1", "source.zip", []byte{0x50, 0x4b, 0x03, 0x04})
+
+	if err := buildHandler.UploadBuildArchive(echoCtx); err != nil {
+		t.Fatalf("UploadBuildArchive() がエラーを返しました: %v", err)
+	}
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Errorf("期待するステータスコード %d、実際のコード %d", http.StatusBadRequest, recorder.Code)
+	}
+}
+
+// TestTriggerBuild_アーカイブフィールドバインド はArchiveUploadTokenとBuildDirectoryが正しくサービスに渡されることを確認する
+func TestTriggerBuild_アーカイブフィールドバインド(t *testing.T) {
+	var capturedToken, capturedDirectory string
+	mockSvc := &mockBuildService{
+		triggerBuildFunc: func(ctx context.Context, userID string, deploymentID string, commitMessage string, author string, archiveUploadToken string, buildDirectory string) (*models.DeploymentBuild, error) {
+			capturedToken = archiveUploadToken
+			capturedDirectory = buildDirectory
+			return &models.DeploymentBuild{ID: "build-1"}, nil
+		},
+	}
+
+	buildHandler := NewBuildHandler(mockSvc)
+
+	echoInstance := echo.New()
+	requestBody := bytes.NewReader([]byte(`{"archive_upload_token":"test-token","build_directory":"./app"}`))
+	request := httptest.NewRequest(http.MethodPost, "/", requestBody)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	echoCtx := echoInstance.NewContext(request, recorder)
+	echoCtx.Set("UserID", "test-user-id")
+	echoCtx.SetParamNames("id")
+	echoCtx.SetParamValues("deployment-1")
+
+	if err := buildHandler.TriggerBuild(echoCtx); err != nil {
+		t.Fatalf("TriggerBuild() がエラーを返しました: %v", err)
+	}
+
+	if capturedToken != "test-token" {
+		t.Errorf("期待するトークン %s、実際のトークン %s", "test-token", capturedToken)
+	}
+	if capturedDirectory != "./app" {
+		t.Errorf("期待するディレクトリ %s、実際のディレクトリ %s", "./app", capturedDirectory)
 	}
 }

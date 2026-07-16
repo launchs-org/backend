@@ -166,7 +166,7 @@ func (svc *webhookServiceImpl) TriggerBuildByWebhook(ctx context.Context, deploy
 	if err != nil {
 		return nil, err // 取得エラーを返す
 	}
-	return svc.buildService.TriggerBuild(ctx, projectData.UserID, deploymentID, commitMessage, author) // ビルドをトリガーする
+	return svc.buildService.TriggerBuild(ctx, projectData.UserID, deploymentID, commitMessage, author, "", "") // ビルドをトリガーする（webhook経由はGitHubビルド専用のためアーカイブ関連は空文字）
 }
 
 // GetBuildByWebhook はシークレット認証でビルド状態を確認する

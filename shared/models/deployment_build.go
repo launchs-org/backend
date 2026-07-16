@@ -37,6 +37,10 @@ type DeploymentBuild struct {
 	Directory      string `gorm:"type:varchar(255)"  json:"directory"` // build_directory スナップショット
 	DockerfilePath string `gorm:"type:varchar(255)"  json:"dockerfile_path"`
 
+	// archive タイプのビルドでのみ使用（表示・ログ目的のみ。アーカイブ本体・鍵はDBに保存しない）
+	ArchiveFileName  string `gorm:"type:varchar(255)" json:"archive_file_name"`  // アップロードされたアーカイブの元ファイル名
+	ArchiveSizeBytes int64  `gorm:"type:bigint"       json:"archive_size_bytes"` // アーカイブの元サイズ（バイト）
+
 	BuildLog string `gorm:"type:text" json:"build_log"` // k8s Job の Pod ログを収集して保存
 
 	StartedAt  *time.Time `json:"started_at"`

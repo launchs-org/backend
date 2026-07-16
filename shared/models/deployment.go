@@ -13,6 +13,7 @@ const (
 	DeploymentTypeImageURL   DeploymentType = "image_url"
 	DeploymentTypeDockerfile DeploymentType = "dockerfile"
 	DeploymentTypeRailpack   DeploymentType = "railpack"
+	DeploymentTypeArchive    DeploymentType = "archive" // zip/tar.gzアップロードからのRailpackビルド
 )
 
 type DeploymentStatus string
