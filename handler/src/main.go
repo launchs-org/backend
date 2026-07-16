@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"handler/config"
+	"handler/fileio"
 	"handler/handler"
 	"handler/k8s"
 	"handler/middlewares"
@@ -29,6 +30,9 @@ func main() {
 
 	// CLIトークン用の鍵ペアの読み込み
 	middlewares.InitCliToken()
+
+	// アーカイブアップロードトークン用の共有シークレットの読み込み
+	middlewares.InitArchiveUploadToken()
 
 	// データベース初期化・マイグレーション
 	err := repository.Init()
@@ -112,9 +116,10 @@ func main() {
 	ingressRouteHandler := handler.NewIngressRouteHandler(ingressRouteServiceImpl, applyServiceImpl)                   // ingress_route ハンドラーを生成する（apply サービスも注入する）
 
 	// build ハンドラーを DI 組み立てする
-	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)                                                                                               // build ログチャンクリポジトリを生成する
-	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient, "harbor.main-harbor", temporalClient) // build サービスを生成する（Workflow は builder Worker に委譲する）
-	buildHandler := handler.NewBuildHandler(buildServiceImpl)                                                                                                                // build ハンドラーを生成する
+	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)                                                                                                             // build ログチャンクリポジトリを生成する
+	fileIOClient := fileio.NewFileIOClient()                                                                                                                                                // file.io アップロードクライアントを生成する
+	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient, "harbor.main-harbor", temporalClient, fileIOClient) // build サービスを生成する（Workflow は builder Worker に委譲する）
+	buildHandler := handler.NewBuildHandler(buildServiceImpl)                                                                                                                               // build ハンドラーを生成する
 
 	// image ハンドラーを DI 組み立てする
 	imageServiceImpl := service.NewImageService(imageRepo, deploymentRepo, projectRepo, harborCredentialRepo, buildRepo, harborClient) // image サービスを生成する

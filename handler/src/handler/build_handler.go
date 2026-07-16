@@ -5,6 +5,7 @@ import (
 	"handler/service"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -25,8 +26,10 @@ func NewBuildHandler(buildService service.BuildService) *BuildHandler {
 
 // TriggerBuildRequest は TriggerBuild のリクエストボディ
 type TriggerBuildRequest struct {
-	CommitMessage string `json:"commit_message"` // コミットメッセージ（オプション）
-	Author        string `json:"author"`         // コミット著者（オプション）
+	CommitMessage      string `json:"commit_message"`       // コミットメッセージ（オプション）
+	Author             string `json:"author"`               // コミット著者（オプション）
+	ArchiveUploadToken string `json:"archive_upload_token"` // アーカイブアップロードトークン（archiveビルド時のみ指定）
+	BuildDirectory     string `json:"build_directory"`      // ビルドディレクトリ（archiveビルド時のみ指定、省略時は"."）
 }
 
 // TriggerBuild は POST /api/v1/deployments/:id/build のハンドラー
@@ -37,7 +40,7 @@ func (buildHandler *BuildHandler) TriggerBuild(echoCtx echo.Context) error {
 	var requestBody TriggerBuildRequest                      // リクエストボディの構造体を定義する
 	_ = echoCtx.Bind(&requestBody)                          // バインド失敗は無視してオプション扱いにする
 
-	buildData, err := buildHandler.buildService.TriggerBuild(echoCtx.Request().Context(), userID, deploymentID, requestBody.CommitMessage, requestBody.Author) // サービスを呼び出してビルドをトリガーする
+	buildData, err := buildHandler.buildService.TriggerBuild(echoCtx.Request().Context(), userID, deploymentID, requestBody.CommitMessage, requestBody.Author, requestBody.ArchiveUploadToken, requestBody.BuildDirectory) // サービスを呼び出してビルドをトリガーする
 	if err != nil {
 		if errors.Is(err, service.ErrForbidden) { // 所有権エラーの場合は 403 を返す
 			logger.PrintHandlerError("BuildHandler", "TriggerBuild", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
@@ -57,6 +60,18 @@ func (buildHandler *BuildHandler) TriggerBuild(echoCtx echo.Context) error {
 				"error": "dockerfile タイプは現在サポートされていません",
 			})
 		}
+		if errors.Is(err, service.ErrArchiveTokenInvalid) { // アップロードトークンが無効・期限切れの場合は 401 を返す
+			logger.PrintHandlerError("BuildHandler", "TriggerBuild", echoCtx.Request().URL.Path, http.StatusUnauthorized, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusUnauthorized, map[string]string{
+				"error": "アーカイブアップロードトークンが無効です",
+			})
+		}
+		if errors.Is(err, service.ErrArchiveTokenDeploymentMismatch) { // トークンの対象デプロイメント不一致の場合は 403 を返す
+			logger.PrintHandlerError("BuildHandler", "TriggerBuild", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusForbidden, map[string]string{
+				"error": "アーカイブアップロードトークンの対象デプロイメントが一致しません",
+			})
+		}
 		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが見つからない場合は 404 を返す
 			logger.PrintHandlerError("BuildHandler", "TriggerBuild", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
 			return echoCtx.JSON(http.StatusNotFound, map[string]string{
@@ -69,6 +84,83 @@ func (buildHandler *BuildHandler) TriggerBuild(echoCtx echo.Context) error {
 		})
 	}
 	return echoCtx.JSON(http.StatusCreated, buildData) // 作成したビルドレコードを返す
+}
+
+// UploadBuildArchive は POST /api/v1/deployments/:id/build/upload のハンドラー
+func (buildHandler *BuildHandler) UploadBuildArchive(echoCtx echo.Context) error {
+	userID := echoCtx.Get("UserID").(string) // ミドルウェアがセットした UserID を取得する
+	deploymentID := echoCtx.Param("id")     // パスパラメータから deployment ID を取得する
+
+	fileHeader, err := echoCtx.FormFile("archive") // multipartのファイルを取得する
+	if err != nil {
+		logger.PrintHandlerError("BuildHandler", "UploadBuildArchive", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
+		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+			"error": "archiveフィールドが必要です",
+		})
+	}
+	if !hasValidArchiveExtension(fileHeader.Filename) { // 拡張子を検証する
+		logger.PrintHandlerError("BuildHandler", "UploadBuildArchive", echoCtx.Request().URL.Path, http.StatusBadRequest, service.ErrInvalidArchiveType) // エラーログを出力する
+		return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+			"error": "zip または tar.gz 形式のみサポートしています",
+		})
+	}
+
+	fileContent, err := fileHeader.Open() // ファイルを開く
+	if err != nil {
+		logger.PrintHandlerError("BuildHandler", "UploadBuildArchive", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "内部サーバーエラー",
+		})
+	}
+	defer fileContent.Close() // 終了時にファイルを閉じる
+
+	uploadToken, err := buildHandler.buildService.UploadBuildArchive(echoCtx.Request().Context(), userID, deploymentID, fileHeader.Filename, fileContent, fileHeader.Size) // サービスを呼び出してアップロードする
+	if err != nil {
+		if errors.Is(err, service.ErrForbidden) { // 所有権エラーの場合は 403 を返す
+			logger.PrintHandlerError("BuildHandler", "UploadBuildArchive", echoCtx.Request().URL.Path, http.StatusForbidden, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusForbidden, map[string]string{
+				"error": "アクセス権限がありません",
+			})
+		}
+		if errors.Is(err, service.ErrDeploymentTypeMismatch) { // デプロイメントタイプ不一致の場合は 400 を返す
+			logger.PrintHandlerError("BuildHandler", "UploadBuildArchive", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "このデプロイメントタイプでは利用できません",
+			})
+		}
+		if errors.Is(err, service.ErrInvalidArchiveType) { // アーカイブ形式不正の場合は 400 を返す
+			logger.PrintHandlerError("BuildHandler", "UploadBuildArchive", echoCtx.Request().URL.Path, http.StatusBadRequest, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusBadRequest, map[string]string{
+				"error": "zip または tar.gz 形式のみサポートしています",
+			})
+		}
+		if errors.Is(err, service.ErrArchiveUploadFailed) { // file.io アップロード失敗の場合は 502 を返す
+			logger.PrintHandlerError("BuildHandler", "UploadBuildArchive", echoCtx.Request().URL.Path, http.StatusBadGateway, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusBadGateway, map[string]string{
+				"error": "アーカイブのアップロードに失敗しました",
+			})
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) { // リソースが見つからない場合は 404 を返す
+			logger.PrintHandlerError("BuildHandler", "UploadBuildArchive", echoCtx.Request().URL.Path, http.StatusNotFound, err) // エラーログを出力する
+			return echoCtx.JSON(http.StatusNotFound, map[string]string{
+				"error": "リソースが見つかりません",
+			})
+		}
+		logger.PrintHandlerError("BuildHandler", "UploadBuildArchive", echoCtx.Request().URL.Path, http.StatusInternalServerError, err) // エラーログを出力する
+		return echoCtx.JSON(http.StatusInternalServerError, map[string]string{ // その他のエラーは 500 を返す
+			"error": "内部サーバーエラー",
+		})
+	}
+
+	return echoCtx.JSON(http.StatusOK, map[string]string{ // アップロードトークンを返す
+		"upload_token": uploadToken,
+	})
+}
+
+// hasValidArchiveExtension はファイル名の拡張子がzip/tar.gz/tgzのいずれかか判定する
+func hasValidArchiveExtension(fileName string) bool {
+	lowerName := strings.ToLower(fileName)
+	return strings.HasSuffix(lowerName, ".zip") || strings.HasSuffix(lowerName, ".tar.gz") || strings.HasSuffix(lowerName, ".tgz")
 }
 
 // ListBuilds は GET /api/v1/deployments/:id/builds のハンドラー

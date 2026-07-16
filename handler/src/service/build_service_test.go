@@ -2,9 +2,14 @@ package service
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"handler/fileio"
+	"handler/middlewares"
 	"handler/models"
 
 	temporalclient "go.temporal.io/sdk/client"
@@ -184,9 +189,9 @@ func TestTriggerBuild_正常系(t *testing.T) {
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}, nil) // サービスを生成する
 
-	resultBuild, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "") // ビルドをトリガーする
+	resultBuild, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "", "", "") // ビルドをトリガーする
 	if err != nil {
 		t.Fatalf("TriggerBuild() がエラーを返しました: %v", err)
 	}
@@ -234,9 +239,9 @@ func TestTriggerBuild_403_他ユーザー(t *testing.T) {
 	harborCredRepo := &mockHarborCredentialRepository{}     // harbor credential リポジトリのモックを生成する
 	k8sClient := fake.NewSimpleClientset()                  // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}, nil) // サービスを生成する
 
-	_, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "") // ビルドをトリガーする
+	_, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "", "", "") // ビルドをトリガーする
 	if err == nil {                                                  // エラーが返ることを確認する
 		t.Fatal("TriggerBuild() はエラーを返すべきです")
 	}
@@ -283,9 +288,9 @@ func TestTriggerBuild_409_ビルド中(t *testing.T) {
 	harborCredRepo := &mockHarborCredentialRepository{}     // harbor credential リポジトリのモックを生成する
 	k8sClient := fake.NewSimpleClientset()                  // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}, nil) // サービスを生成する
 
-	_, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "") // ビルドをトリガーする
+	_, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "", "", "") // ビルドをトリガーする
 	if err == nil {                                                  // エラーが返ることを確認する
 		t.Fatal("TriggerBuild() はエラーを返すべきです")
 	}
@@ -358,7 +363,7 @@ func TestCancelBuild_正常系(t *testing.T) {
 		},
 	}
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", workflowStarter) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", workflowStarter, nil) // サービスを生成する
 
 	err := buildSvc.CancelBuild(ctx, "user-1", "build-1") // ビルドをキャンセルする
 	if err != nil {                                        // エラーが返った場合はテスト失敗
@@ -405,7 +410,7 @@ func TestCancelBuild_完了済みビルドはキャンセル不可(t *testing.T)
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}, nil) // サービスを生成する
 
 	err := buildSvc.CancelBuild(ctx, "user-1", "build-1") // 完了済みビルドをキャンセルする
 	if err != ErrBuildNotCancellable {                     // ErrBuildNotCancellable が返ることを確認する
@@ -449,7 +454,7 @@ func TestCancelBuild_403_他ユーザー(t *testing.T) {
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredRepo, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}, nil) // サービスを生成する
 
 	err := buildSvc.CancelBuild(ctx, "user-1", "build-1") // 他ユーザーのビルドをキャンセルする
 	if err != ErrForbidden {                               // ErrForbidden が返ることを確認する
@@ -495,7 +500,7 @@ func TestGetBuildLogs_正常系(t *testing.T) {
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, "", &mockWorkflowStarter{}, nil) // サービスを生成する
 
 	logs, _, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", nil) // ログを取得する
 	if err != nil {                                                        // エラーが返った場合はテスト失敗
@@ -548,7 +553,7 @@ func TestGetBuildLogs_since指定(t *testing.T) {
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, "", &mockWorkflowStarter{}, nil) // サービスを生成する
 
 	logs, _, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", &sinceTime) // since を指定してログを取得する
 	if err != nil {                                                              // エラーが返った場合はテスト失敗
@@ -597,7 +602,7 @@ func TestGetBuildLogs_チャンクなし(t *testing.T) {
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, logChunkRepo, k8sClient, "", &mockWorkflowStarter{}, nil) // サービスを生成する
 
 	logs, _, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", nil) // ログを取得する
 	if err != nil {                                                       // エラーが返った場合はテスト失敗
@@ -637,7 +642,7 @@ func TestGetBuildLogs_403_他ユーザー(t *testing.T) {
 
 	k8sClient := fake.NewSimpleClientset() // フェイク k8s クライアントを生成する
 
-	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, &mockBuildLogChunkRepository{}, k8sClient, "", &mockWorkflowStarter{}, nil) // サービスを生成する
 
 	_, _, err := buildSvc.GetBuildLogs(ctx, "user-1", "build-1", nil) // 他ユーザーのログを取得しようとする
 	if err != ErrForbidden {                                          // ErrForbidden が返ることを確認する
@@ -671,7 +676,7 @@ func TestListBuildsByProject_正常系(t *testing.T) {
 		},
 	}
 
-	buildSvc := NewBuildService(&mockDeploymentRepository{}, buildRepo, projectRepo, &mockHarborCredentialRepository{findByProjectIDNoTxFunc: func(ctx context.Context, projectID string) (*models.HarborCredential, error) { return nil, nil }}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(&mockDeploymentRepository{}, buildRepo, projectRepo, &mockHarborCredentialRepository{findByProjectIDNoTxFunc: func(ctx context.Context, projectID string) (*models.HarborCredential, error) { return nil, nil }}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}, nil) // サービスを生成する
 
 	builds, err := buildSvc.ListBuildsByProject(ctx, "user-1", "project-1") // ビルド一覧を取得する
 	if err != nil {                                                           // エラーが返った場合はテスト失敗
@@ -700,10 +705,304 @@ func TestListBuildsByProject_403_他ユーザー(t *testing.T) {
 		},
 	}
 
-	buildSvc := NewBuildService(&mockDeploymentRepository{}, &mockDeploymentBuildRepository{}, projectRepo, &mockHarborCredentialRepository{findByProjectIDNoTxFunc: func(ctx context.Context, projectID string) (*models.HarborCredential, error) { return nil, nil }}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}) // サービスを生成する
+	buildSvc := NewBuildService(&mockDeploymentRepository{}, &mockDeploymentBuildRepository{}, projectRepo, &mockHarborCredentialRepository{findByProjectIDNoTxFunc: func(ctx context.Context, projectID string) (*models.HarborCredential, error) { return nil, nil }}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}, nil) // サービスを生成する
 
 	_, err := buildSvc.ListBuildsByProject(ctx, "user-1", "project-1") // 他ユーザーのプロジェクトのビルドを取得しようとする
 	if err != ErrForbidden {                                            // ErrForbidden が返ることを確認する
 		t.Errorf("期待するエラー %v、実際のエラー %v", ErrForbidden, err)
+	}
+}
+
+// newMockFileIOServer はテスト用のfile.ioモックサーバーを生成する
+func newMockFileIOServer(t *testing.T) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
+		responseWriter.Header().Set("Content-Type", "application/json")
+		responseWriter.Write([]byte(`{"success":true,"link":"https://file.io/testlink"}`)) // 常に成功レスポンスを返す
+	}))
+}
+
+// TestUploadBuildArchive_正常系 はzip形式アーカイブが正常にアップロードされトークンが返ることを確認する
+func TestUploadBuildArchive_正常系(t *testing.T) {
+	middlewares.SetArchiveUploadTokenSecretForTest([]byte("test-secret")) // テスト用シークレットを設定する
+	ctx := context.Background()
+
+	deploymentData := &models.Deployment{
+		ID:        "deployment-1",
+		ProjectID: "project-1",
+		Type:      models.DeploymentTypeArchive,
+	}
+	projectData := &models.Project{ID: "project-1", UserID: "user-1"}
+
+	deploymentRepo := &mockDeploymentRepository{
+		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
+			return deploymentData, nil
+		},
+	}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return projectData, nil
+		},
+	}
+
+	mockFileIOServer := newMockFileIOServer(t)
+	defer mockFileIOServer.Close()
+	fileIOClient := fileio.NewFileIOClientForTest(mockFileIOServer.URL)
+
+	buildSvc := NewBuildService(deploymentRepo, &mockDeploymentBuildRepository{}, projectRepo, &mockHarborCredentialRepository{}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}, fileIOClient)
+
+	zipMagicBytes := []byte{0x50, 0x4b, 0x03, 0x04, 0x00, 0x00} // zipのマジックバイトで始まるダミーデータ
+	uploadToken, err := buildSvc.UploadBuildArchive(ctx, "user-1", "deployment-1", "source.zip", strings.NewReader(string(zipMagicBytes)), int64(len(zipMagicBytes)))
+	if err != nil {
+		t.Fatalf("UploadBuildArchive() がエラーを返しました: %v", err)
+	}
+	if uploadToken == "" {
+		t.Fatal("UploadBuildArchive() が空のトークンを返しました")
+	}
+
+	claim, err := middlewares.ValidateArchiveUploadToken(uploadToken) // 発行されたトークンを検証する
+	if err != nil {
+		t.Fatalf("発行されたトークンの検証に失敗しました: %v", err)
+	}
+	if claim.DeploymentID != "deployment-1" {
+		t.Errorf("DeploymentIDが一致しません: got=%s", claim.DeploymentID)
+	}
+	if claim.ArchiveURL != "https://file.io/testlink" {
+		t.Errorf("ArchiveURLが一致しません: got=%s", claim.ArchiveURL)
+	}
+	if claim.FileName != "source.zip" {
+		t.Errorf("FileNameが一致しません: got=%s", claim.FileName)
+	}
+}
+
+// TestUploadBuildArchive_デプロイメントタイプ不一致 はarchiveタイプ以外に対してErrDeploymentTypeMismatchを返すことを確認する
+func TestUploadBuildArchive_デプロイメントタイプ不一致(t *testing.T) {
+	ctx := context.Background()
+
+	deploymentData := &models.Deployment{
+		ID:        "deployment-1",
+		ProjectID: "project-1",
+		Type:      models.DeploymentTypeRailpack, // archiveタイプではない
+	}
+
+	deploymentRepo := &mockDeploymentRepository{
+		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
+			return deploymentData, nil
+		},
+	}
+
+	buildSvc := NewBuildService(deploymentRepo, &mockDeploymentBuildRepository{}, &mockProjectRepository{}, &mockHarborCredentialRepository{}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}, nil)
+
+	_, err := buildSvc.UploadBuildArchive(ctx, "user-1", "deployment-1", "source.zip", strings.NewReader("dummy"), 5)
+	if err != ErrDeploymentTypeMismatch {
+		t.Errorf("期待するエラー %v、実際のエラー %v", ErrDeploymentTypeMismatch, err)
+	}
+}
+
+// TestUploadBuildArchive_不正な拡張子 はzip/tar.gzのマジックバイトを持たないデータでErrInvalidArchiveTypeを返すことを確認する
+func TestUploadBuildArchive_不正な拡張子(t *testing.T) {
+	ctx := context.Background()
+
+	deploymentData := &models.Deployment{
+		ID:        "deployment-1",
+		ProjectID: "project-1",
+		Type:      models.DeploymentTypeArchive,
+	}
+	projectData := &models.Project{ID: "project-1", UserID: "user-1"}
+
+	deploymentRepo := &mockDeploymentRepository{
+		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
+			return deploymentData, nil
+		},
+	}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return projectData, nil
+		},
+	}
+
+	buildSvc := NewBuildService(deploymentRepo, &mockDeploymentBuildRepository{}, projectRepo, &mockHarborCredentialRepository{}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}, nil)
+
+	_, err := buildSvc.UploadBuildArchive(ctx, "user-1", "deployment-1", "not-an-archive.txt", strings.NewReader("plain text content"), 19)
+	if err != ErrInvalidArchiveType {
+		t.Errorf("期待するエラー %v、実際のエラー %v", ErrInvalidArchiveType, err)
+	}
+}
+
+// TestUploadBuildArchive_アップロード失敗 はfile.ioアップロード失敗時にErrArchiveUploadFailedを返すことを確認する
+func TestUploadBuildArchive_アップロード失敗(t *testing.T) {
+	ctx := context.Background()
+
+	deploymentData := &models.Deployment{
+		ID:        "deployment-1",
+		ProjectID: "project-1",
+		Type:      models.DeploymentTypeArchive,
+	}
+	projectData := &models.Project{ID: "project-1", UserID: "user-1"}
+
+	deploymentRepo := &mockDeploymentRepository{
+		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
+			return deploymentData, nil
+		},
+	}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return projectData, nil
+		},
+	}
+
+	mockFailServer := httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) { // 常に500を返すモックサーバー
+		responseWriter.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer mockFailServer.Close()
+	fileIOClient := fileio.NewFileIOClientForTest(mockFailServer.URL)
+
+	buildSvc := NewBuildService(deploymentRepo, &mockDeploymentBuildRepository{}, projectRepo, &mockHarborCredentialRepository{}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}, fileIOClient)
+
+	zipMagicBytes := []byte{0x50, 0x4b, 0x03, 0x04}
+	_, err := buildSvc.UploadBuildArchive(ctx, "user-1", "deployment-1", "source.zip", strings.NewReader(string(zipMagicBytes)), int64(len(zipMagicBytes)))
+	if err != ErrArchiveUploadFailed {
+		t.Errorf("期待するエラー %v、実際のエラー %v", ErrArchiveUploadFailed, err)
+	}
+}
+
+// TestTriggerBuild_アーカイブトークン正常系 はアーカイブアップロードトークンを使ったビルド開始が正常に処理されることを確認する
+func TestTriggerBuild_アーカイブトークン正常系(t *testing.T) {
+	middlewares.SetArchiveUploadTokenSecretForTest([]byte("test-secret")) // テスト用シークレットを設定する
+	ctx := context.Background()
+
+	deploymentData := &models.Deployment{
+		ID:        "deployment-1",
+		ProjectID: "project-1",
+		Type:      models.DeploymentTypeArchive,
+	}
+	projectData := &models.Project{ID: "project-1", UserID: "user-1"}
+
+	deploymentRepo := &mockDeploymentRepository{
+		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
+			return deploymentData, nil
+		},
+	}
+	buildRepo := &mockDeploymentBuildRepository{
+		createFunc: func(ctx context.Context, build *models.DeploymentBuild) error {
+			build.ID = "build-id-archive"
+			return nil
+		},
+		findAllByDeploymentIDFunc: func(ctx context.Context, deploymentID string) ([]models.DeploymentBuild, error) {
+			return []models.DeploymentBuild{}, nil
+		},
+	}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return projectData, nil
+		},
+	}
+
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}, nil)
+
+	uploadToken, err := middlewares.IssueArchiveUploadToken(middlewares.ArchiveUploadTokenClaim{
+		DeploymentID: "deployment-1",
+		ArchiveURL:   "https://file.io/testlink",
+		EncKeyHex:    "abcd1234",
+		SHA256Hex:    "ef567890",
+		FileName:     "source.zip",
+		SizeBytes:    100,
+	})
+	if err != nil {
+		t.Fatalf("トークンの発行に失敗しました: %v", err)
+	}
+
+	resultBuild, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "", uploadToken, "./app")
+	if err != nil {
+		t.Fatalf("TriggerBuild() がエラーを返しました: %v", err)
+	}
+	if resultBuild.ArchiveFileName != "source.zip" {
+		t.Errorf("ArchiveFileNameが一致しません: got=%s", resultBuild.ArchiveFileName)
+	}
+	if resultBuild.ArchiveSizeBytes != 100 {
+		t.Errorf("ArchiveSizeBytesが一致しません: got=%d", resultBuild.ArchiveSizeBytes)
+	}
+	if resultBuild.Directory != "./app" {
+		t.Errorf("Directoryが一致しません: got=%s", resultBuild.Directory)
+	}
+}
+
+// TestTriggerBuild_アーカイブトークン無効 はトークンが無効な場合にErrArchiveTokenInvalidを返すことを確認する
+func TestTriggerBuild_アーカイブトークン無効(t *testing.T) {
+	ctx := context.Background()
+
+	deploymentData := &models.Deployment{
+		ID:        "deployment-1",
+		ProjectID: "project-1",
+		Type:      models.DeploymentTypeArchive,
+	}
+	projectData := &models.Project{ID: "project-1", UserID: "user-1"}
+
+	deploymentRepo := &mockDeploymentRepository{
+		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
+			return deploymentData, nil
+		},
+	}
+	buildRepo := &mockDeploymentBuildRepository{
+		findAllByDeploymentIDFunc: func(ctx context.Context, deploymentID string) ([]models.DeploymentBuild, error) {
+			return []models.DeploymentBuild{}, nil
+		},
+	}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return projectData, nil
+		},
+	}
+
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}, nil)
+
+	_, err := buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "", "invalid-token-string", "./app")
+	if err != ErrArchiveTokenInvalid {
+		t.Errorf("期待するエラー %v、実際のエラー %v", ErrArchiveTokenInvalid, err)
+	}
+}
+
+// TestTriggerBuild_アーカイブトークンデプロイメント不一致 はトークンの対象デプロイメントがリクエストと異なる場合にErrArchiveTokenDeploymentMismatchを返すことを確認する
+func TestTriggerBuild_アーカイブトークンデプロイメント不一致(t *testing.T) {
+	middlewares.SetArchiveUploadTokenSecretForTest([]byte("test-secret"))
+	ctx := context.Background()
+
+	deploymentData := &models.Deployment{
+		ID:        "deployment-1",
+		ProjectID: "project-1",
+		Type:      models.DeploymentTypeArchive,
+	}
+	projectData := &models.Project{ID: "project-1", UserID: "user-1"}
+
+	deploymentRepo := &mockDeploymentRepository{
+		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
+			return deploymentData, nil
+		},
+	}
+	buildRepo := &mockDeploymentBuildRepository{
+		findAllByDeploymentIDFunc: func(ctx context.Context, deploymentID string) ([]models.DeploymentBuild, error) {
+			return []models.DeploymentBuild{}, nil
+		},
+	}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return projectData, nil
+		},
+	}
+
+	buildSvc := NewBuildService(deploymentRepo, buildRepo, projectRepo, &mockHarborCredentialRepository{}, &mockBuildLogChunkRepository{}, fake.NewSimpleClientset(), "", &mockWorkflowStarter{}, nil)
+
+	uploadToken, err := middlewares.IssueArchiveUploadToken(middlewares.ArchiveUploadTokenClaim{
+		DeploymentID: "different-deployment", // 別のデプロイメントID向けに発行されたトークン
+		ArchiveURL:   "https://file.io/testlink",
+		EncKeyHex:    "abcd1234",
+		SHA256Hex:    "ef567890",
+	})
+	if err != nil {
+		t.Fatalf("トークンの発行に失敗しました: %v", err)
+	}
+
+	_, err = buildSvc.TriggerBuild(ctx, "user-1", "deployment-1", "", "", uploadToken, "./app")
+	if err != ErrArchiveTokenDeploymentMismatch {
+		t.Errorf("期待するエラー %v、実際のエラー %v", ErrArchiveTokenDeploymentMismatch, err)
 	}
 }
