@@ -87,6 +87,8 @@ func (mock *mockEnvVarMountRepository) FindAllByDeploymentID(ctx context.Context
 func (mock *mockEnvVarMountRepository) FindByDeploymentIDAndEnvVarID(ctx context.Context, deploymentID string, envVarID string) (*models.EnvVarMount, error) { return nil, nil }
 func (mock *mockEnvVarMountRepository) UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount, status models.EnvVarMountStatus) error { return nil }
 func (mock *mockEnvVarMountRepository) Delete(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error { return nil }
+func (mock *mockEnvVarMountRepository) DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error { return nil }
+func (mock *mockEnvVarMountRepository) CountByEnvVarID(ctx context.Context, envVarID string) (int64, error) { return 0, nil }
 
 // mockVolumeMountRepository は VolumeMountRepository のテスト用最小モック
 type mockVolumeMountRepository struct{}
