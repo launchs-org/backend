@@ -106,6 +106,26 @@ info:
     5. ビルド成功後、Image レコードが自動生成され `pending_image_id` に設定される
     6. `POST /api/v1/deployments/{id}/apply` — ビルド成功後に apply（`not_init` のままだと `400` エラー）
 
+    ### zip/tar.gz アップロードからのビルド（archive）のフロー
+
+    GitHub リポジトリを持たないソースコードから直接ビルドしたい場合に使う。
+    アップロードとビルド開始は2段階のAPIに分かれている（署名付きURLは使わず、
+    handler が受け取ったアーカイブをサーバー側で暗号化して外部の一時ファイル共有サービス
+    file.io に中継する構成）。
+
+    1. `POST /api/v1/projects` — プロジェクトを作成
+    2. `POST /api/v1/projects/{id}/deployments` — `type: archive` でデプロイメントを作成（`status` は `not_init`）
+    3. `POST /api/v1/deployments/{id}/build/upload` — zip/tar.gz を multipart/form-data でアップロードし
+       `upload_token` を取得（この時点ではビルドは開始されない。トークンの有効期限は15分）
+    4. `POST /api/v1/deployments/{id}/build` — `archive_upload_token` と任意で `build_directory` を指定して
+       Temporal `BuildWorkflow` を起動しビルド
+    5. `GET /api/v1/builds/{id}/logs` — ビルドログを確認（`since` で差分ポーリング可能）
+    6. ビルド成功後、Image レコードが自動生成され `pending_image_id` に設定される
+    7. `POST /api/v1/deployments/{id}/apply` — ビルド成功後に apply（`not_init` のままだと `400` エラー）
+
+    再ビルドする場合もアップロード済みアーカイブは再利用できないため、
+    手順3から再度実行する必要がある（file.io のリンクは1回のダウンロードで自動的に無効化される）。
+
     ### GitHub push → 自動ビルド・自動デプロイのフロー（Webhook）
 
     1. `POST /api/v1/deployments/{id}/webhooks` — Webhook を作成しシークレットを取得
@@ -365,12 +385,13 @@ components:
           maxLength: 63
         type:
           type: string
-          enum: [image_url, dockerfile, railpack]
+          enum: [image_url, dockerfile, railpack, archive]
           description: |
             デプロイメントタイプ（作成後変更不可）
             - `image_url`: 既存の Docker イメージを直接デプロイ
             - `dockerfile`: リポジトリ内の Dockerfile でビルド（現在ビルド未サポート）
-            - `railpack`: Railpack でビルドしてデプロイ
+            - `railpack`: Railpack でビルドしてデプロイ（GitHub リポジトリ起点）
+            - `archive`: zip/tar.gz アーカイブをアップロードして Railpack でビルドしてデプロイ
         image_id:
           type: string
           format: uuid
@@ -484,7 +505,7 @@ components:
           example: "web-app"
         type:
           type: string
-          enum: [image_url, dockerfile, railpack]
+          enum: [image_url, dockerfile, railpack, archive]
           example: "image_url"
         image_url:
           type: string
@@ -502,7 +523,10 @@ components:
           example: "HEAD"
         build_directory:
           type: string
-          description: ビルド作業ディレクトリ（デフォルト "./"）
+          description: |
+            ビルド作業ディレクトリ（デフォルト "./"）。
+            type=archive の場合はここで指定せず、`POST /api/v1/deployments/{id}/build` の
+            `build_directory` で毎回指定する（アーカイブごとに構成が異なり得るため）。
           example: "./"
         dockerfile_path:
           type: string
@@ -805,6 +829,13 @@ components:
           description: build_directory のスナップショット
         dockerfile_path:
           type: string
+        archive_file_name:
+          type: string
+          description: type=archive のビルドでのみ使用。アップロードされたアーカイブの元ファイル名（表示・ログ目的のみ。アーカイブ本体・鍵はDBに保存しない）
+        archive_size_bytes:
+          type: integer
+          format: int64
+          description: type=archive のビルドでのみ使用。アップロードされたアーカイブの元サイズ（バイト）
         build_log:
           type: string
           description: k8s Job の Pod ログ全文（完了後に格納。差分取得は logs エンドポイントを利用）
@@ -822,7 +853,12 @@ components:
 
     TriggerBuildRequest:
       type: object
-      description: 全フィールド省略可（バインド失敗時も無視されオプション扱いになる）
+      description: |
+        全フィールド省略可（バインド失敗時も無視されオプション扱いになる）。
+
+        `archive_upload_token` を指定した場合は archive タイプのビルドとして処理される
+        （事前に `POST /api/v1/deployments/{id}/build/upload` でアーカイブをアップロードし
+        取得したトークンを渡す）。省略した場合は既存の GitHub ビルドフローとして処理される。
       properties:
         commit_message:
           type: string
@@ -830,6 +866,28 @@ components:
         author:
           type: string
           example: "octocat"
+        archive_upload_token:
+          type: string
+          description: |
+            アーカイブアップロードトークン（JWT）。`POST /api/v1/deployments/{id}/build/upload`
+            のレスポンスで取得する。有効期限は発行から15分間で、1回のビルド開始にのみ使用できる
+            （再ビルド時は再アップロードが必要）。archive タイプのビルド時のみ指定する。
+        build_directory:
+          type: string
+          description: ビルドディレクトリ。archive タイプのビルド時のみ指定する（省略時は "."）。
+          example: "./app"
+
+    UploadBuildArchiveResponse:
+      type: object
+      description: アーカイブアップロード完了時に返るレスポンス。この時点ではビルドは開始されない。
+      properties:
+        upload_token:
+          type: string
+          description: |
+            アーカイブアップロードトークン（JWT）。file.io のダウンロードリンク・復号鍵・
+            アーカイブのSHA256ハッシュ・ファイル名・サイズをクレームに含む（DBには保存されない）。
+            `POST /api/v1/deployments/{id}/build` の `archive_upload_token` に渡してビルドを開始する。
+            有効期限は発行から15分間。
 
     BuildLogsResponse:
       type: object
@@ -885,7 +943,7 @@ components:
           type: string
         type:
           type: string
-          enum: [image_url, dockerfile, railpack]
+          enum: [image_url, dockerfile, railpack, archive]
         image_url:
           type: string
         instance_size:
@@ -2676,13 +2734,19 @@ paths:
     post:
       summary: ビルドトリガー
       description: |
-        `railpack` タイプのデプロイメントで Temporal `BuildWorkflow` を起動しビルドを開始します。
+        `railpack` / `archive` タイプのデプロイメントで Temporal `BuildWorkflow` を起動しビルドを開始します。
 
         **注意**: `dockerfile` タイプは現在サポートされていません（`400` が返ります）。
 
+        - `railpack` タイプ: GitHub リポジトリ (`github_repo_url` 等) からビルドする既存フロー。
+          `archive_upload_token` は指定しない。
+        - `archive` タイプ: 事前に `POST /api/v1/deployments/{id}/build/upload` でアーカイブを
+          アップロードして取得した `archive_upload_token` と、任意で `build_directory` を指定する。
+
         **前提条件**:
-        - `type` が `railpack` であること（`dockerfile` は非対応）
+        - `type` が `railpack` または `archive` であること（`dockerfile` は非対応）
         - 別のビルドが実行中でないこと（`409` を返す）
+        - `archive` タイプの場合、`archive_upload_token` が有効期限内（発行から15分）であること
 
         ビルドは k8s Job として実行されます。進捗は `GET /api/v1/builds/{id}/logs` で確認できます。
         成功すると Image レコードが自動作成され `pending_image_id` に設定されます。
@@ -2706,8 +2770,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: アーカイブアップロードトークンが無効・期限切れです（archive タイプのみ）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: アクセスが禁止されています
+          description: アクセスが禁止されています。またはアーカイブアップロードトークンの対象デプロイメントが一致しません（archive タイプのみ）
           content:
             application/json:
               schema:
@@ -2720,6 +2790,89 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: ビルドが実行中（同時に複数のビルドは不可）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: サーバーエラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/deployments/{id}/build/upload:
+    parameters:
+      - $ref: "#/components/parameters/DeploymentIdParam"
+
+    post:
+      summary: ビルド用アーカイブアップロード
+      description: |
+        `archive` タイプのデプロイメント向けに zip/tar.gz アーカイブをアップロードします。
+        この時点ではビルドは開始されません。
+
+        処理の流れ:
+        1. アップロードされたアーカイブの拡張子・マジックバイトを検証する（zip/tar.gz/tgzのみ許可）
+        2. サーバー側で AES-256-CBC 暗号化し、暗号文を外部の一時ファイル共有サービス file.io に
+           アップロードする（`expires=1h`, `maxDownloads=1` を明示指定し、ビルドJobが1回だけ
+           ダウンロードすると自動的に無効化される）
+        3. file.io のダウンロードリンク・復号鍵・暗号文のSHA256ハッシュ・ファイル名・サイズを
+           クレームに含む有効期限15分のJWT（アップロードトークン）を発行して返す
+
+        アーカイブ本体・復号鍵は DB には保存されない。取得した `upload_token` を
+        `POST /api/v1/deployments/{id}/build` の `archive_upload_token` に渡してビルドを開始する。
+        トークンは1回のビルド開始にのみ使用でき、再ビルド時は再アップロードが必要。
+
+        **前提条件**:
+        - `type` が `archive` であること（それ以外は `400` を返す）
+        - アップロードするファイルサイズは概ね100MB程度まで（file.io無料枠の制限に合わせ
+          リクエストボディ上限を120MBに設定している。超過時はEchoが自動的に `413` を返す）
+      tags: [Builds]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [archive]
+              properties:
+                archive:
+                  type: string
+                  format: binary
+                  description: アップロードする zip/tar.gz/tgz アーカイブファイル
+      responses:
+        "200":
+          description: アップロード完了。アップロードトークンを返す
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadBuildArchiveResponse"
+        "400":
+          description: archiveフィールドが指定されていない、拡張子・マジックバイトが不正、またはデプロイメントタイプが archive ではない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: アクセスが禁止されています
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: デプロイメントが見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: アップロードサイズが上限（120MB）を超えている
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: file.io へのアップロードに失敗しました
           content:
             application/json:
               schema:
