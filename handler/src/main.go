@@ -96,20 +96,21 @@ func main() {
 	projectHandler := handler.NewProjectHandler(projectServiceImpl)                                                                                                                                                                                               // project ハンドラーを生成する
 
 	// deployment ハンドラーを DI 組み立てする
-	serviceRepo := repository.NewServiceRepository(repository.Database)           // service リポジトリを生成する
-	envVarRepo := repository.NewEnvVarRepository(repository.Database)             // env_var リポジトリを生成する
-	envVarMountRepo := repository.NewEnvVarMountRepository(repository.Database)   // env_var_mount リポジトリを生成する
-	applyHistoryRepo := repository.NewApplyHistoryRepository(repository.Database) // apply_history リポジトリを生成する
-	volumeRepo := repository.NewVolumeRepository(repository.Database)             // volume リポジトリを生成する
-	volumeMountRepo := repository.NewVolumeMountRepository(repository.Database)   // volume_mount リポジトリを生成する
-	baseDomain := os.Getenv("BASE_DOMAIN")                                        // ベースドメインを環境変数から取得する
-	pathRuleRepo := repository.NewPathRuleRepository(repository.Database)         // path_rule リポジトリを生成する
+	serviceRepo := repository.NewServiceRepository(repository.Database)                       // service リポジトリを生成する
+	envVarRepo := repository.NewEnvVarRepository(repository.Database)                         // env_var リポジトリを生成する
+	envVarMountRepo := repository.NewEnvVarMountRepository(repository.Database)               // env_var_mount リポジトリを生成する
+	applyHistoryRepo := repository.NewApplyHistoryRepository(repository.Database)             // apply_history リポジトリを生成する
+	applyProgressRepo := repository.NewDeploymentApplyProgressRepository(repository.Database) // deployment_apply_progress リポジトリを生成する
+	volumeRepo := repository.NewVolumeRepository(repository.Database)                         // volume リポジトリを生成する
+	volumeMountRepo := repository.NewVolumeMountRepository(repository.Database)               // volume_mount リポジトリを生成する
+	baseDomain := os.Getenv("BASE_DOMAIN")                                                    // ベースドメインを環境変数から取得する
+	pathRuleRepo := repository.NewPathRuleRepository(repository.Database)                     // path_rule リポジトリを生成する
 
 	imageRepo := repository.NewImageRepository(repository.Database) // image リポジトリを生成する
 
-	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, envVarRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, buildRepo, imageRepo, userQuotaRepo, k8sClient, temporalClient)               // deployment サービスを生成する
-	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, pathRuleRepo, userQuotaRepo, temporalClient, baseDomain) // apply サービスを生成する
-	deploymentHandler := handler.NewDeploymentHandler(deploymentServiceImpl, applyServiceImpl)                                                                                                                                        // deployment ハンドラーを生成する
+	deploymentServiceImpl := service.NewDeploymentService(deploymentRepo, serviceRepo, projectRepo, envVarRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, applyProgressRepo, buildRepo, imageRepo, userQuotaRepo, k8sClient, temporalClient) // deployment サービスを生成する
+	applyServiceImpl := service.NewApplyService(repository.Database, k8sClient, dynamicClient, deploymentRepo, applyHistoryRepo, projectRepo, serviceRepo, ingressRouteRepo, pathRuleRepo, userQuotaRepo, temporalClient, baseDomain)                  // apply サービスを生成する
+	deploymentHandler := handler.NewDeploymentHandler(deploymentServiceImpl, applyServiceImpl)                                                                                                                                                         // deployment ハンドラーを生成する
 
 	// ingress_route ハンドラーを DI 組み立てする
 	ingressRouteServiceImpl := service.NewIngressRouteService(ingressRouteRepo, pathRuleRepo, projectRepo, baseDomain) // ingress_route サービスを生成する
@@ -117,9 +118,9 @@ func main() {
 
 	// build ハンドラーを DI 組み立てする
 	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)                                                                                                             // build ログチャンクリポジトリを生成する
-	fileIOClient := fileio.NewFileIOClient()                                                                                                                                                // file.io アップロードクライアントを生成する
+	fileIOClient := fileio.NewFileIOClient()                                                                                                                                               // file.io アップロードクライアントを生成する
 	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient, "harbor.main-harbor", temporalClient, fileIOClient) // build サービスを生成する（Workflow は builder Worker に委譲する）
-	buildHandler := handler.NewBuildHandler(buildServiceImpl)                                                                                                                               // build ハンドラーを生成する
+	buildHandler := handler.NewBuildHandler(buildServiceImpl)                                                                                                                              // build ハンドラーを生成する
 
 	// image ハンドラーを DI 組み立てする
 	imageServiceImpl := service.NewImageService(imageRepo, deploymentRepo, projectRepo, harborCredentialRepo, buildRepo, harborClient) // image サービスを生成する
