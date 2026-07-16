@@ -63,7 +63,7 @@ func isNotFound(err error) bool {
 
 // pollDeployments は 10 秒ごとに全 Deployment を List して app_status を同期する
 // Watch 接続切断中のイベント取りこぼしを補完するためのポーリングループ
-func pollDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
+func pollDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, applyProgressRepo repository.DeploymentApplyProgressRepository, serviceRepo repository.ServiceRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
 	ticker := time.NewTicker(10 * time.Second) // 10 秒ごとにポーリングするタイマーを生成する
 	defer ticker.Stop()                        // 終了時にタイマーを停止する
 
@@ -117,6 +117,10 @@ func pollDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploy
 					logger.Println("pollDeployments: 変化なし deploymentID=" + deploymentID + " app_status=" + string(newAppStatus)) // 変化なしログを出力する
 				}
 
+				if newAppStatus == models.AppStatusRunning { // running 到達時は apply 進捗の後半ステップを完了にする
+					updateApplyProgressOnRunning(ctx, applyProgressRepo, serviceRepo, k8sClient, deploymentID, currentDeployment.ProjectID, projectRepo)
+				}
+
 				if newAppStatus == models.AppStatusRunning { // app_status が running の場合はログストリームを開始する
 					currentReadyReplicas := k8sDeployment.Status.ReadyReplicas                              // 現在の ReadyReplicas を取得する
 					streamCancelMu.Lock()                                                                   // マップへの排他アクセスを開始する
@@ -167,7 +171,7 @@ type podStreamState struct {
 }
 
 // WatchDeployments は全 Namespace の Deployment 変化を監視して DB を自動更新する
-func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository) {
+func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, applyProgressRepo repository.DeploymentApplyProgressRepository, serviceRepo repository.ServiceRepository) {
 	// 実行中のログストリームを管理するマップ（deploymentID → podStreamState）
 	streamCancelMap := make(map[string]podStreamState) // ストリーム状態を管理するマップ
 	var streamCancelMu sync.Mutex                      // マップへの排他アクセスのためのミューテックス
@@ -193,8 +197,8 @@ func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deplo
 		}
 	}
 
-	go pollDeployments(ctx, k8sClient, deploymentRepo, podLogChunkRepo, projectRepo, streamCancelMap, &streamCancelMu) // 定期ポーリングを goroutine で起動する
-	go watchPodDeletions(ctx, k8sClient, podLogChunkRepo)                                                              // Pod 削除イベントを監視する goroutine を起動する
+	go pollDeployments(ctx, k8sClient, deploymentRepo, podLogChunkRepo, projectRepo, applyProgressRepo, serviceRepo, streamCancelMap, &streamCancelMu) // 定期ポーリングを goroutine で起動する
+	go watchPodDeletions(ctx, k8sClient, podLogChunkRepo)                                                                                              // Pod 削除イベントを監視する goroutine を起動する
 
 	for {
 		if ctx.Err() != nil { // コンテキストがキャンセルされた場合は終了する
@@ -211,14 +215,14 @@ func WatchDeployments(ctx context.Context, k8sClient kubernetes.Interface, deplo
 
 		logger.Println("WatchDeployments: 監視を開始しました") // 監視開始ログを出力する
 
-		watchLoop(ctx, watcher, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, podLogChunkRepo, projectRepo, streamCancelMap, &streamCancelMu) // イベントループを実行する
+		watchLoop(ctx, watcher, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, podLogChunkRepo, projectRepo, applyProgressRepo, serviceRepo, streamCancelMap, &streamCancelMu) // イベントループを実行する
 
 		logger.Println("WatchDeployments: Watch チャネルが終了しました。再接続します") // 再接続ログを出力する
 	}
 }
 
 // watchLoop は Watch イベントチャネルを処理するループ
-func watchLoop(ctx context.Context, watcher watch.Interface, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
+func watchLoop(ctx context.Context, watcher watch.Interface, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, applyProgressRepo repository.DeploymentApplyProgressRepository, serviceRepo repository.ServiceRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
 	defer watcher.Stop() // 終了時に Watch を停止する
 
 	for {
@@ -229,13 +233,13 @@ func watchLoop(ctx context.Context, watcher watch.Interface, k8sClient kubernete
 			if !ok { // チャネルが閉じられた場合はループを抜ける
 				return
 			}
-			handleDeploymentEvent(ctx, event, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, podLogChunkRepo, projectRepo, streamCancelMap, streamCancelMu) // イベントを処理する
+			handleDeploymentEvent(ctx, event, k8sClient, deploymentRepo, envVarMountRepo, volumeMountRepo, applyHistoryRepo, podLogChunkRepo, projectRepo, applyProgressRepo, serviceRepo, streamCancelMap, streamCancelMu) // イベントを処理する
 		}
 	}
 }
 
 // handleDeploymentEvent は Deployment の Watch イベントを処理する
-func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
+func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kubernetes.Interface, deploymentRepo repository.DeploymentRepository, envVarMountRepo repository.EnvVarMountRepository, volumeMountRepo repository.VolumeMountRepository, applyHistoryRepo repository.ApplyHistoryRepository, podLogChunkRepo repository.PodLogChunkRepository, projectRepo repository.ProjectRepository, applyProgressRepo repository.DeploymentApplyProgressRepository, serviceRepo repository.ServiceRepository, streamCancelMap map[string]podStreamState, streamCancelMu *sync.Mutex) {
 	k8sDeployment, ok := event.Object.(*appsv1.Deployment) // イベントオブジェクトを Deployment にキャストする
 	if !ok {                                               // キャストに失敗した場合はスキップする
 		return
@@ -328,6 +332,20 @@ func handleDeploymentEvent(ctx context.Context, event watch.Event, k8sClient kub
 			return
 		}
 		logger.Println("WatchDeployments: app_status と k8s_status を更新しました: " + deploymentID) // 更新ログを出力する
+
+		if k8sDeployment.Status.Replicas > 0 { // レプリカが生成されていればコンテナ起動ステップを完了にする
+			updateApplyProgressStep(ctx, applyProgressRepo, deploymentID, models.ApplyProgressStepPodScheduled, models.ApplyProgressStepStatusDone)
+		}
+		if k8sDeployment.Status.ReadyReplicas > 0 { // Ready なレプリカが1つでもあれば起動確認ステップを完了にする
+			updateApplyProgressStep(ctx, applyProgressRepo, deploymentID, models.ApplyProgressStepPodRunning, models.ApplyProgressStepStatusDone)
+		}
+
+		if appStatus == models.AppStatusRunning { // running 到達時は apply 進捗の後半ステップを完了にする
+			deploymentDataForProgress, deploymentErrForProgress := deploymentRepo.FindByID(ctx, deploymentID) // projectID 解決用に deployment を取得する
+			if deploymentErrForProgress == nil {
+				updateApplyProgressOnRunning(ctx, applyProgressRepo, serviceRepo, k8sClient, deploymentID, deploymentDataForProgress.ProjectID, projectRepo)
+			}
+		}
 
 		if appStatus == models.AppStatusRunning { // app_status が running の場合はログストリームを開始または継続する
 			currentReadyReplicas := k8sDeployment.Status.ReadyReplicas                              // 現在の ReadyReplicas を取得する
@@ -671,6 +689,44 @@ func watchPodDeletions(ctx context.Context, k8sClient kubernetes.Interface, podL
 			return
 		}
 		logger.Println("watchPodDeletions: Watch チャンネルが閉じられました。再接続します") // 再接続ログを出力する
+	}
+}
+
+// updateApplyProgressStep は deploymentID に対応する最新workflowの指定ステップを更新する
+// workflow_id が見つからない場合や更新に失敗した場合はログのみでスキップする（Deployment本体の状態同期を妨げないため）
+func updateApplyProgressStep(ctx context.Context, applyProgressRepo repository.DeploymentApplyProgressRepository, deploymentID string, stepName models.ApplyProgressStepName, status models.ApplyProgressStepStatus) {
+	workflowID, workflowErr := applyProgressRepo.FindLatestWorkflowIDByDeploymentID(ctx, deploymentID) // 最新の workflow_id を取得する
+	if workflowErr != nil {                                                                            // workflow_id が見つからない場合は何もしない
+		return
+	}
+	if err := applyProgressRepo.UpdateStepStatus(ctx, nil, workflowID, stepName, status, ""); err != nil { // ステップを更新する
+		logger.PrintErr("updateApplyProgressStep: apply_progress 更新に失敗しました（deploymentID=" + deploymentID + "）: " + err.Error()) // エラーをログ出力する
+	}
+}
+
+// updateApplyProgressOnRunning は app_status が running に到達した際に、ネットワーク接続確認・起動状態確認ステップを完了にする
+func updateApplyProgressOnRunning(ctx context.Context, applyProgressRepo repository.DeploymentApplyProgressRepository, serviceRepo repository.ServiceRepository, k8sClient kubernetes.Interface, deploymentID string, projectID string, projectRepo repository.ProjectRepository) {
+	workflowID, workflowErr := applyProgressRepo.FindLatestWorkflowIDByDeploymentID(ctx, deploymentID) // 最新の workflow_id を取得する
+	if workflowErr != nil {                                                                            // workflow_id が見つからない場合は何もしない
+		return
+	}
+
+	serviceData, serviceErr := serviceRepo.FindByDeploymentID(ctx, deploymentID) // Service レコードを取得する（存在しない場合はエラーになる）
+	if serviceErr == nil && serviceData.Status != models.ServiceStatusPending {  // Service が有効な場合のみネットワーク確認を行う
+		projectData, projectErr := projectRepo.FindByIDNoTx(ctx, projectID) // namespace 解決のため project を取得する
+		if projectErr == nil {
+			k8sServiceName := serviceData.ID + "-svc"                                                                  // k8s Service 名を生成する
+			endpointsReady, endpointsErr := CheckEndpointsReady(ctx, k8sClient, projectData.Namespace, k8sServiceName) // Endpoints の Ready 状態を確認する
+			if endpointsErr == nil && endpointsReady {                                                                 // Ready なアドレスが存在する場合のみ完了にする
+				if err := applyProgressRepo.UpdateStepStatus(ctx, nil, workflowID, models.ApplyProgressStepNetwork, models.ApplyProgressStepStatusDone, ""); err != nil {
+					logger.PrintErr("updateApplyProgressOnRunning: network ステップ更新に失敗しました（deploymentID=" + deploymentID + "）: " + err.Error()) // エラーをログ出力する
+				}
+			}
+		}
+	}
+
+	if err := applyProgressRepo.UpdateStepStatus(ctx, nil, workflowID, models.ApplyProgressStepReadiness, models.ApplyProgressStepStatusDone, ""); err != nil { // 起動状態確認ステップを完了にする
+		logger.PrintErr("updateApplyProgressOnRunning: readiness ステップ更新に失敗しました（deploymentID=" + deploymentID + "）: " + err.Error()) // エラーをログ出力する
 	}
 }
 
