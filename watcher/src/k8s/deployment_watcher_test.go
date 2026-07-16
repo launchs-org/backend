@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"gorm.io/datatypes"
+	"gorm.io/gorm"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
-	"gorm.io/datatypes"
-	"gorm.io/gorm"
 )
 
 // ---- モック定義 ----
@@ -29,24 +29,36 @@ type mockDeploymentRepository struct {
 	findAllRunningFunc       func(ctx context.Context) ([]models.Deployment, error)
 }
 
-func (mock *mockDeploymentRepository) Create(ctx context.Context, deployment *models.Deployment) error { return nil }
-func (mock *mockDeploymentRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, deployment *models.Deployment) error { return nil }
+func (mock *mockDeploymentRepository) Create(ctx context.Context, deployment *models.Deployment) error {
+	return nil
+}
+func (mock *mockDeploymentRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, deployment *models.Deployment) error {
+	return nil
+}
 func (mock *mockDeploymentRepository) FindByID(ctx context.Context, deploymentID string) (*models.Deployment, error) {
 	if mock.findByIDFunc != nil {
 		return mock.findByIDFunc(ctx, deploymentID)
 	}
 	return nil, nil
 }
-func (mock *mockDeploymentRepository) FindByIDForUpdate(ctx context.Context, tx *gorm.DB, deploymentID string) (*models.Deployment, error) { return nil, nil }
-func (mock *mockDeploymentRepository) FindAllByProjectID(ctx context.Context, projectID string) ([]models.Deployment, error) { return nil, nil }
+func (mock *mockDeploymentRepository) FindByIDForUpdate(ctx context.Context, tx *gorm.DB, deploymentID string) (*models.Deployment, error) {
+	return nil, nil
+}
+func (mock *mockDeploymentRepository) FindAllByProjectID(ctx context.Context, projectID string) ([]models.Deployment, error) {
+	return nil, nil
+}
 func (mock *mockDeploymentRepository) FindAllRunning(ctx context.Context) ([]models.Deployment, error) {
 	if mock.findAllRunningFunc != nil {
 		return mock.findAllRunningFunc(ctx)
 	}
 	return nil, nil
 }
-func (mock *mockDeploymentRepository) Save(ctx context.Context, deployment *models.Deployment) error { return nil }
-func (mock *mockDeploymentRepository) Updates(ctx context.Context, tx *gorm.DB, deployment *models.Deployment, values map[string]interface{}) error { return nil }
+func (mock *mockDeploymentRepository) Save(ctx context.Context, deployment *models.Deployment) error {
+	return nil
+}
+func (mock *mockDeploymentRepository) Updates(ctx context.Context, tx *gorm.DB, deployment *models.Deployment, values map[string]interface{}) error {
+	return nil
+}
 func (mock *mockDeploymentRepository) UpdateAppStatus(ctx context.Context, deploymentID string, appStatus models.AppStatus) error {
 	if mock.updateAppStatusFunc != nil {
 		return mock.updateAppStatusFunc(ctx, deploymentID, appStatus)
@@ -65,12 +77,24 @@ func (mock *mockDeploymentRepository) UpdateDeleteProgress(ctx context.Context, 
 	}
 	return nil
 }
-func (mock *mockDeploymentRepository) UpdatePendingImageID(ctx context.Context, deploymentID string, imageID string) error { return nil }
-func (mock *mockDeploymentRepository) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error { return nil }
-func (mock *mockDeploymentRepository) UpdatePendingGithubBuildFields(ctx context.Context, deploymentID string, repoURL string, branch string, commitSHA string, directory string) error { return nil }
-func (mock *mockDeploymentRepository) UpdateDeploymentStatus(ctx context.Context, deploymentID string, status models.DeploymentStatus) error { return nil }
-func (mock *mockDeploymentRepository) UpdateCurrentBuildID(ctx context.Context, deploymentID string, buildID string) error { return nil }
-func (mock *mockDeploymentRepository) ClearCurrentBuildID(ctx context.Context, deploymentID string) error { return nil }
+func (mock *mockDeploymentRepository) UpdatePendingImageID(ctx context.Context, deploymentID string, imageID string) error {
+	return nil
+}
+func (mock *mockDeploymentRepository) UpdatePendingGithubCommitSHA(ctx context.Context, deploymentID string, commitSHA string) error {
+	return nil
+}
+func (mock *mockDeploymentRepository) UpdatePendingGithubBuildFields(ctx context.Context, deploymentID string, repoURL string, branch string, commitSHA string, directory string) error {
+	return nil
+}
+func (mock *mockDeploymentRepository) UpdateDeploymentStatus(ctx context.Context, deploymentID string, status models.DeploymentStatus) error {
+	return nil
+}
+func (mock *mockDeploymentRepository) UpdateCurrentBuildID(ctx context.Context, deploymentID string, buildID string) error {
+	return nil
+}
+func (mock *mockDeploymentRepository) ClearCurrentBuildID(ctx context.Context, deploymentID string) error {
+	return nil
+}
 func (mock *mockDeploymentRepository) Delete(ctx context.Context, deploymentID string) error {
 	if mock.deleteFunc != nil {
 		return mock.deleteFunc(ctx, deploymentID)
@@ -81,35 +105,73 @@ func (mock *mockDeploymentRepository) Delete(ctx context.Context, deploymentID s
 // mockEnvVarMountRepository は EnvVarMountRepository のテスト用最小モック
 type mockEnvVarMountRepository struct{}
 
-func (mock *mockEnvVarMountRepository) Create(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error { return nil }
-func (mock *mockEnvVarMountRepository) FindByID(ctx context.Context, mountID string) (*models.EnvVarMount, error) { return nil, nil }
-func (mock *mockEnvVarMountRepository) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error) { return nil, nil }
-func (mock *mockEnvVarMountRepository) FindByDeploymentIDAndEnvVarID(ctx context.Context, deploymentID string, envVarID string) (*models.EnvVarMount, error) { return nil, nil }
-func (mock *mockEnvVarMountRepository) UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount, status models.EnvVarMountStatus) error { return nil }
-func (mock *mockEnvVarMountRepository) Delete(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error { return nil }
-func (mock *mockEnvVarMountRepository) DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error { return nil }
-func (mock *mockEnvVarMountRepository) CountByEnvVarID(ctx context.Context, envVarID string) (int64, error) { return 0, nil }
+func (mock *mockEnvVarMountRepository) Create(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error {
+	return nil
+}
+func (mock *mockEnvVarMountRepository) FindByID(ctx context.Context, mountID string) (*models.EnvVarMount, error) {
+	return nil, nil
+}
+func (mock *mockEnvVarMountRepository) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.EnvVarMount, error) {
+	return nil, nil
+}
+func (mock *mockEnvVarMountRepository) FindByDeploymentIDAndEnvVarID(ctx context.Context, deploymentID string, envVarID string) (*models.EnvVarMount, error) {
+	return nil, nil
+}
+func (mock *mockEnvVarMountRepository) UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount, status models.EnvVarMountStatus) error {
+	return nil
+}
+func (mock *mockEnvVarMountRepository) Delete(ctx context.Context, tx *gorm.DB, mount *models.EnvVarMount) error {
+	return nil
+}
+func (mock *mockEnvVarMountRepository) DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error {
+	return nil
+}
+func (mock *mockEnvVarMountRepository) CountByEnvVarID(ctx context.Context, envVarID string) (int64, error) {
+	return 0, nil
+}
 
 // mockVolumeMountRepository は VolumeMountRepository のテスト用最小モック
 type mockVolumeMountRepository struct{}
 
-func (mock *mockVolumeMountRepository) Create(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount) error { return nil }
-func (mock *mockVolumeMountRepository) FindByID(ctx context.Context, mountID string) (*models.VolumeMount, error) { return nil, nil }
-func (mock *mockVolumeMountRepository) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.VolumeMount, error) { return nil, nil }
-func (mock *mockVolumeMountRepository) FindAllByVolumeID(ctx context.Context, volumeID string) ([]*models.VolumeMount, error) { return nil, nil }
-func (mock *mockVolumeMountRepository) FindByDeploymentIDAndMountPath(ctx context.Context, deploymentID string, mountPath string) (*models.VolumeMount, error) { return nil, nil }
-func (mock *mockVolumeMountRepository) UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount, status models.VolumeMountStatus) error { return nil }
-func (mock *mockVolumeMountRepository) Delete(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount) error { return nil }
-func (mock *mockVolumeMountRepository) DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error { return nil }
+func (mock *mockVolumeMountRepository) Create(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount) error {
+	return nil
+}
+func (mock *mockVolumeMountRepository) FindByID(ctx context.Context, mountID string) (*models.VolumeMount, error) {
+	return nil, nil
+}
+func (mock *mockVolumeMountRepository) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.VolumeMount, error) {
+	return nil, nil
+}
+func (mock *mockVolumeMountRepository) FindAllByVolumeID(ctx context.Context, volumeID string) ([]*models.VolumeMount, error) {
+	return nil, nil
+}
+func (mock *mockVolumeMountRepository) FindByDeploymentIDAndMountPath(ctx context.Context, deploymentID string, mountPath string) (*models.VolumeMount, error) {
+	return nil, nil
+}
+func (mock *mockVolumeMountRepository) UpdateStatus(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount, status models.VolumeMountStatus) error {
+	return nil
+}
+func (mock *mockVolumeMountRepository) Delete(ctx context.Context, tx *gorm.DB, mount *models.VolumeMount) error {
+	return nil
+}
+func (mock *mockVolumeMountRepository) DeleteAllByDeploymentID(ctx context.Context, tx *gorm.DB, deploymentID string) error {
+	return nil
+}
 
 // mockApplyHistoryRepository は ApplyHistoryRepository のテスト用最小モック
 type mockApplyHistoryRepository struct {
 	deleteAllByDeploymentIDFunc func(ctx context.Context, deploymentID string) error
 }
 
-func (mock *mockApplyHistoryRepository) Create(ctx context.Context, tx *gorm.DB, history *models.ApplyHistory) error { return nil }
-func (mock *mockApplyHistoryRepository) UpdateStatus(ctx context.Context, tx *gorm.DB, history *models.ApplyHistory, status models.ApplyStatus) error { return nil }
-func (mock *mockApplyHistoryRepository) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.ApplyHistory, error) { return nil, nil }
+func (mock *mockApplyHistoryRepository) Create(ctx context.Context, tx *gorm.DB, history *models.ApplyHistory) error {
+	return nil
+}
+func (mock *mockApplyHistoryRepository) UpdateStatus(ctx context.Context, tx *gorm.DB, history *models.ApplyHistory, status models.ApplyStatus) error {
+	return nil
+}
+func (mock *mockApplyHistoryRepository) FindAllByDeploymentID(ctx context.Context, deploymentID string) ([]*models.ApplyHistory, error) {
+	return nil, nil
+}
 func (mock *mockApplyHistoryRepository) DeleteAllByDeploymentID(ctx context.Context, deploymentID string) error {
 	if mock.deleteAllByDeploymentIDFunc != nil {
 		return mock.deleteAllByDeploymentIDFunc(ctx, deploymentID)
@@ -120,32 +182,116 @@ func (mock *mockApplyHistoryRepository) DeleteAllByDeploymentID(ctx context.Cont
 // mockPodLogChunkRepository は PodLogChunkRepository のテスト用最小モック
 type mockPodLogChunkRepository struct{}
 
-func (mock *mockPodLogChunkRepository) Create(ctx context.Context, chunk *models.PodLogChunk) error { return nil }
-func (mock *mockPodLogChunkRepository) FindByDeploymentID(ctx context.Context, deploymentID string) ([]models.PodLogChunk, error) { return nil, nil }
-func (mock *mockPodLogChunkRepository) FindByDeploymentIDSince(ctx context.Context, deploymentID string, since time.Time) ([]models.PodLogChunk, error) { return nil, nil }
-func (mock *mockPodLogChunkRepository) DeleteByDeploymentIDAndPodNameNotIn(ctx context.Context, deploymentID string, activePodNames []string) error { return nil }
-func (mock *mockPodLogChunkRepository) DeleteByPodName(ctx context.Context, deploymentID string, podName string) error { return nil }
+func (mock *mockPodLogChunkRepository) Create(ctx context.Context, chunk *models.PodLogChunk) error {
+	return nil
+}
+func (mock *mockPodLogChunkRepository) FindByDeploymentID(ctx context.Context, deploymentID string) ([]models.PodLogChunk, error) {
+	return nil, nil
+}
+func (mock *mockPodLogChunkRepository) FindByDeploymentIDSince(ctx context.Context, deploymentID string, since time.Time) ([]models.PodLogChunk, error) {
+	return nil, nil
+}
+func (mock *mockPodLogChunkRepository) DeleteByDeploymentIDAndPodNameNotIn(ctx context.Context, deploymentID string, activePodNames []string) error {
+	return nil
+}
+func (mock *mockPodLogChunkRepository) DeleteByPodName(ctx context.Context, deploymentID string, podName string) error {
+	return nil
+}
 
 // mockProjectRepository は ProjectRepository のテスト用最小モック
 type mockProjectRepository struct {
 	findByIDNoTxFunc func(ctx context.Context, projectID string) (*models.Project, error)
 }
 
-func (mock *mockProjectRepository) Create(ctx context.Context, tx *gorm.DB, project *models.Project) error { return nil }
-func (mock *mockProjectRepository) FindByID(ctx context.Context, tx *gorm.DB, projectID string) (*models.Project, error) { return nil, nil }
+func (mock *mockProjectRepository) Create(ctx context.Context, tx *gorm.DB, project *models.Project) error {
+	return nil
+}
+func (mock *mockProjectRepository) FindByID(ctx context.Context, tx *gorm.DB, projectID string) (*models.Project, error) {
+	return nil, nil
+}
 func (mock *mockProjectRepository) FindByIDNoTx(ctx context.Context, projectID string) (*models.Project, error) {
 	if mock.findByIDNoTxFunc != nil {
 		return mock.findByIDNoTxFunc(ctx, projectID)
 	}
 	return nil, nil
 }
-func (mock *mockProjectRepository) FindByNamespace(ctx context.Context, namespace string) (*models.Project, error) { return nil, nil }
-func (mock *mockProjectRepository) FindAllByUserID(ctx context.Context, userID string) ([]*models.Project, error) { return nil, nil }
-func (mock *mockProjectRepository) UpdateStatus(ctx context.Context, tx *gorm.DB, project *models.Project, status models.ProjectStatus) error { return nil }
-func (mock *mockProjectRepository) UpdateStatusNoTx(ctx context.Context, project *models.Project, status models.ProjectStatus) error { return nil }
-func (mock *mockProjectRepository) Save(ctx context.Context, project *models.Project) error { return nil }
-func (mock *mockProjectRepository) Delete(ctx context.Context, tx *gorm.DB, project *models.Project) error { return nil }
-func (mock *mockProjectRepository) DeleteNoTx(ctx context.Context, project *models.Project) error { return nil }
+func (mock *mockProjectRepository) FindByNamespace(ctx context.Context, namespace string) (*models.Project, error) {
+	return nil, nil
+}
+func (mock *mockProjectRepository) FindAllByUserID(ctx context.Context, userID string) ([]*models.Project, error) {
+	return nil, nil
+}
+func (mock *mockProjectRepository) UpdateStatus(ctx context.Context, tx *gorm.DB, project *models.Project, status models.ProjectStatus) error {
+	return nil
+}
+func (mock *mockProjectRepository) UpdateStatusNoTx(ctx context.Context, project *models.Project, status models.ProjectStatus) error {
+	return nil
+}
+func (mock *mockProjectRepository) Save(ctx context.Context, project *models.Project) error {
+	return nil
+}
+func (mock *mockProjectRepository) Delete(ctx context.Context, tx *gorm.DB, project *models.Project) error {
+	return nil
+}
+func (mock *mockProjectRepository) DeleteNoTx(ctx context.Context, project *models.Project) error {
+	return nil
+}
+
+// mockDeploymentApplyProgressRepository は DeploymentApplyProgressRepository のテスト用最小モック
+type mockDeploymentApplyProgressRepository struct {
+	findLatestWorkflowIDByDeploymentIDFunc func(ctx context.Context, deploymentID string) (string, error)
+	updateStepStatusFunc                   func(ctx context.Context, tx *gorm.DB, workflowID string, stepName models.ApplyProgressStepName, status models.ApplyProgressStepStatus, errorMessage string) error
+}
+
+func (mock *mockDeploymentApplyProgressRepository) InitializeSteps(ctx context.Context, tx *gorm.DB, workflowID string, deploymentID string, skippedSteps map[models.ApplyProgressStepName]bool) error {
+	return nil
+}
+func (mock *mockDeploymentApplyProgressRepository) UpdateStepStatus(ctx context.Context, tx *gorm.DB, workflowID string, stepName models.ApplyProgressStepName, status models.ApplyProgressStepStatus, errorMessage string) error {
+	if mock.updateStepStatusFunc != nil {
+		return mock.updateStepStatusFunc(ctx, tx, workflowID, stepName, status, errorMessage)
+	}
+	return nil
+}
+func (mock *mockDeploymentApplyProgressRepository) FindAllByWorkflowID(ctx context.Context, workflowID string) ([]*models.DeploymentApplyProgress, error) {
+	return nil, nil
+}
+func (mock *mockDeploymentApplyProgressRepository) FindLatestWorkflowIDByDeploymentID(ctx context.Context, deploymentID string) (string, error) {
+	if mock.findLatestWorkflowIDByDeploymentIDFunc != nil {
+		return mock.findLatestWorkflowIDByDeploymentIDFunc(ctx, deploymentID)
+	}
+	return "", gorm.ErrRecordNotFound
+}
+func (mock *mockDeploymentApplyProgressRepository) FindLatestByDeploymentID(ctx context.Context, deploymentID string) ([]*models.DeploymentApplyProgress, error) {
+	return nil, nil
+}
+
+// mockServiceRepository は ServiceRepository のテスト用最小モック
+type mockServiceRepository struct{}
+
+func (mock *mockServiceRepository) Create(ctx context.Context, service *models.Service) error {
+	return nil
+}
+func (mock *mockServiceRepository) CreateWithTx(ctx context.Context, tx *gorm.DB, service *models.Service) error {
+	return nil
+}
+func (mock *mockServiceRepository) FindByDeploymentID(ctx context.Context, deploymentID string) (*models.Service, error) {
+	return nil, gorm.ErrRecordNotFound
+}
+func (mock *mockServiceRepository) FindByServiceID(ctx context.Context, serviceID string) (*models.Service, error) {
+	return nil, nil
+}
+func (mock *mockServiceRepository) Update(ctx context.Context, service *models.Service) error {
+	return nil
+}
+func (mock *mockServiceRepository) UpdateStatus(ctx context.Context, serviceID string, status models.ServiceStatus, k8sStatus datatypes.JSON) error {
+	return nil
+}
+func (mock *mockServiceRepository) UpdateClusterIP(ctx context.Context, serviceID string, clusterIP string) error {
+	return nil
+}
+func (mock *mockServiceRepository) Delete(ctx context.Context, serviceID string) error {
+	return nil
+}
 
 // インターフェース実装を静的に確認する
 var _ repository.DeploymentRepository = (*mockDeploymentRepository)(nil)
@@ -154,6 +300,8 @@ var _ repository.VolumeMountRepository = (*mockVolumeMountRepository)(nil)
 var _ repository.ApplyHistoryRepository = (*mockApplyHistoryRepository)(nil)
 var _ repository.PodLogChunkRepository = (*mockPodLogChunkRepository)(nil)
 var _ repository.ProjectRepository = (*mockProjectRepository)(nil)
+var _ repository.DeploymentApplyProgressRepository = (*mockDeploymentApplyProgressRepository)(nil)
+var _ repository.ServiceRepository = (*mockServiceRepository)(nil)
 
 // ---- テスト ----
 
@@ -175,7 +323,7 @@ func makeRunningDeployment(deploymentID string, replicas int32) *appsv1.Deployme
 			Conditions: []appsv1.DeploymentCondition{
 				{
 					Type:   appsv1.DeploymentAvailable, // Available 条件を設定する
-					Status: corev1.ConditionTrue,        // True を設定して running 判定にする
+					Status: corev1.ConditionTrue,       // True を設定して running 判定にする
 				},
 			},
 		},
@@ -205,9 +353,9 @@ func TestHandleDeploymentEvent_ModifiedイベントでappStatusがrunningに更�
 		},
 	}
 
-	fakeK8sClient := k8sfake.NewSimpleClientset() // fake k8s クライアントを生成する
+	fakeK8sClient := k8sfake.NewSimpleClientset()      // fake k8s クライアントを生成する
 	streamCancelMap := make(map[string]podStreamState) // ストリーム管理マップを生成する
-	var streamCancelMu sync.Mutex                       // ミューテックスを生成する
+	var streamCancelMu sync.Mutex                      // ミューテックスを生成する
 
 	k8sDeployment := makeRunningDeployment("deployment-1", 1) // Running 状態の k8s Deployment を生成する
 	event := watch.Event{
@@ -215,9 +363,95 @@ func TestHandleDeploymentEvent_ModifiedイベントでappStatusがrunningに更�
 		Object: k8sDeployment, // Modified イベントを構築する
 	}
 
-	handleDeploymentEvent(ctx, event, fakeK8sClient, deploymentRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockPodLogChunkRepository{}, projectRepo, streamCancelMap, &streamCancelMu) // イベントを処理する
+	handleDeploymentEvent(ctx, event, fakeK8sClient, deploymentRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockPodLogChunkRepository{}, projectRepo, &mockDeploymentApplyProgressRepository{}, &mockServiceRepository{}, streamCancelMap, &streamCancelMu) // イベントを処理する
 
 	if updatedAppStatus != models.AppStatusRunning { // app_status が running になったことを確認する
+		t.Errorf("期待する app_status: %s、実際: %s", models.AppStatusRunning, updatedAppStatus)
+	}
+}
+
+// TestHandleDeploymentEvent_AppStatusRunning到達時にreadinessステップがdoneになる は
+// app_status が running になった際に、apply進捗のreadinessステップがdoneに更新されることを確認する
+func TestHandleDeploymentEvent_AppStatusRunning到達時にreadinessステップがdoneになる(t *testing.T) {
+	ctx := context.Background() // テスト用コンテキストを生成する
+
+	deploymentRepo := &mockDeploymentRepository{
+		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
+			return &models.Deployment{ID: deploymentID, ProjectID: "project-1"}, nil
+		},
+	}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return &models.Project{ID: projectID, Namespace: "test-ns"}, nil
+		},
+	}
+
+	var updatedStepName models.ApplyProgressStepName     // 更新されたステップ名を記録する変数を定義する
+	var updatedStepStatus models.ApplyProgressStepStatus // 更新されたステータスを記録する変数を定義する
+	applyProgressRepo := &mockDeploymentApplyProgressRepository{
+		findLatestWorkflowIDByDeploymentIDFunc: func(ctx context.Context, deploymentID string) (string, error) {
+			return "apply-deployment-1", nil // workflow_id が特定できる状態を模倣する
+		},
+		updateStepStatusFunc: func(ctx context.Context, tx *gorm.DB, workflowID string, stepName models.ApplyProgressStepName, status models.ApplyProgressStepStatus, errorMessage string) error {
+			if stepName == models.ApplyProgressStepReadiness { // readinessステップの更新のみ記録する
+				updatedStepName = stepName
+				updatedStepStatus = status
+			}
+			return nil
+		},
+	}
+
+	fakeK8sClient := k8sfake.NewSimpleClientset()
+	streamCancelMap := make(map[string]podStreamState)
+	var streamCancelMu sync.Mutex
+
+	k8sDeployment := makeRunningDeployment("deployment-1", 1)
+	event := watch.Event{Type: watch.Modified, Object: k8sDeployment}
+
+	handleDeploymentEvent(ctx, event, fakeK8sClient, deploymentRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockPodLogChunkRepository{}, projectRepo, applyProgressRepo, &mockServiceRepository{}, streamCancelMap, &streamCancelMu)
+
+	if updatedStepName != models.ApplyProgressStepReadiness { // readinessステップが更新されたことを確認する
+		t.Errorf("期待するstep_name: readiness, 実際: %s", updatedStepName)
+	}
+	if updatedStepStatus != models.ApplyProgressStepStatusDone { // doneに更新されたことを確認する
+		t.Errorf("期待するstatus: done, 実際: %s", updatedStepStatus)
+	}
+}
+
+// TestHandleDeploymentEvent_workflowID未検出時は進捗更新をスキップしてエラーにしない は
+// apply_progressにレコードがない（workflow_id未検出の）場合でも処理が継続することを確認する
+func TestHandleDeploymentEvent_workflowID未検出時は進捗更新をスキップしてエラーにしない(t *testing.T) {
+	ctx := context.Background() // テスト用コンテキストを生成する
+
+	var updatedAppStatus models.AppStatus
+	deploymentRepo := &mockDeploymentRepository{
+		updateAppStatusFunc: func(ctx context.Context, deploymentID string, appStatus models.AppStatus) error {
+			updatedAppStatus = appStatus
+			return nil
+		},
+		findByIDFunc: func(ctx context.Context, deploymentID string) (*models.Deployment, error) {
+			return &models.Deployment{ID: deploymentID, ProjectID: "project-1"}, nil
+		},
+	}
+	projectRepo := &mockProjectRepository{
+		findByIDNoTxFunc: func(ctx context.Context, projectID string) (*models.Project, error) {
+			return &models.Project{ID: projectID, Namespace: "test-ns"}, nil
+		},
+	}
+	// findLatestWorkflowIDByDeploymentIDFunc を設定しないため、デフォルトの gorm.ErrRecordNotFound が返る
+	applyProgressRepo := &mockDeploymentApplyProgressRepository{}
+
+	fakeK8sClient := k8sfake.NewSimpleClientset()
+	streamCancelMap := make(map[string]podStreamState)
+	var streamCancelMu sync.Mutex
+
+	k8sDeployment := makeRunningDeployment("deployment-1", 1)
+	event := watch.Event{Type: watch.Modified, Object: k8sDeployment}
+
+	handleDeploymentEvent(ctx, event, fakeK8sClient, deploymentRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockPodLogChunkRepository{}, projectRepo, applyProgressRepo, &mockServiceRepository{}, streamCancelMap, &streamCancelMu)
+
+	// workflow_id が見つからなくても、Deployment本体のapp_status更新は正常に完了することを確認する
+	if updatedAppStatus != models.AppStatusRunning {
 		t.Errorf("期待する app_status: %s、実際: %s", models.AppStatusRunning, updatedAppStatus)
 	}
 }
@@ -237,7 +471,7 @@ func TestHandleDeploymentEvent_ラベルなしDeploymentはスキップされる
 
 	fakeK8sClient := k8sfake.NewSimpleClientset()      // fake k8s クライアントを生成する
 	streamCancelMap := make(map[string]podStreamState) // ストリーム管理マップを生成する
-	var streamCancelMu sync.Mutex                       // ミューテックスを生成する
+	var streamCancelMu sync.Mutex                      // ミューテックスを生成する
 
 	// ラベルのない k8s Deployment を生成する
 	k8sDeployment := &appsv1.Deployment{
@@ -249,7 +483,7 @@ func TestHandleDeploymentEvent_ラベルなしDeploymentはスキップされる
 	}
 	event := watch.Event{Type: watch.Modified, Object: k8sDeployment} // Modified イベントを構築する
 
-	handleDeploymentEvent(ctx, event, fakeK8sClient, deploymentRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockPodLogChunkRepository{}, &mockProjectRepository{}, streamCancelMap, &streamCancelMu) // イベントを処理する
+	handleDeploymentEvent(ctx, event, fakeK8sClient, deploymentRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockPodLogChunkRepository{}, &mockProjectRepository{}, &mockDeploymentApplyProgressRepository{}, &mockServiceRepository{}, streamCancelMap, &streamCancelMu) // イベントを処理する
 
 	if updateCalled { // UpdateAppStatus が呼ばれていないことを確認する
 		t.Error("ラベルなし Deployment でも UpdateAppStatus が呼ばれました")
@@ -277,7 +511,7 @@ func TestHandleDeploymentEvent_DeletingステータスのDeployment削除はDB�
 
 	fakeK8sClient := k8sfake.NewSimpleClientset()      // fake k8s クライアントを生成する
 	streamCancelMap := make(map[string]podStreamState) // ストリーム管理マップを生成する
-	var streamCancelMu sync.Mutex                       // ミューテックスを生成する
+	var streamCancelMu sync.Mutex                      // ミューテックスを生成する
 
 	k8sDeployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -289,7 +523,7 @@ func TestHandleDeploymentEvent_DeletingステータスのDeployment削除はDB�
 	}
 	event := watch.Event{Type: watch.Deleted, Object: k8sDeployment} // Deleted イベントを構築する
 
-	handleDeploymentEvent(ctx, event, fakeK8sClient, deploymentRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockPodLogChunkRepository{}, &mockProjectRepository{}, streamCancelMap, &streamCancelMu) // イベントを処理する
+	handleDeploymentEvent(ctx, event, fakeK8sClient, deploymentRepo, &mockEnvVarMountRepository{}, &mockVolumeMountRepository{}, &mockApplyHistoryRepository{}, &mockPodLogChunkRepository{}, &mockProjectRepository{}, &mockDeploymentApplyProgressRepository{}, &mockServiceRepository{}, streamCancelMap, &streamCancelMu) // イベントを処理する
 
 	if !deleteCalled { // Delete が呼ばれたことを確認する
 		t.Error("deleting 状態の Deployment 削除で Delete が呼ばれませんでした")

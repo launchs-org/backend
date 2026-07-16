@@ -118,6 +118,7 @@ User（外部認証基盤が発行するID。バックエンドにUserテーブ�
 - `POST /api/v1/projects/{id}/apply`：プロジェクト内の複数リソースを一括apply（IngressRoute系の変更を含む場合に使う）。
 - `GET /api/v1/deployments/{id}/apply-histories`：過去のapply実行履歴（誰が・いつ・何を変更したかのスナップショット）。
 - Deploymentが`not_init`ステータスのままapplyしようとすると`400`が返る（railpack/archiveタイプで初回ビルドが完了していない場合）。
+- **apply実行中の進捗表示**：`GET /api/v1/deployments/{id}` のレスポンスに含まれる `apply_progress` 配列をポーリングすることで、「ボリュームをプロビジョニングしています」「コンテナを作成しています」「ポートを開いています」のようなステップ単位の進捗をUIに表示できる。各ステップは `pending` → `in_progress` → `done`/`failed`/`skipped`（対象リソースがない場合）と遷移する。詳細はセクション7を参照。完了したかどうかの判定には引き続き `app_status` が `running` になったかを使うこと（`apply_progress` 自体は完了判定には使わない）。
 
 ### 5.5 外部公開設定
 - **Service**（ポート公開）: `GET/POST/PUT/DELETE /api/v1/deployments/{id}/service`。`type`は`ClusterIP`/`NodePort`/`LoadBalancer`。
@@ -202,6 +203,23 @@ Deployment・Service・EnvVarMount・VolumeMountなど多くのリソースは�
 | `error` | エラー状態 |
 
 `status` と `app_status` は両方表示し、`k8s_status`（jsonb、Pod詳細等の生データ）は詳細画面でのみ展開表示する想定でよい。`delete_progress` フィールドは削除処理中のステップ名が入るので、削除中はこれを進捗表示に使える。
+
+### Deployment.apply_progress（apply実行中のステップ単位の進捗）
+`POST /apply` を呼ぶと、`GET /deployments/{id}` の `apply_progress` に直近の apply 実行（1 workflow 実行あたり）の進捗ステップ一覧が含まれる。各要素は `step_name` と `status` を持ち、`step_no` の昇順（1〜9）でUIに並べて表示することを想定している。
+
+| step_no | step_name | 表示文言の例 | 更新元 |
+|---|---|---|---|
+| 1 | `volume` | ボリュームをプロビジョニングしています | controller（対象Volumeがなければ`skipped`） |
+| 2 | `env_var` | 環境変数を適用しています | controller（対象EnvVarMountがなければ`skipped`） |
+| 3 | `image` | イメージを取得しています | controller |
+| 4 | `container` | コンテナを作成しています | controller |
+| 5 | `pod_scheduled` | コンテナを起動しています | watcher |
+| 6 | `pod_running` | コンテナの起動を確認しています | watcher |
+| 7 | `service` | ポートを開いています | controller（対象Serviceがなければ`skipped`） |
+| 8 | `network` | ネットワーク接続を確認しています | watcher（対象Serviceがなければ`skipped`） |
+| 9 | `readiness` | 起動状態を確認しています | watcher（`app_status`が`running`になった時点で`done`） |
+
+各ステップの `status` は `pending` → `in_progress` → `done` / `failed` / `skipped` と遷移する。`failed` の場合は `error_message` にエラー内容が入る。**完了判定には `apply_progress` ではなく `app_status === "running"` を使うこと**（`apply_progress` はあくまで途中経過の可視化用）。
 
 ### DeploymentBuild.status
 `pending` → `building` → `succeeded` / `failed` / `cancelled`

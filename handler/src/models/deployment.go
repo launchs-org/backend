@@ -19,8 +19,8 @@ const (
 type DeploymentStatus string
 
 const (
-	DeploymentStatusNotInit  DeploymentStatus = "not_init"  // 初回ビルド未完了（Githubビルド専用）
-	DeploymentStatusPending  DeploymentStatus = "pending"   // 初回作成・未 apply
+	DeploymentStatusNotInit  DeploymentStatus = "not_init" // 初回ビルド未完了（Githubビルド専用）
+	DeploymentStatusPending  DeploymentStatus = "pending"  // 初回作成・未 apply
 	DeploymentStatusRunning  DeploymentStatus = "running"
 	DeploymentStatusFailed   DeploymentStatus = "failed"
 	DeploymentStatusDeleting DeploymentStatus = "deleting"
@@ -81,18 +81,21 @@ type Deployment struct {
 	PendingReplicas int32 `json:"pending_replicas"`
 
 	// --- 起動設定 ---
-	Command        pq.StringArray `gorm:"type:text[]" json:"command"`  // k8s command（ENTRYPOINT 上書き）
+	Command        pq.StringArray `gorm:"type:text[]" json:"command"` // k8s command（ENTRYPOINT 上書き）
 	PendingCommand pq.StringArray `gorm:"type:text[]" json:"pending_command"`
 
-	Args        pq.StringArray `gorm:"type:text[]" json:"args"`  // k8s args（CMD 上書き）
+	Args        pq.StringArray `gorm:"type:text[]" json:"args"` // k8s args（CMD 上書き）
 	PendingArgs pq.StringArray `gorm:"type:text[]" json:"pending_args"`
 
 	// --- ステータス ---
 	Status         DeploymentStatus `gorm:"type:varchar(32);not null;default:'pending'" json:"status"`
 	AppStatus      AppStatus        `gorm:"type:varchar(32);not null;default:'pending'" json:"app_status"`
-	K8sStatus      datatypes.JSON   `gorm:"type:jsonb"                                  json:"k8s_status"` // null = 未同期
+	K8sStatus      datatypes.JSON   `gorm:"type:jsonb"                                  json:"k8s_status"`      // null = 未同期
 	DeleteProgress string           `gorm:"type:varchar(128)"                           json:"delete_progress"` // 削除中のステップ名（deleting 時のみ使用）
 	AppliedAt      *time.Time       `json:"applied_at"`
+
+	// ApplyProgress は直近の apply 実行における進捗ステップ一覧（DB には保存しない、GetDeployment 応答専用）
+	ApplyProgress []*DeploymentApplyProgress `gorm:"-" json:"apply_progress,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

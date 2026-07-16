@@ -252,6 +252,7 @@ func AutoMigrate() error {
 		&models.BuildLogChunk{}, // ビルドログをchunk単位で保存するテーブル
 		&models.PodLogChunk{},   // 稼働中Podのログをchunk単位で保存するテーブル
 		&models.ApplyHistory{},
+		&models.DeploymentApplyProgress{}, // apply進捗ステップ管理テーブルを追加する
 		&models.DeploymentWebhook{},
 		&models.Service{},
 		&models.IngressRoute{},

@@ -480,6 +480,15 @@ components:
         delete_progress:
           type: string
           description: 削除処理の進捗ステップ名（DeleteDeploymentWorkflow が更新）
+        apply_progress:
+          type: array
+          nullable: true
+          description: |
+            直近の apply 実行における進捗ステップ一覧（ExecuteApply Activity と watcher が更新）。
+            ボリューム・環境変数・イメージ取得・コンテナ作成・起動確認・ポート公開・ネットワーク確認・起動状態確認の
+            9ステップで構成される。対象リソースが存在しないステップは `skipped` になる。
+          items:
+            $ref: "#/components/schemas/DeploymentApplyProgress"
         applied_at:
           type: string
           format: date-time
@@ -605,6 +614,62 @@ components:
         error_message:
           type: string
         applied_at:
+          type: string
+          format: date-time
+
+    DeploymentApplyProgress:
+      type: object
+      description: apply 実行1回（workflow_id）における1ステップの進捗
+      properties:
+        id:
+          type: string
+          format: uuid
+        workflow_id:
+          type: string
+          description: Temporal の WorkflowID（apply-{deploymentID}）
+        deployment_id:
+          type: string
+          format: uuid
+        step_no:
+          type: integer
+          description: ステップの表示順（1〜9）
+        step_name:
+          type: string
+          enum:
+            [
+              volume,
+              env_var,
+              image,
+              container,
+              pod_scheduled,
+              pod_running,
+              service,
+              network,
+              readiness,
+            ]
+          description: |
+            volume: ボリュームをプロビジョニングしています / env_var: 環境変数を適用しています /
+            image: イメージを取得しています / container: コンテナを作成しています /
+            pod_scheduled: コンテナを起動しています / pod_running: コンテナの起動を確認しています /
+            service: ポートを開いています / network: ネットワーク接続を確認しています /
+            readiness: 起動状態を確認しています
+        status:
+          type: string
+          enum: [pending, in_progress, done, failed, skipped]
+        error_message:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
           type: string
           format: date-time
 
@@ -2020,6 +2085,11 @@ paths:
 
     get:
       summary: デプロイメント取得
+      description: |
+        デプロイメント詳細を取得します。`POST /apply` 実行中は、レスポンスの `apply_progress` に
+        直近の apply 実行の進捗ステップ一覧が含まれます。フロントエンドはこのフィールドをポーリングで
+        参照することで、コンテナ・ボリューム・ネットワークのプロビジョニング状況を段階的に表示できます。
+        完了判定には引き続き `app_status` が `running` になったかどうかを使用してください。
       tags: [Deployments]
       responses:
         "200":

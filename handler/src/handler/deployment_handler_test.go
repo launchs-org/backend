@@ -1,12 +1,12 @@
 package handler
 
 import (
-	"handler/models"
-	"handler/service"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"handler/models"
+	"handler/service"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,13 +18,13 @@ import (
 
 // mockDeploymentService は DeploymentService のテスト用モック実装
 type mockDeploymentService struct {
-	listDeploymentsFunc    func(ctx context.Context, projectID string) ([]models.Deployment, error)
-	createDeploymentFunc   func(ctx context.Context, req service.CreateDeploymentRequest) (*models.Deployment, error)
-	getDeploymentFunc      func(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)
-	updateDeploymentFunc   func(ctx context.Context, userID string, deploymentID string, req service.UpdateDeploymentRequest) (*models.Deployment, error)
-	deleteDeploymentFunc   func(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)
-	getServiceFunc         func(ctx context.Context, userID string, deploymentID string) (*models.Service, error)
-	updateServiceFunc      func(ctx context.Context, userID string, deploymentID string, req service.UpdateServiceRequest) (*models.Service, error)
+	listDeploymentsFunc  func(ctx context.Context, projectID string) ([]models.Deployment, error)
+	createDeploymentFunc func(ctx context.Context, req service.CreateDeploymentRequest) (*models.Deployment, error)
+	getDeploymentFunc    func(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)
+	updateDeploymentFunc func(ctx context.Context, userID string, deploymentID string, req service.UpdateDeploymentRequest) (*models.Deployment, error)
+	deleteDeploymentFunc func(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error)
+	getServiceFunc       func(ctx context.Context, userID string, deploymentID string) (*models.Service, error)
+	updateServiceFunc    func(ctx context.Context, userID string, deploymentID string, req service.UpdateServiceRequest) (*models.Service, error)
 }
 
 func (mock *mockDeploymentService) ListDeployments(ctx context.Context, projectID string) ([]models.Deployment, error) {
@@ -69,13 +69,13 @@ func (mock *mockDeploymentService) DiscardPending(ctx context.Context, userID st
 
 // setupDeploymentEchoContext はテスト用の Echo コンテキストを生成するヘルパー関数
 func setupDeploymentEchoContext(method, path, body string, params map[string]string) (echo.Context, *httptest.ResponseRecorder) {
-	echoInstance := echo.New()                                            // Echo インスタンスを生成する
-	bodyReader := strings.NewReader(body)                                 // リクエストボディを設定する
+	echoInstance := echo.New()                                           // Echo インスタンスを生成する
+	bodyReader := strings.NewReader(body)                                // リクエストボディを設定する
 	request := httptest.NewRequest(method, path, bodyReader)             // テスト用リクエストを生成する
 	request.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON) // Content-Type を JSON に設定する
-	responseRecorder := httptest.NewRecorder()                            // テスト用レスポンスレコーダーを生成する
-	echoCtx := echoInstance.NewContext(request, responseRecorder)         // Echo コンテキストを生成する
-	echoCtx.Set("UserID", "test-user-id")                                 // テスト用 UserID を設定する
+	responseRecorder := httptest.NewRecorder()                           // テスト用レスポンスレコーダーを生成する
+	echoCtx := echoInstance.NewContext(request, responseRecorder)        // Echo コンテキストを生成する
+	echoCtx.Set("UserID", "test-user-id")                                // テスト用 UserID を設定する
 
 	if len(params) > 0 { // パスパラメータが存在する場合は設定する
 		paramNames := make([]string, 0, len(params))
@@ -95,15 +95,15 @@ func setupDeploymentEchoContext(method, path, body string, params map[string]str
 func TestCreateDeployment_正常にdeploymentが作成される(t *testing.T) {
 	pendingImageID := "image-id-1" // pending_image_id に設定する ID を定義する
 	expectedDeployment := &models.Deployment{
-		ID:                  "deployment-id-1",           // deployment ID を設定する
-		ProjectID:           "project-id-1",              // project ID を設定する
-		Name:                "my-app",                    // deployment 名を設定する
-		Type:                models.DeploymentTypeImageURL, // deployment タイプを設定する
+		ID:                  "deployment-id-1",              // deployment ID を設定する
+		ProjectID:           "project-id-1",                 // project ID を設定する
+		Name:                "my-app",                       // deployment 名を設定する
+		Type:                models.DeploymentTypeImageURL,  // deployment タイプを設定する
 		Status:              models.DeploymentStatusPending, // ステータスを pending に設定する
-		AppStatus:           models.AppStatusPending,     // アプリステータスを pending に設定する
-		PendingImageID:      &pendingImageID,             // pending image_id を設定する
-		PendingInstanceSize: "small",                     // pending instance_size を設定する
-		PendingReplicas:     1,                           // pending replicas を設定する
+		AppStatus:           models.AppStatusPending,        // アプリステータスを pending に設定する
+		PendingImageID:      &pendingImageID,                // pending image_id を設定する
+		PendingInstanceSize: "small",                        // pending instance_size を設定する
+		PendingReplicas:     1,                              // pending replicas を設定する
 	}
 
 	mockSvc := &mockDeploymentService{
@@ -112,8 +112,8 @@ func TestCreateDeployment_正常にdeploymentが作成される(t *testing.T) {
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                       // ハンドラーを生成する
-	requestJSON := `{"name":"my-app","type":"image_url","image_url":"nginx:latest","instance_size":"small","replicas":1}`                    // リクエスト JSON を定義する
+	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                                                     // ハンドラーを生成する
+	requestJSON := `{"name":"my-app","type":"image_url","image_url":"nginx:latest","instance_size":"small","replicas":1}`                                                       // リクエスト JSON を定義する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPost, "/api/v1/projects/project-id-1/deployments", requestJSON, map[string]string{"id": "project-id-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.CreateDeployment(echoCtx) // ハンドラーを実行する
@@ -147,7 +147,7 @@ func TestCreateDeployment_サービスエラーで500になる(t *testing.T) {
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                           // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                                                                                // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPost, "/api/v1/projects/project-id-1/deployments", `{"name":"my-app","type":"image_url"}`, map[string]string{"id": "project-id-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.CreateDeployment(echoCtx) // ハンドラーを実行する
@@ -164,9 +164,9 @@ func TestUpdateDeployment_送ったフィールドのみpendingが更新され�
 	updatedImageURL := "nginx:1.25"
 	updatedImageID := "image-id-updated"
 	expectedDeployment := &models.Deployment{
-		ID:              "deployment-id-1",            // deployment ID を設定する
-		PendingImageID:  &updatedImageID,              // 更新後の pending_image_id を設定する
-		PendingReplicas: 0,                            // replicas は送っていないので変化しない
+		ID:              "deployment-id-1", // deployment ID を設定する
+		PendingImageID:  &updatedImageID,   // 更新後の pending_image_id を設定する
+		PendingReplicas: 0,                 // replicas は送っていないので変化しない
 	}
 
 	var capturedRequest service.UpdateDeploymentRequest // キャプチャしたリクエストを格納する変数を定義する
@@ -177,7 +177,7 @@ func TestUpdateDeployment_送ったフィールドのみpendingが更新され�
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                                   // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                                                                  // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPut, "/api/v1/deployments/deployment-id-1", `{"image_url":"nginx:1.25"}`, map[string]string{"id": "deployment-id-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.UpdateDeployment(echoCtx) // ハンドラーを実行する
@@ -206,7 +206,7 @@ func TestUpdateDeployment_存在しないdeploymentは404になる(t *testing.T)
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                        // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                                                            // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPut, "/api/v1/deployments/nonexistent", `{"image_url":"nginx:latest"}`, map[string]string{"id": "nonexistent"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.UpdateDeployment(echoCtx) // ハンドラーを実行する
@@ -231,7 +231,7 @@ func TestDeleteDeployment_statusがdeletingになる(t *testing.T) {
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                             // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                                           // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodDelete, "/api/v1/deployments/deployment-id-1", "", map[string]string{"id": "deployment-id-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.DeleteDeployment(echoCtx) // ハンドラーを実行する
@@ -259,7 +259,7 @@ func TestDeleteDeployment_存在しないdeploymentは404になる(t *testing.T)
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                            // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                                   // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodDelete, "/api/v1/deployments/nonexistent", "", map[string]string{"id": "nonexistent"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.DeleteDeployment(echoCtx) // ハンドラーを実行する
@@ -279,7 +279,7 @@ func TestCreateDeployment_Service作成失敗時に500になる(t *testing.T) {
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                        // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                                                                                // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPost, "/api/v1/projects/project-id-1/deployments", `{"name":"my-app","type":"image_url"}`, map[string]string{"id": "project-id-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.CreateDeployment(echoCtx) // ハンドラーを実行する
@@ -306,7 +306,7 @@ func TestGetDeployment_正常にdeployment詳細が返る(t *testing.T) {
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                              // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                                        // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodGet, "/api/v1/deployments/deployment-id-1", "", map[string]string{"id": "deployment-id-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.GetDeployment(echoCtx) // ハンドラーを実行する
@@ -326,10 +326,53 @@ func TestGetDeployment_正常にdeployment詳細が返る(t *testing.T) {
 	}
 }
 
+// TestGetDeployment_レスポンスにapply_progressフィールドが含まれる は apply_progress がレスポンスJSONに正しく含まれることを確認する
+func TestGetDeployment_レスポンスにapply_progressフィールドが含まれる(t *testing.T) {
+	expectedDeployment := &models.Deployment{
+		ID:        "deployment-id-2",
+		Name:      "my-app-2",
+		ProjectID: "project-id-1",
+		Status:    models.DeploymentStatusPending,
+		AppStatus: models.AppStatusDeploying,
+		ApplyProgress: []*models.DeploymentApplyProgress{
+			{StepNo: 1, StepName: models.ApplyProgressStepVolume, Status: models.ApplyProgressStepStatusSkipped},
+			{StepNo: 4, StepName: models.ApplyProgressStepContainer, Status: models.ApplyProgressStepStatusInProgress},
+		},
+	}
+
+	mockSvc := &mockDeploymentService{
+		getDeploymentFunc: func(ctx context.Context, userID string, deploymentID string) (*models.Deployment, error) {
+			return expectedDeployment, nil
+		},
+	}
+
+	deploymentHandler := NewDeploymentHandler(mockSvc, nil)
+	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodGet, "/api/v1/deployments/deployment-id-2", "", map[string]string{"id": "deployment-id-2"})
+
+	err := deploymentHandler.GetDeployment(echoCtx)
+	if err != nil {
+		t.Fatalf("ハンドラーがエラーを返しました: %v", err)
+	}
+
+	var actualDeployment models.Deployment
+	if err := json.NewDecoder(responseRecorder.Body).Decode(&actualDeployment); err != nil {
+		t.Fatalf("レスポンスのデコードに失敗しました: %v", err)
+	}
+	if len(actualDeployment.ApplyProgress) != 2 { // apply_progress が含まれることを確認する
+		t.Fatalf("期待する件数: 2, 実際の件数: %d", len(actualDeployment.ApplyProgress))
+	}
+	if actualDeployment.ApplyProgress[0].StepName != models.ApplyProgressStepVolume { // 内容が一致することを確認する
+		t.Errorf("期待するstep_name: volume, 実際: %s", actualDeployment.ApplyProgress[0].StepName)
+	}
+	if actualDeployment.ApplyProgress[1].Status != models.ApplyProgressStepStatusInProgress {
+		t.Errorf("期待するstatus: in_progress, 実際: %s", actualDeployment.ApplyProgress[1].Status)
+	}
+}
+
 // mockApplyService は ApplyServiceInterface のテスト用モック実装
 type mockApplyService struct {
-	applyFunc               func(ctx context.Context, userID string, deploymentID string) (*service.ApplyResult, error)
-	listApplyHistoriesFunc  func(ctx context.Context, userID string, deploymentID string) ([]*models.ApplyHistory, error)
+	applyFunc              func(ctx context.Context, userID string, deploymentID string) (*service.ApplyResult, error)
+	listApplyHistoriesFunc func(ctx context.Context, userID string, deploymentID string) ([]*models.ApplyHistory, error)
 }
 
 func (mock *mockApplyService) Apply(ctx context.Context, userID string, deploymentID string) (*service.ApplyResult, error) {
@@ -360,7 +403,7 @@ func TestApplyDeployment_正常に202とworkflow_idが返る(t *testing.T) {
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                  // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                      // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPost, "/api/v1/deployments/dep-1/apply", "", map[string]string{"id": "dep-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.ApplyDeployment(echoCtx) // ハンドラーを実行する
@@ -388,7 +431,7 @@ func TestApplyDeployment_apply中に再applyすると409が返る(t *testing.T) 
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                            // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                      // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPost, "/api/v1/deployments/dep-1/apply", "", map[string]string{"id": "dep-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.ApplyDeployment(echoCtx) // ハンドラーを実行する
@@ -408,7 +451,7 @@ func TestApplyDeployment_存在しないdeploymentIDで404が返る(t *testing.T
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                            // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                              // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPost, "/api/v1/deployments/not-exist/apply", "", map[string]string{"id": "not-exist"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.ApplyDeployment(echoCtx) // ハンドラーを実行する
@@ -428,7 +471,7 @@ func TestApplyDeployment_k8s_apply失敗時に500が返る(t *testing.T) {
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                            // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                      // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPost, "/api/v1/deployments/dep-1/apply", "", map[string]string{"id": "dep-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.ApplyDeployment(echoCtx) // ハンドラーを実行する
@@ -448,7 +491,7 @@ func TestGetDeployment_他ユーザーのdeploymentは403になる(t *testing.T)
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                       // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                    // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodGet, "/api/v1/deployments/dep-1", "", map[string]string{"id": "dep-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.GetDeployment(echoCtx) // ハンドラーを実行する
@@ -468,7 +511,7 @@ func TestUpdateDeployment_他ユーザーのdeploymentは403になる(t *testing
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                        // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                                                // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPut, "/api/v1/deployments/dep-1", `{"image_url":"nginx:latest"}`, map[string]string{"id": "dep-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.UpdateDeployment(echoCtx) // ハンドラーを実行する
@@ -488,7 +531,7 @@ func TestDeleteDeployment_他ユーザーのdeploymentは403になる(t *testing
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                           // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(mockSvc, nil)                                                                                       // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodDelete, "/api/v1/deployments/dep-1", "", map[string]string{"id": "dep-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.DeleteDeployment(echoCtx) // ハンドラーを実行する
@@ -533,7 +576,7 @@ func TestListApplyHistories_正常に履歴一覧が返る(t *testing.T) {
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                                   // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                               // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodGet, "/api/v1/deployments/dep-1/apply-histories", "", map[string]string{"id": "dep-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.ListApplyHistories(echoCtx) // ハンドラーを実行する
@@ -561,7 +604,7 @@ func TestListApplyHistories_履歴が存在しない場合は空配列が返る(
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                                   // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                               // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodGet, "/api/v1/deployments/dep-1/apply-histories", "", map[string]string{"id": "dep-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.ListApplyHistories(echoCtx) // ハンドラーを実行する
@@ -581,7 +624,7 @@ func TestListApplyHistories_他ユーザーのdeploymentは403になる(t *testi
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                                   // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                               // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodGet, "/api/v1/deployments/dep-1/apply-histories", "", map[string]string{"id": "dep-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.ListApplyHistories(echoCtx) // ハンドラーを実行する
@@ -601,7 +644,7 @@ func TestListApplyHistories_存在しないdeploymentは404になる(t *testing.
 		},
 	}
 
-	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                                   // ハンドラーを生成する
+	deploymentHandler := NewDeploymentHandler(nil, mockApplySvc)                                                                                               // ハンドラーを生成する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodGet, "/api/v1/deployments/dep-1/apply-histories", "", map[string]string{"id": "dep-1"}) // テスト用コンテキストを生成する
 
 	err := deploymentHandler.ListApplyHistories(echoCtx) // ハンドラーを実行する
@@ -666,14 +709,14 @@ func TestGetService_他ユーザーのDeploymentは403が返る(t *testing.T) {
 func TestUpdateService_pendingフィールドが更新され200が返る(t *testing.T) {
 	mockSvc := &mockDeploymentService{
 		updateServiceFunc: func(ctx context.Context, userID string, deploymentID string, req service.UpdateServiceRequest) (*models.Service, error) {
-			port := 9090                                                                          // 更新後のポート番号を設定する
+			port := 9090                                                               // 更新後のポート番号を設定する
 			return &models.Service{DeploymentID: deploymentID, PendingPort: port}, nil // 更新後の service を返す
 		},
 	}
 	mockApplySvc := &mockApplyService{}
 	deploymentHandler := NewDeploymentHandler(mockSvc, mockApplySvc) // ハンドラーを生成する
 
-	requestBody := `{"port": 9090}` // リクエストボディを設定する
+	requestBody := `{"port": 9090}`                                                                                                                                          // リクエストボディを設定する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPut, "/deployments/deployment-id-1/service", requestBody, map[string]string{"id": "deployment-id-1"}) // Echo コンテキストを生成する
 
 	err := deploymentHandler.UpdateService(echoCtx) // ハンドラーを実行する
@@ -702,7 +745,7 @@ func TestUpdateService_他ユーザーのDeploymentは403が返る(t *testing.T)
 	mockApplySvc := &mockApplyService{}
 	deploymentHandler := NewDeploymentHandler(mockSvc, mockApplySvc) // ハンドラーを生成する
 
-	requestBody := `{"port": 9090}` // リクエストボディを設定する
+	requestBody := `{"port": 9090}`                                                                                                                                          // リクエストボディを設定する
 	echoCtx, responseRecorder := setupDeploymentEchoContext(http.MethodPut, "/deployments/deployment-id-1/service", requestBody, map[string]string{"id": "deployment-id-1"}) // Echo コンテキストを生成する
 
 	err := deploymentHandler.UpdateService(echoCtx) // ハンドラーを実行する
@@ -713,4 +756,3 @@ func TestUpdateService_他ユーザーのDeploymentは403が返る(t *testing.T)
 		t.Errorf("期待するステータスコード: %d, 実際のステータスコード: %d", http.StatusForbidden, responseRecorder.Code)
 	}
 }
-
