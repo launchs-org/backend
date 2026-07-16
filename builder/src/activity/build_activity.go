@@ -38,6 +38,12 @@ type BuildActivities struct {
 // BuildWorkflowInput は BuildWorkflow への入力
 type BuildWorkflowInput struct {
 	BuildID string // 対象ビルドの ID（あらかじめ DB に pending 状態で作成済み）
+
+	// --- archive タイプのビルドでのみ使用（railpack/dockerfile タイプでは空）---
+	// file.io のダウンロードリンクと復号鍵はDBに保存しないため、Workflow入力経由で直接受け渡す
+	ArchiveDownloadURL string // file.io のダウンロードリンク
+	ArchiveEncKeyHex   string // AES-256-CBC復号鍵（16進）
+	ArchiveSHA256Hex   string // 暗号文全体のSHA256ハッシュ（16進、破損・改竄検知用）
 }
 
 // VerifyHarborCredentialActivity は Harbor 認証情報の存在を確認する
@@ -78,19 +84,29 @@ func (act *BuildActivities) CreateBuildJobActivity(ctx context.Context, input Bu
 		imageName = *buildData.DeploymentID // Deployment ID が存在する場合はそれを使う
 	}
 
-	railpackClient, err := railpack.New(act.K8sClient, railpack.BuildConfig{ // railpack クライアントを生成する
-		JobID:            buildData.ID,        // ビルド ID をジョブ ID に使う
-		GitRepo:          buildData.GithubRepoURL, // Git リポジトリ URL を設定する
-		GitBranch:        buildData.Branch,    // ブランチを設定する
-		Subdir:           buildData.Directory, // ビルドサブディレクトリを設定する
-		ImageName:        imageName,           // イメージ名を設定する
-		ImageTag:         buildData.ID,        // タグにビルド ID を使う
-		RegistryHost:     act.RegistryHost,    // クラスタ内 DNS 名を使用する
-		RegistryProject:  projectData.ID,      // Harbor プロジェクト名にプロジェクト ID を使う
-		RegistryUsername: harborCredential.RobotName,   // robot アカウント名を設定する
-		RegistryPassword: harborCredential.RobotSecret, // robot シークレットを設定する
-		Namespace:        buildkitNamespace,   // ビルド専用 namespace を設定する
-	})
+	buildConfig := railpack.BuildConfig{ // railpack クライアント共通設定を構築する
+		JobID:            buildData.ID,                  // ビルド ID をジョブ ID に使う
+		Subdir:           buildData.Directory,            // ビルドサブディレクトリを設定する
+		ImageName:        imageName,                      // イメージ名を設定する
+		ImageTag:         buildData.ID,                   // タグにビルド ID を使う
+		RegistryHost:     act.RegistryHost,                // クラスタ内 DNS 名を使用する
+		RegistryProject:  projectData.ID,                  // Harbor プロジェクト名にプロジェクト ID を使う
+		RegistryUsername: harborCredential.RobotName,      // robot アカウント名を設定する
+		RegistryPassword: harborCredential.RobotSecret,    // robot シークレットを設定する
+		Namespace:        buildkitNamespace,                // ビルド専用 namespace を設定する
+	}
+	if input.ArchiveDownloadURL != "" { // archive タイプのビルド
+		buildConfig.SourceType = "archive"
+		buildConfig.ArchiveURL = input.ArchiveDownloadURL
+		buildConfig.ArchiveEncKeyHex = input.ArchiveEncKeyHex
+		buildConfig.ArchiveSHA256Hex = input.ArchiveSHA256Hex
+	} else { // 既存 railpack(GitHub) タイプ
+		buildConfig.SourceType = "git"
+		buildConfig.GitRepo = buildData.GithubRepoURL // Git リポジトリ URL を設定する
+		buildConfig.GitBranch = buildData.Branch      // ブランチを設定する
+	}
+
+	railpackClient, err := railpack.New(act.K8sClient, buildConfig) // railpack クライアントを生成する
 	if err != nil {
 		return fmt.Errorf("railpack クライアントの生成に失敗しました: %w", err) // 生成エラーを返す
 	}
@@ -207,8 +223,12 @@ func (act *BuildActivities) SetPendingImageActivity(ctx context.Context, input B
 		return "", fmt.Errorf("Deployment の取得に失敗しました: %w", err) // 取得エラーを返す
 	}
 
-	if err := act.DeploymentRepo.UpdatePendingGithubBuildFields(ctx, deploymentIDValue, deploymentData.GithubRepoURL, buildData.Branch, buildData.CommitSHA, buildData.Directory); err != nil { // pending_github_* フィールドを更新する
-		return "", fmt.Errorf("pending_github_* フィールドの更新に失敗しました: %w", err) // 更新エラーを返す
+	// GitHub系タイプ（railpack/dockerfile）の場合のみpending_github_*を更新する
+	// archive タイプでは意味のない空文字更新になるため対象外とする
+	if deploymentData.Type == models.DeploymentTypeRailpack || deploymentData.Type == models.DeploymentTypeDockerfile {
+		if err := act.DeploymentRepo.UpdatePendingGithubBuildFields(ctx, deploymentIDValue, deploymentData.GithubRepoURL, buildData.Branch, buildData.CommitSHA, buildData.Directory); err != nil { // pending_github_* フィールドを更新する
+			return "", fmt.Errorf("pending_github_* フィールドの更新に失敗しました: %w", err) // 更新エラーを返す
+		}
 	}
 
 	return imageData.ID, nil // Image ID を返す

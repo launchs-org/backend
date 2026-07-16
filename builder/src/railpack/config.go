@@ -15,6 +15,16 @@ type BuildConfig struct {
 	// GitSubmodules: true にすると git submodule も再帰的にクローンします
 	GitSubmodules bool
 
+	// ── アーカイブソース（zip/tar.gzアップロード）──────────────
+	// SourceType: "git" または "archive"。省略時は ArchiveURL の有無から自動判定
+	SourceType string
+	// ArchiveURL: file.io のダウンロードリンク（GitRepo の代わりに使用）
+	ArchiveURL string
+	// ArchiveEncKeyHex: AES-256-CBC復号鍵（16進エンコード）
+	ArchiveEncKeyHex string
+	// ArchiveSHA256Hex: 暗号文全体のSHA256ハッシュ（16進、破損・改竄検知用）
+	ArchiveSHA256Hex string
+
 	// ── 成果物 ──────────────────────────────────────────────
 	// ImageName: プッシュ先のイメージ名 (例: "my-app")
 	ImageName string
@@ -81,6 +91,13 @@ func DefaultResourceConfig() ResourceConfig {
 
 // applyDefaults は省略された設定項目にデフォルト値を適用します。
 func applyDefaults(cfg BuildConfig) BuildConfig {
+	if cfg.SourceType == "" {
+		if cfg.ArchiveURL != "" { // ArchiveURLが指定されている場合はarchiveソースとみなす
+			cfg.SourceType = "archive"
+		} else {
+			cfg.SourceType = "git"
+		}
+	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 10 * time.Minute
 	}

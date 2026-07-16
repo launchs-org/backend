@@ -51,6 +51,11 @@ func createJob(ctx context.Context, cs kubernetes.Interface, ns string, cfg Buil
 	jobName := "railpack-" + cfg.JobID
 	deadline := int64(cfg.Timeout.Seconds())
 
+	sourceContainer := gitCloneContainer(cfg, initRes) // デフォルトはGitクローン
+	if cfg.SourceType == "archive" {
+		sourceContainer = archiveFetchContainer(cfg, initRes) // アーカイブソースの場合はfile.ioから取得する
+	}
+
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
@@ -71,8 +76,8 @@ func createJob(ctx context.Context, cs kubernetes.Interface, ns string, cfg Buil
 						// 1. Harbor TLS 証明書をシステム CA バンドルと結合して配置
 						//    + レジストリ認証用 config.json を生成
 						setupEnvContainer(cfg, initRes),
-						// 2. Git リポジトリをクローン
-						gitCloneContainer(cfg, initRes),
+						// 2. ソースコードを取得する（Git クローン、またはアーカイブダウンロード＋復号）
+						sourceContainer,
 						// 3. railpack prepare でビルドプランを生成
 						railpackPrepareContainer(cfg, initRes),
 					},
@@ -174,6 +179,58 @@ func gitCloneContainer(cfg BuildConfig, res corev1.ResourceRequirements) corev1.
 		},
 		Command: []string{"sh", "-c"},
 		Args:    []string{"mkdir -p /workspace/repo && git clone --depth=1 --branch=${GIT_BRANCH} ${GIT_REPO} /workspace/repo && chmod -R 777 /workspace"},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: "workspace", MountPath: "/workspace"},
+		},
+	}
+}
+
+// archiveFetchContainer は file.io からアップロード済みアーカイブをダウンロードし、
+// SHA256ハッシュで破損・改竄がないか確認した上でAES-256-CBC復号し、zip/tar.gzを展開する。
+func archiveFetchContainer(cfg BuildConfig, res corev1.ResourceRequirements) corev1.Container {
+	script := `
+set -e
+
+mkdir -p /workspace/repo
+
+# file.io からダウンロードする（リンク失効・ダウンロード回数超過時は404で失敗する）
+curl -fsSL "${ARCHIVE_URL}" -o /tmp/archive.enc || { echo "アーカイブのダウンロードに失敗しました（リンク失効の可能性があります）"; exit 1; }
+
+# ダウンロード結果のSHA256ハッシュを検証する（改竄・破損検知）
+ACTUAL_SHA256=$(sha256sum /tmp/archive.enc | awk '{print $1}')
+if [ "${ACTUAL_SHA256}" != "${ARCHIVE_SHA256_HEX}" ]; then
+  echo "SHA256ハッシュが一致しません（期待値: ${ARCHIVE_SHA256_HEX}, 実際: ${ACTUAL_SHA256}）"
+  exit 1
+fi
+
+# 先頭16byteをIVとして分離し、残りをciphertextとして復号する（iv || ciphertext 形式）
+tail -c +17 /tmp/archive.enc > /tmp/archive.ciphertext
+IV_HEX=$(head -c 16 /tmp/archive.enc | xxd -p -c 16)
+openssl enc -d -aes-256-cbc -K "${ARCHIVE_ENC_KEY_HEX}" -iv "${IV_HEX}" -in /tmp/archive.ciphertext -out /tmp/archive.raw || { echo "復号に失敗しました"; exit 1; }
+
+# マジックバイトでzip/tar.gzを判定して展開する
+if head -c 2 /tmp/archive.raw | grep -q "PK"; then
+  unzip -q /tmp/archive.raw -d /workspace/repo
+else
+  tar -xzf /tmp/archive.raw -C /workspace/repo
+fi
+chmod -R 777 /workspace
+
+# 復号済み中間ファイルをコンテナ内に残さない
+rm -f /tmp/archive.enc /tmp/archive.ciphertext /tmp/archive.raw
+`
+
+	return corev1.Container{
+		Name:      "archive-fetch",
+		Image:     "alpine:latest",
+		Resources: res,
+		Env: []corev1.EnvVar{
+			{Name: "ARCHIVE_URL", Value: cfg.ArchiveURL},
+			{Name: "ARCHIVE_ENC_KEY_HEX", Value: cfg.ArchiveEncKeyHex},
+			{Name: "ARCHIVE_SHA256_HEX", Value: cfg.ArchiveSHA256Hex},
+		},
+		Command: []string{"sh", "-c"},
+		Args:    []string{"apk add --no-cache curl tar unzip openssl xxd >/dev/null && " + script},
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: "workspace", MountPath: "/workspace"},
 		},
