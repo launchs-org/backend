@@ -41,6 +41,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 		&models.DeploymentBuild{},
 		&models.Image{},
 		&models.ApplyHistory{},
+		&models.DeploymentApplyProgress{},
 		&models.DeploymentWebhook{},
 		&models.Service{},
 		&models.IngressRoute{},
