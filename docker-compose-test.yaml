@@ -1,4 +1,4 @@
-name: launchs-org-backend-mini-test
+name: launchs-org-backend-test
 
 services:
   # テスト用 PostgreSQL（handler サービスのリポジトリテスト用）

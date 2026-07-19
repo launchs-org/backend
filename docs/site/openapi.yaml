@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: backend-mini API
+  title: backend API
   version: "2.0.0"
   description: |
     Go 製 PaaS バックエンド API（`handler` サービス）。ユーザーがプロジェクト・デプロイメントを

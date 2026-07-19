@@ -18,7 +18,7 @@ from pathlib import Path
 from dataclasses import dataclass, field
 
 
-REPO = "launchs-org/backend-mini"
+REPO = "launchs-org/backend"
 ISSUES_DIR = Path(__file__).parent.parent / "docs" / "Issues"
 
 

@@ -1,4 +1,4 @@
-# CLAUDE.md — backend-mini コーディング規約
+# CLAUDE.md — backend コーディング規約
 
 ## プロジェクト概要
 
