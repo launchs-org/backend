@@ -713,11 +713,10 @@ func TestListBuildsByProject_403_他ユーザー(t *testing.T) {
 	}
 }
 
-// newMockFileIOServer はテスト用のfile.ioモックサーバーを生成する
+// newMockFileIOServer はテスト用の一時ファイル共有サービス(litterbox)モックサーバーを生成する
 func newMockFileIOServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
-		responseWriter.Header().Set("Content-Type", "application/json")
-		responseWriter.Write([]byte(`{"success":true,"link":"https://file.io/testlink"}`)) // 常に成功レスポンスを返す
+		responseWriter.Write([]byte("https://file.io/testlink")) // 常に成功レスポンス（ダウンロードURLのプレーンテキスト）を返す
 	}))
 }
 

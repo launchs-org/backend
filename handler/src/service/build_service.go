@@ -10,6 +10,7 @@ import (
 
 	archivecrypto "handler/crypto"
 	"handler/fileio"
+	"handler/logger"
 	"handler/middlewares"
 	"handler/models"
 	"handler/repository"
@@ -30,7 +31,7 @@ var ErrDockerfileNotSupported = errors.New("dockerfile タイプは現在サポ�
 // ErrInvalidArchiveType はアップロードされたファイルがzip/tar.gz形式ではない場合のエラー
 var ErrInvalidArchiveType = errors.New("zip または tar.gz 形式のみサポートしています")
 
-// ErrArchiveUploadFailed はfile.ioへのアップロードに失敗した場合のエラー
+// ErrArchiveUploadFailed は一時ファイル共有サービス(litterbox)へのアップロードに失敗した場合のエラー
 var ErrArchiveUploadFailed = errors.New("アーカイブのアップロードに失敗しました")
 
 // ErrDeploymentTypeMismatch はデプロイメントタイプがリクエストと一致しない場合のエラー
@@ -60,7 +61,7 @@ type BuildWorkflowInput struct {
 	BuildID string // 対象ビルドの ID（あらかじめ DB に pending 状態で作成済み）
 
 	// --- archive タイプのビルドでのみ使用（railpack/dockerfile タイプでは空）---
-	ArchiveDownloadURL string // file.io のダウンロードリンク
+	ArchiveDownloadURL string // 一時ファイル共有サービス(litterbox) のダウンロードリンク
 	ArchiveEncKeyHex   string // AES-256-CBC復号鍵（16進）
 	ArchiveSHA256Hex   string // 暗号文全体のSHA256ハッシュ（16進、破損・改竄検知用）
 }
@@ -80,7 +81,7 @@ type buildServiceImpl struct {
 	k8sClient            kubernetes.Interface                  // k8s クライアント（Harbor クライアント等に使用）
 	registryHost         string                                // ビルドジョブが使う Harbor ホスト名（スキームなし）
 	temporalClient       WorkflowStarter                      // Temporal クライアント（Workflow 起動用）
-	fileIOClient         *fileio.FileIOClient                 // file.io アップロードクライアント
+	fileIOClient         *fileio.FileIOClient                 // 一時ファイル共有サービス(litterbox) アップロードクライアント
 }
 
 // NewBuildService は BuildService の実装を返す
@@ -104,7 +105,7 @@ func NewBuildService(
 		k8sClient:            k8sClient,            // k8s クライアントを注入する
 		registryHost:         registryHost,         // クラスタ内 DNS 名を注入する
 		temporalClient:       temporalClient,       // Temporal クライアントを注入する
-		fileIOClient:         fileIOClient,         // file.io アップロードクライアントを注入する
+		fileIOClient:         fileIOClient,         // 一時ファイル共有サービス(litterbox) アップロードクライアントを注入する
 	}
 }
 
@@ -175,7 +176,7 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 		buildData.ArchiveFileName = archiveClaim.FileName  // アーカイブファイル名を設定する
 		buildData.ArchiveSizeBytes = archiveClaim.SizeBytes // アーカイブサイズを設定する
 
-		workflowInput.ArchiveDownloadURL = archiveClaim.ArchiveURL // file.io のダウンロードリンクを設定する
+		workflowInput.ArchiveDownloadURL = archiveClaim.ArchiveURL // 一時ファイル共有サービス(litterbox) のダウンロードリンクを設定する
 		workflowInput.ArchiveEncKeyHex = archiveClaim.EncKeyHex     // 復号鍵を設定する
 		workflowInput.ArchiveSHA256Hex = archiveClaim.SHA256Hex     // SHA256ハッシュを設定する
 	} else { // 既存の GitHub ビルドフロー
@@ -215,7 +216,7 @@ func (svc *buildServiceImpl) TriggerBuild(ctx context.Context, userID string, de
 var archiveMagicBytesZip = []byte{0x50, 0x4b, 0x03, 0x04}    // "PK\x03\x04"
 var archiveMagicBytesGzip = []byte{0x1f, 0x8b}                // gzip マジックバイト
 
-// UploadBuildArchive はzip/tar.gzアーカイブを暗号化してfile.ioにアップロードし、
+// UploadBuildArchive はzip/tar.gzアーカイブを暗号化して一時ファイル共有サービス(litterbox)にアップロードし、
 // アップロードトークン(JWT)を発行して返す。この時点ではビルドは開始しない。
 func (svc *buildServiceImpl) UploadBuildArchive(ctx context.Context, userID string, deploymentID string, fileName string, fileReader io.Reader, fileSize int64) (string, error) {
 	// 1. Deployment を取得しタイプを検証する
@@ -251,16 +252,17 @@ func (svc *buildServiceImpl) UploadBuildArchive(ctx context.Context, userID stri
 		return "", fmt.Errorf("アーカイブの暗号化に失敗しました: %w", err) // 暗号化エラーを返す
 	}
 
-	// 5. file.io にアップロードする
-	downloadURL, err := svc.fileIOClient.Upload(ctx, fileName, strings.NewReader(string(encoded)), int64(len(encoded))) // file.io にアップロードする
+	// 5. 一時ファイル共有サービス(litterbox) にアップロードする
+	downloadURL, err := svc.fileIOClient.Upload(ctx, fileName, strings.NewReader(string(encoded)), int64(len(encoded))) // 一時ファイル共有サービス(litterbox) にアップロードする
 	if err != nil {
+		logger.PrintErr(fmt.Sprintf("一時ファイル共有サービス(litterbox) へのアーカイブアップロードに失敗しました（deploymentID=%s, fileName=%s）: %v", deploymentID, fileName, err)) // 実際の失敗原因（HTTPステータスやレスポンス内容）をログに残す
 		return "", ErrArchiveUploadFailed
 	}
 
 	// 6. アップロードトークンを発行する
 	claim := middlewares.ArchiveUploadTokenClaim{
 		DeploymentID: deploymentID, // 対象デプロイメントIDを設定する
-		ArchiveURL:   downloadURL,  // file.io のダウンロードリンクを設定する
+		ArchiveURL:   downloadURL,  // 一時ファイル共有サービス(litterbox) のダウンロードリンクを設定する
 		EncKeyHex:    encKeyHex,    // 復号鍵を設定する
 		SHA256Hex:    sha256Hex,    // SHA256ハッシュを設定する
 		FileName:     fileName,     // 元ファイル名を設定する
