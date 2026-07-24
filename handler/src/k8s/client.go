@@ -12,13 +12,15 @@ import (
 	metricsv1beta1 "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
-// buildConfig は kubeconfig が存在すればそれを使い、存在しなければ in-cluster 設定にフォールバックする
+// buildConfig は Pod 内で実行されていれば in-cluster 設定を使い、そうでなければ kubeconfig にフォールバックする
 func buildConfig() (*rest.Config, error) {
-	kubeconfig := filepath.Join(homedir.HomeDir(), ".kube", "config") // kubeconfig のパスを組み立てる
-	if _, statErr := os.Stat(kubeconfig); statErr == nil {
-		return clientcmd.BuildConfigFromFlags("", kubeconfig) // kubeconfig が存在する場合はそこから設定を構築する
+	// KUBERNETES_SERVICE_HOST は Pod 内実行時に必ず設定されるため、これを in-cluster 判定に使う
+	// （HOME 環境変数はコンテナランタイムが /etc/passwd から自動補完することがあり、kubeconfig の有無判定には使えない）
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		return rest.InClusterConfig() // Pod 内の ServiceAccount から設定を構築する
 	}
-	return rest.InClusterConfig() // kubeconfig が存在しない場合は Pod 内の ServiceAccount から設定を構築する
+	kubeconfig := filepath.Join(homedir.HomeDir(), ".kube", "config") // kubeconfig のパスを組み立てる
+	return clientcmd.BuildConfigFromFlags("", kubeconfig)             // ローカル実行時は kubeconfig から設定を構築する
 }
 
 // NewClient は kubeconfig または in-cluster 設定から通常の k8s クライアントを生成する
