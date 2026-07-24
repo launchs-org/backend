@@ -6,8 +6,10 @@ replace app/shared => ../../shared
 
 require (
 	app/shared v0.0.0-00010101000000-000000000000
+	github.com/stretchr/testify v1.11.1
 	go.temporal.io/sdk v1.45.0
 	gorm.io/datatypes v1.2.7
+	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.2
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.2
@@ -16,7 +18,7 @@ require (
 )
 
 require (
-	filippo.io/edwards25519 v1.1.0 // indirect
+	filippo.io/edwards25519 v1.1.1 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/facebookgo/clock v0.0.0-20150410010913-600d898af40a // indirect
@@ -50,7 +52,6 @@ require (
 	github.com/robfig/cron v1.2.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/stretchr/objx v0.5.2 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.temporal.io/api v1.62.12 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
@@ -71,7 +72,6 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/driver/mysql v1.5.6 // indirect
-	gorm.io/driver/postgres v1.6.0 // indirect
 	k8s.io/klog/v2 v2.140.0 // indirect
 	k8s.io/kube-openapi v0.0.0-20260317180543-43fb72c5454a // indirect
 	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2 // indirect
