@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -47,38 +48,57 @@ func NewFileIOClientForTest(endpoint string) *FileIOClient {
 	return newFileIOClientWithEndpoint(endpoint)
 }
 
+// maxUploadSizeBytes はアップロード可能なアーカイブの上限サイズ（500MB）
+const maxUploadSizeBytes = 500 * 1024 * 1024
+
 // Upload はデータを一時ファイル共有サービスにアップロードしダウンロードリンクを返す。
 // litterbox のレスポンスは JSON ではなくダウンロードURLそのものがプレーンテキストで返る。
+// multipart ボディは一時ファイルに書き出してから Content-Length 付きで送信する
+// （io.Pipe によるストリーミング送信は litterbox 側で正しく処理されず 412 No file! になることがあったため）
 func (client *FileIOClient) Upload(ctx context.Context, fileName string, data io.Reader, size int64) (downloadURL string, err error) {
-	bodyReader, bodyWriter := io.Pipe() // multipartボディをストリームで書き込むためのパイプを生成する
-	multipartWriter := multipart.NewWriter(bodyWriter)
+	if size > maxUploadSizeBytes {
+		return "", fmt.Errorf("アーカイブサイズが上限を超えています: size=%d, limit=%d", size, maxUploadSizeBytes)
+	}
 
-	go func() { // multipartボディの書き込みを別goroutineで行う
-		defer bodyWriter.Close()
-		if writeErr := multipartWriter.WriteField("reqtype", "fileupload"); writeErr != nil { // litterbox 固有の必須フィールドを設定する
-			bodyWriter.CloseWithError(writeErr)
-			return
-		}
-		if writeErr := multipartWriter.WriteField("time", uploadExpiry); writeErr != nil { // 有効期限を設定する
-			bodyWriter.CloseWithError(writeErr)
-			return
-		}
-		part, createErr := multipartWriter.CreateFormFile("fileToUpload", fileName) // litterbox のファイルフィールド名は fileToUpload
-		if createErr != nil {
-			bodyWriter.CloseWithError(createErr)
-			return
-		}
-		if _, copyErr := io.Copy(part, data); copyErr != nil { // アーカイブ本体を書き込む
-			bodyWriter.CloseWithError(copyErr)
-			return
-		}
-		bodyWriter.CloseWithError(multipartWriter.Close())
-	}()
+	tempFile, err := os.CreateTemp("", "litterbox-upload-*.tmp") // multipartボディ全体を書き出す一時ファイルを作成する
+	if err != nil {
+		return "", fmt.Errorf("一時ファイルの作成に失敗しました: %w", err)
+	}
+	tempFilePath := tempFile.Name()
+	defer os.Remove(tempFilePath) // 終了時に一時ファイルを削除する
+	defer tempFile.Close()
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.endpoint, bodyReader) // リクエストを生成する
+	multipartWriter := multipart.NewWriter(tempFile)
+	if writeErr := multipartWriter.WriteField("reqtype", "fileupload"); writeErr != nil { // litterbox 固有の必須フィールドを設定する
+		return "", fmt.Errorf("multipartフィールドの書き込みに失敗しました: %w", writeErr)
+	}
+	if writeErr := multipartWriter.WriteField("time", uploadExpiry); writeErr != nil { // 有効期限を設定する
+		return "", fmt.Errorf("multipartフィールドの書き込みに失敗しました: %w", writeErr)
+	}
+	part, createErr := multipartWriter.CreateFormFile("fileToUpload", fileName) // litterbox のファイルフィールド名は fileToUpload
+	if createErr != nil {
+		return "", fmt.Errorf("multipartファイルパートの生成に失敗しました: %w", createErr)
+	}
+	if _, copyErr := io.Copy(part, data); copyErr != nil { // アーカイブ本体を書き込む
+		return "", fmt.Errorf("アーカイブ本体の書き込みに失敗しました: %w", copyErr)
+	}
+	if closeErr := multipartWriter.Close(); closeErr != nil {
+		return "", fmt.Errorf("multipartボディのクローズに失敗しました: %w", closeErr)
+	}
+
+	fileInfo, statErr := tempFile.Stat() // Content-Length 用に一時ファイルのサイズを取得する
+	if statErr != nil {
+		return "", fmt.Errorf("一時ファイルの情報取得に失敗しました: %w", statErr)
+	}
+	if _, seekErr := tempFile.Seek(0, io.SeekStart); seekErr != nil { // 読み込み用に先頭へシークし直す
+		return "", fmt.Errorf("一時ファイルのシークに失敗しました: %w", seekErr)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.endpoint, tempFile) // リクエストを生成する
 	if err != nil {
 		return "", fmt.Errorf("アップロードリクエストの生成に失敗しました: %w", err)
 	}
+	request.ContentLength = fileInfo.Size()                                     // Content-Length を明示的に設定する
 	request.Header.Set("Content-Type", multipartWriter.FormDataContentType()) // Content-Type を設定する
 
 	response, err := client.httpClient.Do(request) // リクエストを送信する
