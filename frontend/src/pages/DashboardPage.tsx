@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Plus, FolderOpen, Clock, GraduationCap } from 'lucide-react'
+import { Plus, FolderOpen, Clock, GraduationCap, Upload } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { StatusBadge } from '@/components/StatusBadge'
 import { get } from '@/lib/api'
@@ -56,14 +56,23 @@ export function DashboardPage() {
   return (
     <Layout
       actions={
-        <button
-          data-tutorial="tutorial-new-project-btn"
-          onClick={() => navigate('/projects/new')}
-          className="flex items-center gap-1.5 bg-[#111827] text-white text-sm px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          New Project
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/deploy')}
+            className="flex items-center gap-1.5 border border-gray-200 text-[#111827] text-sm px-3 py-1.5 rounded-md hover:bg-gray-50 transition-colors"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            簡易デプロイ（ドロップ）
+          </button>
+          <button
+            data-tutorial="tutorial-new-project-btn"
+            onClick={() => navigate('/projects/new')}
+            className="flex items-center gap-1.5 bg-[#111827] text-white text-sm px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New Project
+          </button>
+        </div>
       }
     >
       <div className="space-y-6">
@@ -108,11 +117,11 @@ export function DashboardPage() {
 
         {/* ローディング */}
         {loading && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
             {[...Array(3)].map((_, skeletonIndex) => (
-              <div key={skeletonIndex} className="bg-white rounded-lg border border-gray-200 p-4 animate-pulse">
-                <div className="h-4 bg-gray-200 rounded w-2/3 mb-2" />
-                <div className="h-3 bg-gray-100 rounded w-1/3" />
+              <div key={skeletonIndex} className="p-4 animate-pulse">
+                <div className="h-4 bg-gray-200 rounded w-1/3 mb-2" />
+                <div className="h-3 bg-gray-100 rounded w-1/4" />
               </div>
             ))}
           </div>
@@ -135,25 +144,27 @@ export function DashboardPage() {
         )}
 
         {!loading && projectList.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
             {projectList.map((project, projectIndex) => (
               <Link
                 key={project.id || String(projectIndex)}
                 to={`/projects/${project.id}`}
-                className="group bg-white rounded-lg border border-gray-200 p-4 hover:border-[#00C2D1] hover:shadow-sm transition-all"
+                className="group flex items-center justify-between gap-4 p-4 hover:bg-gray-50 transition-colors"
               >
-                <div className="flex items-start justify-between mb-3">
+                <div className="min-w-0 flex-1">
                   <h2 className="font-medium text-[#111827] group-hover:text-[#00C2D1] transition-colors truncate">
                     {project.name}
                   </h2>
+                  <div className="mt-1 text-xs text-gray-400 font-mono truncate">
+                    {project.namespace}
+                  </div>
+                </div>
+                <div className="flex items-center gap-4 flex-shrink-0">
+                  <div className="flex items-center gap-1 text-xs text-gray-400">
+                    <Clock className="w-3 h-3" />
+                    {formatRelativeTime(project.updated_at)}
+                  </div>
                   <StatusBadge status={project.status} />
-                </div>
-                <div className="flex items-center gap-1 text-xs text-gray-400">
-                  <Clock className="w-3 h-3" />
-                  {formatRelativeTime(project.updated_at)}
-                </div>
-                <div className="mt-2 text-xs text-gray-400 font-mono truncate">
-                  {project.namespace}
                 </div>
               </Link>
             ))}

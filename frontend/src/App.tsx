@@ -8,6 +8,7 @@ import { DeploymentDetailPage } from '@/pages/DeploymentDetailPage'
 import { DeploymentNewPage } from '@/pages/DeploymentNewPage'
 import { BuildLogPage } from '@/pages/BuildLogPage'
 import { SettingsPage } from '@/pages/SettingsPage'
+import { DeployWizardPage } from '@/pages/DeployWizardPage'
 import { TutorialProvider } from '@/tutorial/TutorialContext' // チュートリアル Context プロバイダーをインポートする
 import { TutorialOverlay } from '@/tutorial/TutorialOverlay' // チュートリアルオーバーレイをインポートする
 import { Toaster } from 'sonner' // トースト通知をインポートする
@@ -50,6 +51,14 @@ export default function App() {
           element={
             <AuthGate>
               <DashboardPage />
+            </AuthGate>
+          }
+        />
+        <Route
+          path="/deploy"
+          element={
+            <AuthGate>
+              <DeployWizardPage />
             </AuthGate>
           }
         />

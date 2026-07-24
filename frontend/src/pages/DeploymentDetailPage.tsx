@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Play, Trash2, GitBranch, Container, Package, ExternalLink, Clock, CheckCircle2, XCircle, AlertCircle, Ban, GitCommit, X, Hammer, Copy, Eye, EyeOff, Webhook as WebhookIcon, Rocket, FolderOpen, HardDrive } from 'lucide-react'
+import { Play, Trash2, GitBranch, Container, Package, Archive, ExternalLink, Clock, CheckCircle2, XCircle, AlertCircle, Ban, GitCommit, X, Hammer, Copy, Eye, EyeOff, Webhook as WebhookIcon, Rocket, FolderOpen, HardDrive } from 'lucide-react'
 import { Layout } from '@/components/Layout'
 import { StatusBadge } from '@/components/StatusBadge'
 import { LogViewer } from '@/components/LogViewer'
@@ -53,6 +53,7 @@ const TYPE_ICON = {
   image_url: Container,
   dockerfile: GitBranch,
   railpack: Package,
+  archive: Archive,
 }
 
 export function DeploymentDetailPage() {

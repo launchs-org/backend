@@ -1,5 +1,5 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
-import { Container, GitBranch, Package } from 'lucide-react'
+import { Container, GitBranch, Package, Archive } from 'lucide-react'
 import { StatusBadge } from '@/components/StatusBadge'
 import type { Deployment } from '@/lib/types'
 
@@ -14,12 +14,14 @@ const TYPE_ICON = {
   image_url: Container,
   dockerfile: GitBranch,
   railpack: Package,
+  archive: Archive,
 } as const
 
 const TYPE_LABEL = {
   image_url: 'Image',
   dockerfile: 'Dockerfile',
   railpack: 'Railpack',
+  archive: 'Archive',
 } as const
 
 const INSTANCE_SIZE_LABEL: Record<string, string> = {
@@ -32,6 +34,7 @@ const TYPE_COLOR = {
   image_url: { accent: '#00C2D1', bg: 'bg-cyan-50', text: 'text-cyan-600' },
   dockerfile: { accent: '#6366F1', bg: 'bg-indigo-50', text: 'text-indigo-600' },
   railpack: { accent: '#10B981', bg: 'bg-emerald-50', text: 'text-emerald-600' },
+  archive: { accent: '#F59E0B', bg: 'bg-amber-50', text: 'text-amber-600' },
 } as const
 
 export function DeploymentNode({ data }: NodeProps) {
