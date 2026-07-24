@@ -1,4 +1,4 @@
-# launchs-org-backend-mini
+# launchs-org-backend
 
 Go + React + Nginx + PostgreSQL の Docker Compose 構成テンプレート。JWT 認証サービス込みで即起動できる開発環境。
 
@@ -60,6 +60,10 @@ SSL 証明書と JWT キーの生成・Docker イメージのビルド・全サ�
 | pgAdmin | http://localhost:8080 |
 
 自己署名証明書を使用しているため、ブラウザの警告は無視して進んでください。
+
+## API ドキュメント
+
+OpenAPI 仕様書は [https://launchs-org.github.io/backend/](https://launchs-org.github.io/backend/) で公開されています（`develop` ブランチの `docs/openapi.yaml` 更新時に自動反映）。
 
 ## コマンド一覧
 

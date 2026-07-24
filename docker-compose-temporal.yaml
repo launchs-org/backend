@@ -1,0 +1,79 @@
+name: launchs-org
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Temporal 層（スキーマセットアップ / サーバー / UI / namespace 作成）
+# docker-compose.yaml と一緒に使用する。
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ─── スキーマセットアップ（一回限り実行）────────────────────────────────
+  temporal-admin-tools:
+    image: temporalio/admin-tools:1.31.0
+    container_name: temporal-admin-tools
+    restart: on-failure:6
+    environment:
+      - DB=db
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=db
+    entrypoint: ["/bin/sh"]
+    command: /scripts/setup-postgres.sh
+    volumes:
+      - ./temporal/scripts:/scripts
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ─── Temporal サーバー ──────────────────────────────────────────────────
+  temporal:
+    image: temporalio/server:1.31.0
+    container_name: temporal
+    environment:
+      - TEMPORAL_SERVER_CONFIG_FILE_PATH=/etc/temporal/config/development.yaml
+      - BIND_ON_IP=0.0.0.0
+      - TEMPORAL_BROADCAST_ADDRESS=127.0.0.1
+    ports:
+      - "7233:7233"
+    volumes:
+      - ./temporal/config:/etc/temporal/config
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7233"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 60
+    depends_on:
+      temporal-admin-tools:
+        condition: service_completed_successfully
+    restart: always
+
+  # ─── namespace 作成（一回限り実行）──────────────────────────────────────
+  temporal-create-namespace:
+    image: temporalio/admin-tools:1.31.0
+    container_name: temporal-create-namespace
+    restart: on-failure:5
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - DEFAULT_NAMESPACE=default
+    entrypoint: ["/bin/sh"]
+    command: /scripts/create-namespace.sh
+    volumes:
+      - ./temporal/scripts:/scripts
+    depends_on:
+      temporal:
+        condition: service_healthy
+
+  # ─── Temporal UI ────────────────────────────────────────────────────────
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    container_name: temporal-ui
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    ports:
+      - "8080:8080"
+    depends_on:
+      temporal:
+        condition: service_healthy
+    restart: always

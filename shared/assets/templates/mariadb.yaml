@@ -1,0 +1,26 @@
+name: mariadb
+description: "MariaDB データベーステンプレート"
+image_url: bitnami/mariadb:latest
+instance_size: small
+replicas: 1
+command: []
+args: []
+
+service:
+  port: 3306
+  target_port: 3306
+  type: ClusterIP
+
+env_vars:
+  - key: MARIADB_ROOT_PASSWORD
+    auto_generate: true
+    length: 32
+    is_secret: true
+  - key: MARIADB_DATABASE
+    value: app
+    is_secret: false
+
+volumes:
+  - name: mariadb-data
+    size_mb: 3072
+    mount_path: /bitnami/mariadb

@@ -1,0 +1,86 @@
+name: launchs-org-backend-test
+
+services:
+  # テスト用 PostgreSQL（handler サービスのリポジトリテスト用）
+  postgres-test:
+    hostname: db-test
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_PASSWORD: root
+      TZ: Asia/Tokyo
+    volumes:
+      - ./database/script/init-test.sql:/docker-entrypoint-initdb.d/init-test.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+  # handler サービスのテスト
+  handler-test:
+    hostname: handler-test
+    build:
+      context: ./handler
+      dockerfile: dockerfile
+      target: Develop
+    volumes:
+      - ./handler/src:/app/src
+    environment:
+      DB_HOST: db-test
+      DB_USER: testuser
+      DB_PASSWORD: testpass
+      DB_NAME: testdb
+      DB_PORT: 5432
+      JWT_PUBLIC_KEY: ""
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    command: ["go", "test", "./...", "-v", "-count=1"]
+
+  # builder サービスのテスト（DB 不要・モックのみ）
+  builder-test:
+    hostname: builder-test
+    build:
+      context: ./builder
+      dockerfile: dockerfile
+      target: Develop
+    volumes:
+      - ./builder/src:/app/src
+      - ./shared:/shared
+    environment:
+      DB_HOST: ""
+      DB_USER: ""
+      DB_PASSWORD: ""
+      DB_NAME: ""
+      DB_PORT: "5432"
+      REGISTRY_HOST: ""
+      HARBOR_ENDPOINT: ""
+    command: ["go", "test", "./...", "-v", "-count=1"]
+
+  # watcher サービスのテスト（DB 不要・モックのみ）
+  watcher-test:
+    hostname: watcher-test
+    build:
+      context: ./watcher
+      dockerfile: dockerfile
+      target: Develop
+    volumes:
+      - ./watcher/src:/app/src
+      - ./shared:/shared
+    environment:
+      DB_HOST: ""
+    command: ["go", "test", "./...", "-v", "-count=1"]
+
+  # controller サービスのテスト（DB 不要・モックのみ）
+  controller-test:
+    hostname: controller-test
+    build:
+      context: ./controller
+      dockerfile: dockerfile
+      target: Develop
+    volumes:
+      - ./controller/src:/app/src
+      - ./shared:/shared
+    environment:
+      DB_HOST: ""
+    command: ["go", "test", "./...", "-v", "-count=1"]

@@ -1,0 +1,70 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Publish OpenAPI Docs
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - "docs/openapi.yaml"
+      - ".github/workflows/publish-openapi-docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ドキュメントをビルドしてコミットする
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: 公開用ディレクトリを作成する
+        run: mkdir -p docs/site
+
+      - name: openapi.yaml を公開用ディレクトリにコピーする
+        run: cp docs/openapi.yaml docs/site/openapi.yaml
+
+      - name: Swagger UI の index.html を生成する
+        run: |
+          cat > docs/site/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html lang="ja">
+            <head>
+              <meta charset="UTF-8" />
+              <title>backend API ドキュメント</title>
+              <link
+                rel="stylesheet"
+                href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css"
+              />
+            </head>
+            <body>
+              <div id="swagger-ui"></div>
+              <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+              <script>
+                window.onload = () => {
+                  window.ui = SwaggerUIBundle({
+                    url: "./openapi.yaml",
+                    dom_id: "#swagger-ui",
+                    presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+                  });
+                };
+              </script>
+            </body>
+          </html>
+          EOF
+
+      - name: 生成した成果物をコミットする
+        run: |
+          git config user.name "github-actions[bot]" # コミット用のユーザー名を設定する
+          git config user.email "github-actions[bot]@users.noreply.github.com" # コミット用のメールアドレスを設定する
+          git add docs/site # 生成した成果物をステージングする
+          if git diff --staged --quiet; then # 差分がない場合は何もしない
+            echo "変更なし"
+          else
+            git commit -m "docs: openapi.yamlの公開用ファイルを更新する" # 成果物をコミットする
+            git push # developブランチにpushする
+          fi

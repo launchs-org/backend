@@ -1,32 +1,23 @@
-name: launchs-org-backend-mini
+name: launchs-org
 
 services:
   # リバースプロキシ
   nginx:
-    # イメージ
     image: nginx:latest
-    # ポート
     ports:
       - "8955:8443"
     tty: true
-    # ディレクトリ共有
     volumes:
-      # 設定ファイル
       - ./nginx/configs:/etc/nginx/conf.d/
-      # 静的ファイル
       - ./nginx/statics:/var/www/nginx/statics/:ro
-      # SSL証明書
       - ./nginx/keys:/etc/nginx/ssl:ro
-      # ロギングディレクトリ
       - ./nginx/logs:/var/log/nginx:rw
-
-    # 自動再起動
     restart: always
     depends_on:
       - frontend
-      - app
+      - handler
       - auth
-  
+
   auth:
     hostname: auth
     image: ghcr.io/mattuu0/authbase/auth:v0.1.6
@@ -38,54 +29,116 @@ services:
       - ./auth/icons:/assets/icons
     restart: always
     depends_on:
-      # マイグレーションが終わるまで
       migrate:
         condition: service_completed_successfully
-    
-    # マイグレーション
+
+  # マイグレーション
   migrate:
     image: ghcr.io/mattuu0/authbase/auth:v0.1.6
     env_file:
       - ./config/auth.env
     command: ["/auth","migrate","-r"]
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # フロントエンドのコンテナ
   frontend:
-    # ホスト名設定
     hostname: frontend
-    # イメージ
     build:
       context: ./frontend
       dockerfile: Dockerfile
       target: development-dependencies-env
-    # ディレクトリ共有
     volumes:
       - ./frontend:/app
       - /app/node_modules
-    # ttyを有効化
     tty: true
     restart: always
 
-  # app コンテナ
-  app:
-    # ホスト名指定
+  # handler コンテナ（旧 app）
+  handler:
     hostname: app
-    # ビルド対象のdockerfileをしてい
     build:
-      context: ./app
-      dockerfile: dockerfile
+      context: .
+      dockerfile: handler/dockerfile
       target: Develop
-    # コードを共有
     volumes:
-      - ./app/src:/app/src
-    # 環境変数
+      - ./handler/src:/app/src
+      - ./shared:/shared
+      - ~/.kube:/root/.kube:ro
     env_file:
       - ./config/app.env
       - ./openssl/jwtKeys/public.env
-    # 仮想端末を有効化
+      - ./openssl/cliTokenKeys/private.env
+      - ./openssl/cliTokenKeys/public.env
+    environment:
+      - TEMPORAL_HOST=temporal:7233
     tty: true
-    # 自動起動を有効化
     restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # controller コンテナ（Temporal Worker: K8s 操作を担う）
+  controller:
+    hostname: controller
+    build:
+      context: .
+      dockerfile: controller/dockerfile
+      target: Develop
+    volumes:
+      - ./controller/src:/app/src
+      - ./shared:/shared
+      - ~/.kube:/root/.kube:ro
+    env_file:
+      - ./config/app.env
+    environment:
+      - TEMPORAL_HOST=temporal:7233
+    tty: true
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # watcher コンテナ（K8s リソース状態監視）
+  watcher:
+    hostname: watcher
+    build:
+      context: .
+      dockerfile: watcher/dockerfile
+      target: Develop
+    volumes:
+      - ./watcher/src:/app/src
+      - ./shared:/shared
+      - ~/.kube:/root/.kube:ro
+    env_file:
+      - ./config/app.env
+    tty: true
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # builder コンテナ（Temporal Worker: ビルド管理を担う）
+  builder:
+    hostname: builder
+    build:
+      context: .
+      dockerfile: builder/dockerfile
+      target: Develop
+    volumes:
+      - ./builder/src:/app/src
+      - ./shared:/shared
+      - ~/.kube:/root/.kube:ro
+    env_file:
+      - ./config/app.env
+    environment:
+      - TEMPORAL_HOST=temporal:7233
+    tty: true
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   postgres:
     hostname: db
@@ -107,18 +160,17 @@ services:
     image: dpage/pgadmin4
     restart: always
     ports:
-      - 8080:8080
+      - 8088:8088
     environment:
       - PGADMIN_DEFAULT_EMAIL=admin@launchs.org
       - PGADMIN_DEFAULT_PASSWORD=password
       - PGADMIN_DISABLE_POSTFIX=1
-      - PGADMIN_LISTEN_PORT=8080
+      - PGADMIN_LISTEN_PORT=8088
       - PGADMIN_CONFIG_SERVER_MODE=False
       - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
     volumes:
       - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
 
 volumes:
-  # mysqlのデータベース
   dbdata:
     driver: local
