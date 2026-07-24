@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Build & Push Watcher
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*.*.*"
+    paths:
+      - "watcher/**"
+      - "shared/**"
+      - ".github/workflows/build-push-watcher.yml"
+
+jobs:
+  build-push:
+    name: watcher イメージのビルド・push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: GitHub Container Registry にログイン
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: イメージのメタデータを生成
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/launchs-org/watcher
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+
+      - name: Docker Buildx をセットアップ
+        uses: docker/setup-buildx-action@v3
+
+      - name: イメージをビルドして push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: watcher/dockerfile
+          target: release
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

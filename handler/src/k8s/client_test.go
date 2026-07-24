@@ -51,16 +51,16 @@ users:
 	}
 }
 
-// TestNewClient_kubeconfigなし は kubeconfig が存在しない場合にエラーが返ることを確認する
+// TestNewClient_kubeconfigなし は kubeconfig も in-cluster 環境も存在しない場合にエラーが返ることを確認する
 func TestNewClient_kubeconfigなし(t *testing.T) {
 	emptyDir := t.TempDir()                        // kubeconfig が存在しない一時ディレクトリを作成する
 	originalHome := os.Getenv("HOME")              // 元の HOME 環境変数を保存する
 	defer os.Setenv("HOME", originalHome)          // テスト終了後に HOME を元に戻す
 	os.Setenv("HOME", emptyDir)                    // HOME を空ディレクトリに変更して kubeconfig が存在しない状態を作る
 
-	_, err := NewClient() // kubeconfig なしでクライアント生成を試みる
+	_, err := NewClient() // kubeconfig なし・in-cluster 環境なしでクライアント生成を試みる（in-cluster フォールバックも失敗するはず）
 	if err == nil {
-		t.Fatal("kubeconfig が存在しない場合に NewClient() はエラーを返すべきです") // エラーが返らない場合はテスト失敗とする
+		t.Fatal("kubeconfig も in-cluster 環境も存在しない場合に NewClient() はエラーを返すべきです") // エラーが返らない場合はテスト失敗とする
 	}
 }
 
@@ -109,15 +109,15 @@ users:
 	}
 }
 
-// TestNewDynamicClient_kubeconfigなし は kubeconfig が存在しない場合にエラーが返ることを確認する
+// TestNewDynamicClient_kubeconfigなし は kubeconfig も in-cluster 環境も存在しない場合にエラーが返ることを確認する
 func TestNewDynamicClient_kubeconfigなし(t *testing.T) {
 	emptyDir := t.TempDir()                        // kubeconfig が存在しない一時ディレクトリを作成する
 	originalHome := os.Getenv("HOME")              // 元の HOME 環境変数を保存する
 	defer os.Setenv("HOME", originalHome)          // テスト終了後に HOME を元に戻す
 	os.Setenv("HOME", emptyDir)                    // HOME を空ディレクトリに変更して kubeconfig が存在しない状態を作る
 
-	_, err := NewDynamicClient() // kubeconfig なしで dynamic クライアント生成を試みる
+	_, err := NewDynamicClient() // kubeconfig なし・in-cluster 環境なしで dynamic クライアント生成を試みる（in-cluster フォールバックも失敗するはず）
 	if err == nil {
-		t.Fatal("kubeconfig が存在しない場合に NewDynamicClient() はエラーを返すべきです") // エラーが返らない場合はテスト失敗とする
+		t.Fatal("kubeconfig も in-cluster 環境も存在しない場合に NewDynamicClient() はエラーを返すべきです") // エラーが返らない場合はテスト失敗とする
 	}
 }

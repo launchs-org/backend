@@ -59,8 +59,8 @@ services:
   handler:
     hostname: app
     build:
-      context: ./handler
-      dockerfile: dockerfile
+      context: .
+      dockerfile: handler/dockerfile
       target: Develop
     volumes:
       - ./handler/src:/app/src
@@ -83,8 +83,8 @@ services:
   controller:
     hostname: controller
     build:
-      context: ./controller
-      dockerfile: dockerfile
+      context: .
+      dockerfile: controller/dockerfile
       target: Develop
     volumes:
       - ./controller/src:/app/src
@@ -104,8 +104,8 @@ services:
   watcher:
     hostname: watcher
     build:
-      context: ./watcher
-      dockerfile: dockerfile
+      context: .
+      dockerfile: watcher/dockerfile
       target: Develop
     volumes:
       - ./watcher/src:/app/src
@@ -123,8 +123,8 @@ services:
   builder:
     hostname: builder
     build:
-      context: ./builder
-      dockerfile: dockerfile
+      context: .
+      dockerfile: builder/dockerfile
       target: Develop
     volumes:
       - ./builder/src:/app/src

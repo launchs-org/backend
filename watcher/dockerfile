@@ -12,7 +12,8 @@ CMD [ "air","-c","./.air.toml" ]
 FROM golang:1.26 as build
 
 WORKDIR /go/src/app
-COPY ./src .
+COPY ./watcher/src .
+COPY ./shared /go/shared
 
 RUN go mod download
 RUN CGO_ENABLED=0 go build -o /go/bin/app
