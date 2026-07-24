@@ -224,6 +224,21 @@ export async function patch<T>(path: string, body?: unknown): Promise<T> {
   return handleResponse<T>(res) // レスポンスを処理する
 }
 
+export async function postMultipart<T>(path: string, formData: FormData): Promise<T> {
+  const token = await ensureAccessToken() // アクセストークンを取得する（Content-Typeはブラウザにboundary付きで自動設定させるため手動指定しない）
+  const headers: Record<string, string> = {}
+  if (token) {
+    headers['Authorization'] = token // Authorizationヘッダーを設定する
+  }
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: formData,
+  })
+  return handleResponse<T>(res) // レスポンスを処理する
+}
+
 export async function del<T = void>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'DELETE',

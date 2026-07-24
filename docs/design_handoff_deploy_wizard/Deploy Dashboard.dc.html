@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+body{margin:0;font-family:'Roboto',-apple-system,BlinkMacSystemFont,sans-serif;}
+a{color:#1a73e8;text-decoration:none;}
+a:hover{color:#1557b0;text-decoration:underline;}
+input{font-family:inherit;}
+::-webkit-scrollbar{width:8px;height:8px;}
+::-webkit-scrollbar-thumb{background:#dadce0;border-radius:4px;}
+@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+</style>
+</helmet>
+<div style="display:flex;height:100vh;width:100%;background:#f8f9fa;overflow:hidden;box-sizing:border-box;">
+  <sc-if value="{{ isViewLanding }}" hint-placeholder-val="{{ true }}">
+    <input type="file" ref="{{ fileInputRef }}" webkitdirectory="true" directory="true" multiple="true" onChange="{{ onFolderSelected }}" style="display:none;" />
+    <div style="position:fixed;inset:0;background:#ffffff;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;padding:40px;">
+      <div style="position:absolute;top:32px;left:40px;font-size:15px;font-weight:700;color:#202124;">デプロイダッシュボード</div>
+      <div onClick="{{ onGoDashboardFromLanding }}" style="position:absolute;top:32px;right:40px;font-size:13px;color:#1a73e8;font-weight:500;cursor:pointer;">既存のプロジェクトを見る →</div>
+      <div style="font-size:40px;font-weight:700;color:#202124;margin-bottom:48px;text-align:center;">プロジェクトフォルダをドロップ</div>
+      <div onClick="{{ onLandingClick }}" onDragOver="{{ onLandingDragOver }}" onDragLeave="{{ onLandingDragLeave }}" onDrop="{{ onLandingDrop }}" style="{{ landingStyle }}">
+        <div style="width:88px;height:88px;border-radius:50%;background:#e8f0fe;color:#1a73e8;display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:700;margin-bottom:28px;">↑</div>
+        <div style="font-size:20px;font-weight:600;color:#202124;margin-bottom:8px;">フォルダをドラッグ&ドロップ</div>
+        <div style="font-size:15px;color:#5f6368;">またはクリックして選択</div>
+      </div>
+      <div style="margin-top:20px;font-size:13px;color:#9aa0a6;">自動でtar.gz形式に圧縮してアップロードされます</div>
+    </div>
+  </sc-if>
+  <div style="width:240px;flex-shrink:0;background:#ffffff;border-right:1px solid #dadce0;display:flex;flex-direction:column;padding:16px 12px;box-sizing:border-box;overflow-y:auto;">
+    <div style="font-size:15px;font-weight:700;color:#202124;padding:8px 12px 16px;">デプロイダッシュボード</div>
+    <div style="font-size:11px;font-weight:700;color:#5f6368;letter-spacing:.04em;padding:8px 12px 4px;">プロジェクト</div>
+    <sc-for list="{{ projectsNav }}" as="p" hint-placeholder-count="2">
+      <div onClick="{{ p.onClick }}" style="{{ p.itemStyle }}">
+        <div style="{{ p.dotStyle }}"></div>
+        <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ p.name }}</div>
+      </div>
+    </sc-for>
+    <div onClick="{{ onAddProject }}" style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:20px;cursor:pointer;color:#1a73e8;font-size:13px;font-weight:500;margin-top:4px;">
+      <div style="width:18px;height:18px;border-radius:50%;border:1.5px solid #1a73e8;display:flex;align-items:center;justify-content:center;font-size:13px;line-height:1;">+</div>
+      新しいプロジェクト
+    </div>
+    <div style="height:1px;background:#dadce0;margin:16px 4px;"></div>
+    <div style="font-size:11px;font-weight:700;color:#5f6368;letter-spacing:.04em;padding:8px 12px 4px;">メニュー</div>
+    <div onClick="{{ goDeployments }}" style="{{ navDeploymentsStyle }}">デプロイメント</div>
+    <div onClick="{{ goTemplates }}" style="{{ navTemplatesStyle }}">テンプレート</div>
+  </div>
+
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0;overflow:hidden;">
+    <div style="height:64px;flex-shrink:0;background:#ffffff;border-bottom:1px solid #dadce0;display:flex;align-items:center;justify-content:space-between;padding:0 28px;box-sizing:border-box;">
+      <div style="font-size:15px;color:#202124;font-weight:500;">{{ breadcrumb }}</div>
+      <div style="width:32px;height:32px;border-radius:50%;background:#1a73e8;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;">{{ userInitial }}</div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:32px 40px;box-sizing:border-box;">
+
+      <sc-if value="{{ isViewDeployments }}" hint-placeholder-val="{{ true }}">
+        <div>
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;">
+            <div>
+              <div style="font-size:22px;font-weight:700;color:#202124;">デプロイメント</div>
+              <div style="font-size:13px;color:#5f6368;margin-top:4px;">このプロジェクトで動いているアプリの一覧です</div>
+            </div>
+            <div onClick="{{ onAddDeployment }}" style="background:#1a73e8;color:#fff;border:none;border-radius:6px;padding:10px 20px;font-size:14px;font-weight:500;cursor:pointer;white-space:nowrap;">+ 新しいアプリを追加</div>
+          </div>
+          <div style="background:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:16px 20px;margin-bottom:24px;">
+            <div style="font-size:13px;color:#5f6368;margin-bottom:8px;">使用状況：{{ quotaUsed }} / {{ quotaMax }} 個のアプリ</div>
+            <div style="height:8px;background:#e8eaed;border-radius:4px;overflow:hidden;">
+              <div style="height:100%;background:#1a73e8;border-radius:4px;width:{{ quotaBarWidth }};"></div>
+            </div>
+          </div>
+          <sc-if value="{{ hasDeployments }}" hint-placeholder-val="{{ true }}">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;">
+              <sc-for list="{{ deploymentsForList }}" as="dep" hint-placeholder-count="2">
+                <div onClick="{{ dep.onClick }}" style="background:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:20px;cursor:pointer;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px;">
+                    <div style="font-size:16px;font-weight:700;color:#202124;">{{ dep.name }}</div>
+                    <div style="font-size:12px;font-weight:600;padding:3px 10px;border-radius:12px;white-space:nowrap;background:{{ dep.statusBg }};color:{{ dep.statusColor }};">{{ dep.statusLabel }}</div>
+                  </div>
+                  <div style="font-size:12px;color:#5f6368;margin-bottom:8px;">{{ dep.typeLabel }}</div>
+                  <sc-if value="{{ dep.hasPending }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:inline-block;font-size:11px;font-weight:600;color:#f29900;background:#fef7e0;padding:2px 8px;border-radius:10px;margin-bottom:8px;">未反映の変更があります</div>
+                  </sc-if>
+                  <sc-if value="{{ dep.hasUrl }}" hint-placeholder-val="{{ false }}">
+                    <a href="{{ dep.url }}" target="_blank" rel="noopener" onClick="{{ dep.onOpenUrl }}" style="display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ dep.url }}</a>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ noDeployments }}" hint-placeholder-val="{{ false }}">
+            <div style="text-align:center;padding:60px 20px;color:#5f6368;font-size:14px;">まだアプリがありません。「+ 新しいアプリを追加」から始めましょう。</div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isViewTemplates }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div style="font-size:22px;font-weight:700;color:#202124;margin-bottom:4px;">テンプレート</div>
+          <div style="font-size:13px;color:#5f6368;margin-bottom:24px;">よく使う構成をワンクリックで追加できます</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;">
+            <sc-for list="{{ templateCards }}" as="tpl" hint-placeholder-count="4">
+              <div style="background:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:20px;display:flex;flex-direction:column;gap:12px;">
+                <div style="width:40px;height:40px;border-radius:8px;color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;background:{{ tpl.iconBg }};">{{ tpl.icon }}</div>
+                <div style="font-size:15px;font-weight:700;color:#202124;">{{ tpl.name }}</div>
+                <div style="font-size:13px;color:#5f6368;flex:1;">{{ tpl.desc }}</div>
+                <div onClick="{{ tpl.onUse }}" style="background:#e8f0fe;color:#1a73e8;border:none;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;text-align:center;">このテンプレートを使う</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isViewWizard }}" hint-placeholder-val="{{ false }}">
+        <div style="{{ wizardOverlayStyle }}">
+          <div onClick="{{ onWizardCancel }}" style="position:absolute;top:24px;left:32px;font-size:13px;color:#5f6368;cursor:pointer;">← キャンセルして一覧に戻る</div>
+          <div style="background:#ffffff;border:1px solid #dadce0;border-radius:12px;padding:28px 40px 40px;width:100%;max-width:1400px;box-sizing:border-box;">
+            <div style="display:flex;align-items:flex-start;margin-bottom:20px;">
+              <sc-for list="{{ wizardSteps }}" as="st" hint-placeholder-count="5">
+                <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
+                  <div style="width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;background:{{ st.circleBg }};color:{{ st.circleColor }};">{{ st.num }}</div>
+                  <div style="font-size:12px;margin-top:6px;text-align:center;color:{{ st.labelColor }};">{{ st.label }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="max-width:920px;margin:0 auto;width:100%;font-size:15px;">
+
+            <sc-if value="{{ isStep0 }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:20px;">
+                <div>
+                  <label style="font-size:13px;font-weight:600;color:#202124;display:block;margin-bottom:6px;">アプリの名前</label>
+                  <input value="{{ wizardName }}" onChange="{{ onNameChange }}" placeholder="例：my-first-app" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #dadce0;border-radius:6px;font-size:14px;" />
+                </div>
+                <div>
+                  <label style="font-size:13px;font-weight:600;color:#202124;display:block;margin-bottom:10px;">ビルダー</label>
+                  <div style="display:flex;flex-direction:column;gap:10px;">
+                    <div onClick="{{ pickBuilderRailpack }}" style="{{ builderRailpackStyle }}">
+                      <div style="{{ builderRailpackRadio }}"></div>
+                      <div>
+                        <div style="font-size:14px;font-weight:600;color:#202124;">Railpack</div>
+                        <div style="font-size:12px;color:#5f6368;margin-top:2px;">言語を自動検出してビルドします（おすすめ）</div>
+                      </div>
+                    </div>
+                    <div onClick="{{ pickBuilderDockerfile }}" style="{{ builderDockerfileStyle }}">
+                      <div style="{{ builderDockerfileRadio }}"></div>
+                      <div>
+                        <div style="font-size:14px;font-weight:600;color:#202124;">Dockerfile</div>
+                        <div style="font-size:12px;color:#5f6368;margin-top:2px;">アプリに含まれるDockerfileの内容でビルドします</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label style="font-size:13px;font-weight:600;color:#202124;display:block;margin-bottom:6px;">ビルドディレクトリ</label>
+                  <input list="build-dir-options" value="{{ buildDirectory }}" onChange="{{ onBuildDirectoryChange }}" placeholder="./" style="width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #dadce0;border-radius:6px;font-size:16px;font-family:ui-monospace,monospace;" />
+                  <datalist id="build-dir-options">
+                    <sc-for list="{{ buildDirOptions }}" as="opt" hint-placeholder-count="4">
+                      <option value="{{ opt }}"></option>
+                    </sc-for>
+                  </datalist>
+                  <div style="font-size:12px;color:#5f6368;margin-top:6px;">アプリのコードがあるフォルダです</div>
+                </div>
+                <div>
+                  <div style="display:flex;align-items:center;justify-content:space-between;">
+                    <div>
+                      <div style="font-size:14px;font-weight:600;color:#202124;">アプリをインターネットに公開する</div>
+                      <div style="font-size:12px;color:#5f6368;margin-top:2px;">オンにすると、他の人もアプリを開けるようになります</div>
+                    </div>
+                    <div onClick="{{ onPortToggle }}" style="{{ portTrackStyle }}"><div style="{{ portKnobStyle }}"></div></div>
+                  </div>
+                  <sc-if value="{{ portEnabled }}" hint-placeholder-val="{{ true }}">
+                    <div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+                      <div>
+                        <label style="font-size:13px;font-weight:600;color:#202124;display:block;margin-bottom:6px;">ポート番号</label>
+                        <input value="{{ port }}" onChange="{{ onPortChange }}" style="width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #dadce0;border-radius:6px;font-size:16px;font-family:ui-monospace,monospace;" />
+                        <div style="font-size:12px;color:#5f6368;margin-top:6px;">アプリが待ち受けている番号です</div>
+                      </div>
+                      <div>
+                        <label style="font-size:13px;font-weight:600;color:#202124;display:block;margin-bottom:6px;">公開URLの名前（任意）</label>
+                        <input value="{{ ingressName }}" onChange="{{ onIngressNameChange }}" placeholder="{{ ingressNamePlaceholder }}" style="width:100%;box-sizing:border-box;padding:12px 14px;border:1px solid #dadce0;border-radius:6px;font-size:16px;font-family:ui-monospace,monospace;" />
+                        <div style="font-size:12px;color:#5f6368;margin-top:6px;">未入力の場合はアプリ名から自動で決まります</div>
+                      </div>
+                    </div>
+                  </sc-if>
+                </div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ isStep1 }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:12px;">
+                <div style="font-size:13px;color:#5f6368;">アプリの設定を外から渡せます（任意）</div>
+                <sc-for list="{{ envRows }}" as="row" hint-placeholder-count="1">
+                  <div style="display:flex;gap:8px;align-items:center;">
+                    <input value="{{ row.key }}" onChange="{{ row.onKeyChange }}" placeholder="キー（例：API_KEY）" style="flex:1;box-sizing:border-box;padding:8px 10px;border:1px solid #dadce0;border-radius:6px;font-size:13px;" />
+                    <input value="{{ row.value }}" onChange="{{ row.onValueChange }}" placeholder="値" style="flex:1;box-sizing:border-box;padding:8px 10px;border:1px solid #dadce0;border-radius:6px;font-size:13px;" />
+                    <sc-if value="{{ row.showRemove }}" hint-placeholder-val="{{ false }}">
+                      <div onClick="{{ row.onRemove }}" style="color:#5f6368;cursor:pointer;font-size:16px;padding:0 6px;">×</div>
+                    </sc-if>
+                  </div>
+                </sc-for>
+                <div onClick="{{ onAddEnvRow }}" style="color:#1a73e8;font-size:13px;font-weight:600;cursor:pointer;">+ 環境変数を追加</div>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ isStep2 }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:20px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;">
+                  <div>
+                    <div style="font-size:13px;font-weight:600;color:#202124;">データを保存する場所を使う</div>
+                    <div style="font-size:12px;color:#5f6368;margin-top:2px;">オンにすると、アプリを再起動してもデータが消えません</div>
+                  </div>
+                  <div onClick="{{ onVolumeToggle }}" style="{{ volumeTrackStyle }}"><div style="{{ volumeKnobStyle }}"></div></div>
+                </div>
+                <sc-if value="{{ volumeEnabled }}" hint-placeholder-val="{{ false }}">
+                  <div>
+                    <label style="font-size:13px;font-weight:600;color:#202124;display:block;margin-bottom:8px;">保存する容量（最大5GB）</label>
+                    <div style="display:flex;gap:8px;">
+                      <sc-for list="{{ volumeSizeOptions }}" as="opt" hint-placeholder-count="4">
+                        <div onClick="{{ opt.onSelect }}" style="{{ opt.style }}">{{ opt.label }}</div>
+                      </sc-for>
+                    </div>
+                  </div>
+                  <div>
+                    <label style="font-size:13px;font-weight:600;color:#202124;display:block;margin-bottom:6px;">保存先のフォルダ</label>
+                    <div style="display:flex;align-items:stretch;border:1px solid #dadce0;border-radius:8px;overflow:hidden;width:280px;">
+                      <div style="background:#f1f3f4;color:#5f6368;font-size:12px;font-weight:700;display:flex;align-items:center;padding:0 14px;font-family:ui-monospace,monospace;">PATH</div>
+                      <input value="{{ mountPath }}" onChange="{{ onMountPathChange }}" style="border:none;flex:1;padding:12px 14px;font-size:15px;font-family:ui-monospace,monospace;outline:none;min-width:0;box-sizing:border-box;" />
+                    </div>
+                    <div style="font-size:12px;color:#5f6368;margin-top:8px;">アプリがデータを書き込むフォルダです</div>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ isStep3 }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;">
+                <div style="font-size:13px;color:#5f6368;margin-bottom:12px;">この内容でデプロイします</div>
+                <sc-for list="{{ reviewList }}" as="item" hint-placeholder-count="5">
+                  <div style="display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid #f1f3f4;gap:12px;">
+                    <div style="font-size:13px;color:#5f6368;white-space:nowrap;">{{ item.label }}</div>
+                    <div style="font-size:13px;color:#202124;font-weight:500;text-align:right;">{{ item.value }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            </div>
+            <div style="display:flex;justify-content:space-between;margin-top:20px;flex-shrink:0;max-width:920px;margin-left:auto;margin-right:auto;width:100%;">
+              <sc-if value="{{ wizardBackVisible }}" hint-placeholder-val="{{ false }}">
+                <div onClick="{{ onWizardBack }}" style="background:#fff;color:#1a73e8;border:1px solid #dadce0;border-radius:6px;padding:10px 20px;font-size:14px;font-weight:500;cursor:pointer;">戻る</div>
+              </sc-if>
+              <div onClick="{{ onWizardNext }}" style="background:#1a73e8;color:#fff;border:none;border-radius:6px;padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer;margin-left:auto;">{{ wizardNextLabel }}</div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isViewProgress }}" hint-placeholder-val="{{ false }}">
+        <div style="{{ progressOverlayStyle }}">
+          <div style="background:#ffffff;border:1px solid #dadce0;border-radius:12px;padding:48px;width:100%;max-width:1040px;box-sizing:border-box;">
+            <sc-if value="{{ isBuilding }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;align-items:center;gap:14px;margin-bottom:28px;">
+                <div style="width:24px;height:24px;border:3px solid #e8eaed;border-top-color:#1a73e8;border-radius:50%;animation:spin 1s linear infinite;"></div>
+                <div style="font-size:20px;font-weight:700;color:#202124;">アプリをビルドしています…</div>
+              </div>
+              <div style="background:#202124;color:#e8eaed;border-radius:8px;padding:24px;font-family:ui-monospace,monospace;font-size:14px;line-height:2;height:420px;overflow-y:auto;">
+                <sc-for list="{{ buildLogsShown }}" as="line" hint-placeholder-count="3">
+                  <div>› {{ line }}</div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ isDeploying }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:20px;font-weight:700;color:#202124;margin-bottom:32px;">アプリを反映しています…</div>
+              <div style="display:flex;flex-direction:column;gap:24px;padding:12px 0 40px;">
+                <sc-for list="{{ deployChecklistShown }}" as="ck" hint-placeholder-count="3">
+                  <div style="display:flex;align-items:center;gap:16px;">
+                    <div style="width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;background:{{ ck.iconBg }};color:{{ ck.iconColor }};">{{ ck.mark }}</div>
+                    <div style="font-size:16px;color:#202124;">{{ ck.label }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-if>
+            <sc-if value="{{ isRunning }}" hint-placeholder-val="{{ false }}">
+              <div style="text-align:center;padding:12px 0;">
+                <div style="width:56px;height:56px;border-radius:50%;background:#e6f4ea;color:#188038;font-size:28px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;">✓</div>
+                <div style="font-size:18px;font-weight:700;color:#202124;margin-bottom:6px;">デプロイが完了しました！</div>
+                <div style="font-size:13px;color:#5f6368;margin-bottom:20px;">{{ runningName }} が使えるようになりました</div>
+                <a href="{{ runningUrl }}" target="_blank" rel="noopener" style="display:block;background:#f1f3f4;border-radius:6px;padding:12px;font-size:13px;margin-bottom:20px;word-break:break-all;">{{ runningUrl }}</a>
+                <div style="display:flex;gap:10px;justify-content:center;">
+                  <div onClick="{{ onGoToDetail }}" style="background:#fff;color:#1a73e8;border:1px solid #dadce0;border-radius:6px;padding:10px 20px;font-size:14px;font-weight:500;cursor:pointer;">詳細を見る</div>
+                  <div onClick="{{ onBackToList }}" style="background:#1a73e8;color:#fff;border:none;border-radius:6px;padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer;">一覧に戻る</div>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isViewDetail }}" hint-placeholder-val="{{ false }}">
+        <div>
+          <div onClick="{{ onBackToList }}" style="font-size:13px;color:#1a73e8;cursor:pointer;margin-bottom:16px;">← デプロイメント一覧に戻る</div>
+          <div style="margin-bottom:20px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <div style="font-size:22px;font-weight:700;color:#202124;">{{ detailName }}</div>
+              <div style="font-size:12px;font-weight:600;padding:3px 10px;border-radius:12px;background:{{ detailStatusBg }};color:{{ detailStatusColor }};">{{ detailStatusLabel }}</div>
+            </div>
+            <div style="font-size:13px;color:#5f6368;margin-top:4px;">{{ detailType }}</div>
+          </div>
+
+          <sc-if value="{{ pendingBannerVisible }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;justify-content:space-between;background:#fef7e0;border:1px solid #f9d67a;border-radius:8px;padding:14px 18px;margin-bottom:20px;gap:12px;">
+              <div style="font-size:13px;color:#7a5b00;">未反映の変更があります。適用すると数十秒でアプリに反映されます。</div>
+              <div style="display:flex;gap:8px;">
+                <div onClick="{{ onDiscardPending }}" style="background:#fff;color:#5f6368;border:1px solid #dadce0;border-radius:6px;padding:8px 16px;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap;">取り消す</div>
+                <div onClick="{{ onApplyPending }}" style="background:#1a73e8;color:#fff;border:none;border-radius:6px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">適用する</div>
+              </div>
+            </div>
+          </sc-if>
+
+          <div style="display:flex;gap:6px;margin-bottom:24px;border-bottom:1px solid #dadce0;">
+            <sc-for list="{{ tabsList }}" as="tab" hint-placeholder-count="5">
+              <div onClick="{{ tab.onClick }}" style="{{ tab.style }}">{{ tab.label }}</div>
+            </sc-for>
+          </div>
+
+          <sc-if value="{{ isOverviewActive }}" hint-placeholder-val="{{ true }}">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;">
+              <sc-for list="{{ overviewRows }}" as="row" hint-placeholder-count="5">
+                <div style="background:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:16px;">
+                  <div style="font-size:12px;color:#5f6368;margin-bottom:6px;">{{ row.label }}</div>
+                  <div style="font-size:14px;color:#202124;font-weight:600;word-break:break-all;">{{ row.value }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isLogsActive }}" hint-placeholder-val="{{ false }}">
+            <div>
+              <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+                <div onClick="{{ onAddLogLine }}" style="background:#fff;color:#1a73e8;border:1px solid #dadce0;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:500;cursor:pointer;">更新</div>
+              </div>
+              <div style="background:#202124;color:#e8eaed;border-radius:8px;padding:16px;font-family:ui-monospace,monospace;font-size:12.5px;line-height:1.8;height:280px;overflow-y:auto;">
+                <sc-for list="{{ detailLogs }}" as="line" hint-placeholder-count="4">
+                  <div>{{ line }}</div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isMetricsActive }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:24px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                <div style="background:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:16px;">
+                  <div style="font-size:12px;color:#5f6368;margin-bottom:8px;">CPU使用率</div>
+                  <div style="height:8px;background:#e8eaed;border-radius:4px;overflow:hidden;margin-bottom:6px;"><div style="height:100%;background:#1a73e8;border-radius:4px;width:{{ cpuBarWidth }};"></div></div>
+                  <div style="font-size:13px;color:#202124;font-weight:600;">{{ cpuPercent }}%</div>
+                </div>
+                <div style="background:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:16px;">
+                  <div style="font-size:12px;color:#5f6368;margin-bottom:8px;">メモリ使用率</div>
+                  <div style="height:8px;background:#e8eaed;border-radius:4px;overflow:hidden;margin-bottom:6px;"><div style="height:100%;background:#188038;border-radius:4px;width:{{ memBarWidth }};"></div></div>
+                  <div style="font-size:13px;color:#202124;font-weight:600;">{{ memPercent }}%</div>
+                </div>
+              </div>
+              <div style="background:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:16px;">
+                <div style="font-size:12px;color:#5f6368;margin-bottom:12px;">過去1時間のCPU使用率</div>
+                <div style="display:flex;align-items:flex-end;gap:6px;height:100px;">
+                  <sc-for list="{{ historyBars }}" as="bar" hint-placeholder-count="12">
+                    <div style="width:100%;background:#1a73e8;border-radius:2px 2px 0 0;height:{{ bar.height }};"></div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isSettingsActive }}" hint-placeholder-val="{{ false }}">
+            <div style="background:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:24px;max-width:560px;display:flex;flex-direction:column;gap:24px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div style="font-size:13px;font-weight:600;color:#202124;">アプリをインターネットに公開する</div>
+                <div onClick="{{ onSettingsPortToggle }}" style="{{ settingsPortTrackStyle }}"><div style="{{ settingsPortKnobStyle }}"></div></div>
+              </div>
+              <sc-if value="{{ settingsPortEnabled }}" hint-placeholder-val="{{ false }}">
+                <div>
+                  <label style="font-size:13px;font-weight:600;color:#202124;display:block;margin-bottom:6px;">ポート番号</label>
+                  <input value="{{ settingsPort }}" onChange="{{ onSettingsPortChange }}" style="width:160px;box-sizing:border-box;padding:10px 12px;border:1px solid #dadce0;border-radius:6px;font-size:14px;" />
+                </div>
+              </sc-if>
+              <div>
+                <label style="font-size:13px;font-weight:600;color:#202124;display:block;margin-bottom:8px;">環境変数</label>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                  <sc-for list="{{ settingsEnvRows }}" as="row" hint-placeholder-count="1">
+                    <div style="display:flex;gap:8px;align-items:center;">
+                      <input value="{{ row.key }}" onChange="{{ row.onKeyChange }}" placeholder="キー" style="flex:1;box-sizing:border-box;padding:8px 10px;border:1px solid #dadce0;border-radius:6px;font-size:13px;" />
+                      <input value="{{ row.value }}" onChange="{{ row.onValueChange }}" placeholder="値" style="flex:1;box-sizing:border-box;padding:8px 10px;border:1px solid #dadce0;border-radius:6px;font-size:13px;" />
+                      <sc-if value="{{ row.showRemove }}" hint-placeholder-val="{{ false }}">
+                        <div onClick="{{ row.onRemove }}" style="color:#5f6368;cursor:pointer;font-size:16px;padding:0 6px;">×</div>
+                      </sc-if>
+                    </div>
+                  </sc-for>
+                  <div onClick="{{ onAddSettingsEnvRow }}" style="color:#1a73e8;font-size:13px;font-weight:600;cursor:pointer;">+ 環境変数を追加</div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div style="font-size:13px;font-weight:600;color:#202124;">データを保存する場所を使う</div>
+                <div onClick="{{ onSettingsVolumeToggle }}" style="{{ settingsVolumeTrackStyle }}"><div style="{{ settingsVolumeKnobStyle }}"></div></div>
+              </div>
+        <sc-if value="{{ settingsVolumeEnabled }}" hint-placeholder-val="{{ false }}">
+                <div style="font-size:12px;color:#5f6368;margin-bottom:8px;">保存する容量（最大5GB）</div>
+                <div style="display:flex;gap:8px;">
+                  <sc-for list="{{ settingsVolumeSizeOptions }}" as="opt" hint-placeholder-count="4">
+                    <div onClick="{{ opt.onSelect }}" style="{{ opt.style }}">{{ opt.label }}</div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <div onClick="{{ onSaveSettings }}" style="background:#1a73e8;color:#fff;border:none;border-radius:6px;padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer;text-align:center;">変更を保存</div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isWebhookActive }}" hint-placeholder-val="{{ false }}">
+            <div style="background:#ffffff;border:1px solid #dadce0;border-radius:8px;padding:24px;max-width:560px;display:flex;flex-direction:column;gap:16px;">
+              <div style="font-size:13px;color:#5f6368;">GitHubなどからビルドやデプロイを自動でトリガーするための鍵です</div>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <div style="flex:1;background:#f1f3f4;border-radius:6px;padding:10px 12px;font-family:ui-monospace,monospace;font-size:13px;color:#202124;word-break:break-all;">{{ secretDisplay }}</div>
+                <div onClick="{{ onToggleSecret }}" style="background:#fff;color:#1a73e8;border:1px solid #dadce0;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap;">{{ toggleSecretLabel }}</div>
+              </div>
+              <div onClick="{{ onRegenerateSecret }}" style="color:#1a73e8;font-size:13px;font-weight:600;cursor:pointer;">鍵を再発行する</div>
+              <div>
+                <div style="font-size:12px;color:#5f6368;margin-bottom:6px;">呼び出し例</div>
+                <div style="background:#202124;color:#e8eaed;border-radius:6px;padding:14px;font-family:ui-monospace,monospace;font-size:12px;line-height:1.7;white-space:pre-wrap;word-break:break-all;">{{ curlExample }}</div>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    view: 'landing',
+    dragActive: false,
+    projects: [
+      {id:'p1', name:'卒業研究サイト', deployments:[
+        {id:'d1', name:'web', type:'archive', status:'running', appStatus:'running', port:3000, url:'https://web-8f3ac1.launchs.org', hasPending:false},
+        {id:'d2', name:'api-server', type:'railpack', status:'pending', appStatus:'pending', port:8080, url:null, hasPending:true}
+      ]},
+      {id:'p2', name:'サークル管理アプリ', deployments:[
+        {id:'d3', name:'app', type:'image_url', status:'running', appStatus:'running', port:80, url:'https://app-2b91cd.launchs.org', hasPending:false}
+      ]}
+    ],
+    selectedProjectId: 'p1',
+    selectedDeploymentId: null,
+    activeTab: 'overview',
+    wizard: null,
+    progress: null,
+    showSecret: false,
+    secretVersions: {},
+    detailSettings: {},
+    logsExtra: {}
+  };
+
+  fileInputRef = React.createRef();
+  buildLogLines = ['ソースを取得しています…','言語・構成を検出しています…','依存パッケージをインストールしています…','アプリをビルドしています…','コンテナイメージを作成しています…','ビルドが完了しました'];
+  deployChecklistLabels = ['コンテナを起動しています','ポートを開いています','起動状態を確認しています'];
+
+  statusMeta(status) {
+    const map = {
+      running: {label:'稼働中', color:'#188038', bg:'#e6f4ea'},
+      pending: {label:'準備中', color:'#f29900', bg:'#fef7e0'},
+      building: {label:'ビルド中', color:'#1a73e8', bg:'#e8f0fe'},
+      failed: {label:'エラー', color:'#d93025', bg:'#fce8e6'},
+      deleting: {label:'削除中', color:'#5f6368', bg:'#f1f3f4'},
+      not_init: {label:'未起動', color:'#5f6368', bg:'#f1f3f4'}
+    };
+    return map[status] || map.pending;
+  }
+  appStatusMeta(s) {
+    const map = {
+      pending:{label:'準備中',color:'#f29900',bg:'#fef7e0'},
+      building:{label:'ビルド中',color:'#1a73e8',bg:'#e8f0fe'},
+      deploying:{label:'反映中',color:'#1a73e8',bg:'#e8f0fe'},
+      running:{label:'稼働中',color:'#188038',bg:'#e6f4ea'},
+      error:{label:'エラー',color:'#d93025',bg:'#fce8e6'}
+    };
+    return map[s] || map.pending;
+  }
+  typeLabel(type) {
+    const map = {archive:'フォルダ', railpack:'GitHubリポジトリ', image_url:'Dockerイメージ'};
+    return map[type] || type;
+  }
+  nextId(prefix) {
+    this._counter = (this._counter||0) + 1;
+    return prefix + (1000 + this._counter);
+  }
+  pillStyle(active) {
+    return 'display:flex;align-items:center;padding:8px 12px;border-radius:20px;cursor:pointer;font-size:13px;font-weight:500;margin-bottom:2px;' + (active ? 'background:#e8f0fe;color:#1a73e8;' : 'color:#202124;');
+  }
+  switchStyle(on, color) {
+    return 'width:40px;height:22px;border-radius:11px;position:relative;cursor:pointer;transition:background .2s;background:' + (on ? color : '#dadce0') + ';';
+  }
+  knobStyle(on) {
+    return 'width:18px;height:18px;border-radius:50%;background:#ffffff;position:absolute;top:2px;transition:left .2s;box-shadow:0 1px 2px rgba(0,0,0,.3);left:' + (on ? '20px' : '2px') + ';';
+  }
+  rowOptionStyle(selected) {
+    return 'display:flex;align-items:center;gap:14px;padding:16px 18px;border-radius:8px;cursor:pointer;width:100%;box-sizing:border-box;border:2px solid ' + (selected?'#1a73e8':'#dadce0') + ';background:' + (selected?'#e8f0fe':'#ffffff') + ';';
+  }
+  radioStyle(selected) {
+    return 'width:18px;height:18px;border-radius:50%;flex-shrink:0;border:2px solid ' + (selected?'#1a73e8':'#dadce0') + ';background:#fff;box-shadow:' + (selected?'inset 0 0 0 4px #1a73e8':'none') + ';';
+  }
+  srcCardStyle(selected) {
+    return 'flex:1;padding:16px 10px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;text-align:center;border:2px solid ' + (selected?'#1a73e8':'#dadce0') + ';background:' + (selected?'#e8f0fe':'#ffffff') + ';color:' + (selected?'#1a73e8':'#202124') + ';';
+  }
+  sizeOptStyle(selected) {
+    return 'padding:8px 16px;border-radius:6px;cursor:pointer;font-weight:500;font-size:13px;border:2px solid ' + (selected?'#1a73e8':'#dadce0') + ';background:' + (selected?'#e8f0fe':'#fff') + ';color:' + (selected?'#1a73e8':'#202124') + ';';
+  }
+
+  selectProject = (id) => this.setState({selectedProjectId:id, view:'deployments', selectedDeploymentId:null});
+  addProject = () => {
+    const id = this.nextId('p');
+    this.setState(s => ({projects:[...s.projects, {id, name:'新しいプロジェクト', deployments:[]}], selectedProjectId:id, view:'deployments'}));
+  };
+  setView = (v) => this.setState({view:v});
+  onLandingClick = () => { if (this.fileInputRef.current) this.fileInputRef.current.click(); };
+  onFolderSelected = (e) => {
+    const files = e.target.files;
+    let fname = 'my-app';
+    const dirs = ['./'];
+    if (files && files.length) {
+      if (files[0].webkitRelativePath) fname = files[0].webkitRelativePath.split('/')[0];
+      for (let i=0; i<files.length; i++) {
+        const parts = (files[i].webkitRelativePath||'').split('/');
+        if (parts.length > 2) {
+          const d = './' + parts[1];
+          if (!dirs.includes(d)) dirs.push(d);
+        }
+      }
+    }
+    e.target.value = '';
+    this.setState({view:'wizard', wizard:this.defaultWizard({sourceType:'archive', fileName:fname, buildDirOptions:dirs})});
+  };
+  onLandingDragOver = (e) => { e.preventDefault(); if (!this.state.dragActive) this.setState({dragActive:true}); };
+  onLandingDragLeave = () => this.setState({dragActive:false});
+  onLandingDrop = (e) => {
+    e.preventDefault();
+    let fname = 'my-app';
+    const dirs = ['./'];
+    try {
+      const files = e.dataTransfer && e.dataTransfer.files;
+      if (files && files.length) {
+        if (files[0].webkitRelativePath) {
+          fname = files[0].webkitRelativePath.split('/')[0];
+          for (let i=0; i<files.length; i++) {
+            const parts = (files[i].webkitRelativePath||'').split('/');
+            if (parts.length > 2) { const d = './' + parts[1]; if (!dirs.includes(d)) dirs.push(d); }
+          }
+        } else {
+          fname = files[0].name.replace(/\.(zip|tar\.gz|tgz)$/i,'');
+        }
+      }
+    } catch (err) {}
+    this.setState({dragActive:false, view:'wizard', wizard:this.defaultWizard({sourceType:'archive', fileName:fname, buildDirOptions:dirs})});
+  };
+  onGoDashboardFromLanding = (e) => { e.stopPropagation(); this.setState({view:'deployments'}); };
+  onWizardCancel = () => this.setState({view:'deployments', wizard:null});
+
+  defaultWizard(overrides) {
+    return Object.assign({
+      step:0, name:'', sourceType:'archive', fileName:null, repoUrl:'', imageUrl:'',
+      portEnabled:true, port:3000, ingressName:'',
+      builder:'railpack', buildDirectory:'./', buildDirOptions:['./'],
+      envRows:[{key:'',value:''}],
+      volumeEnabled:false, volumeSize:1, mountPath:'/data'
+    }, overrides||{});
+  }
+  openWizard = () => this.setState({view:'wizard', wizard:this.defaultWizard({fileName:'my-app'})});
+  openWizardFromTemplate = (tpl) => this.setState({view:'wizard', wizard:this.defaultWizard({name:tpl.prefillName, sourceType:tpl.sourceType, fileName:tpl.prefillName})});
+  updWizard(patch) { this.setState(s => ({wizard: Object.assign({}, s.wizard, patch)})); }
+
+  onNameChange = (e) => this.updWizard({name:e.target.value});
+  pickSource = (t) => this.updWizard({sourceType:t});
+  pickArchive = () => this.pickSource('archive');
+  pickGithub = () => this.pickSource('railpack');
+  pickImage = () => this.pickSource('image_url');
+  onFileZoneClick = () => this.updWizard({fileName:'my-app'});
+  onRepoChange = (e) => this.updWizard({repoUrl:e.target.value});
+  onImageChange = (e) => this.updWizard({imageUrl:e.target.value});
+  onPortToggle = () => this.updWizard({portEnabled: !this.state.wizard.portEnabled});
+  onPortChange = (e) => this.updWizard({port:e.target.value});
+  onIngressNameChange = (e) => this.updWizard({ingressName:e.target.value});
+  pickBuilderRailpack = () => this.updWizard({builder:'railpack'});
+  pickBuilderDockerfile = () => this.updWizard({builder:'dockerfile'});
+  onBuildDirectoryChange = (e) => this.updWizard({buildDirectory:e.target.value});
+  onAddEnvRow = () => this.updWizard({envRows:[...this.state.wizard.envRows, {key:'',value:''}]});
+  updateEnvRow(i, field, value) {
+    const rows = this.state.wizard.envRows.slice();
+    rows[i] = Object.assign({}, rows[i], {[field]:value});
+    this.updWizard({envRows:rows});
+  }
+  removeEnvRow(i) {
+    const rows = this.state.wizard.envRows.slice();
+    rows.splice(i,1);
+    this.updWizard({envRows: rows.length?rows:[{key:'',value:''}]});
+  }
+  onVolumeToggle = () => this.updWizard({volumeEnabled: !this.state.wizard.volumeEnabled});
+  selectVolumeSize(n) { this.updWizard({volumeSize:n}); }
+  onMountPathChange = (e) => this.updWizard({mountPath:e.target.value});
+  wizardBack = () => { if (this.state.wizard.step>0) this.updWizard({step:this.state.wizard.step-1}); };
+  wizardNext = () => {
+    const w = this.state.wizard;
+    if (w.step < 3) { this.updWizard({step:w.step+1}); return; }
+    this.startDeploy();
+  };
+
+  startDeploy() {
+    const w = this.state.wizard;
+    const id = this.nextId('d');
+    const projectId = this.state.selectedProjectId;
+    const slug = (w.name||'app').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || 'app';
+    const draft = {
+      id, name: w.name || 'my-app', type: w.sourceType,
+      port: w.portEnabled ? (Number(w.port)||3000) : null,
+      url: 'https://' + slug + '-' + id.slice(-4) + '.launchs.org',
+      status:'building', appStatus:'building', hasPending:false
+    };
+    clearInterval(this._timer);
+    this.setState({view:'progress', progress:{phase:'building', logIndex:0, checkIndex:0, draft, projectId}});
+    this._timer = setInterval(() => {
+      this.setState(s => {
+        if (!s.progress) return s;
+        if (s.progress.phase==='building') {
+          const next = s.progress.logIndex+1;
+          if (next >= this.buildLogLines.length) return {progress: Object.assign({}, s.progress, {phase:'deploying'})};
+          return {progress: Object.assign({}, s.progress, {logIndex:next})};
+        }
+        if (s.progress.phase==='deploying') {
+          const next = s.progress.checkIndex+1;
+          if (next >= this.deployChecklistLabels.length) {
+            clearInterval(this._timer);
+            const finished = Object.assign({}, s.progress.draft, {status:'running', appStatus:'running'});
+            const newProjects = s.projects.map(p => p.id===s.progress.projectId ? Object.assign({}, p, {deployments:[...p.deployments, finished]}) : p);
+            return {progress: Object.assign({}, s.progress, {phase:'running', checkIndex:next}), projects:newProjects, selectedDeploymentId: finished.id};
+          }
+          return {progress: Object.assign({}, s.progress, {checkIndex:next})};
+        }
+        return s;
+      });
+    }, 700);
+  }
+
+  goToDetailFromProgress = () => this.setState({view:'deploymentDetail', activeTab:'overview'});
+  onBackToList = () => { clearInterval(this._timer); this.setState({view:'deployments', selectedDeploymentId:null, progress:null}); };
+
+  openDeploymentDetail(dep) {
+    this.setState(s => ({
+      view:'deploymentDetail', selectedDeploymentId:dep.id, activeTab:'overview',
+      detailSettings: Object.assign({}, s.detailSettings, {[dep.id]: {portEnabled: dep.port!=null, port: dep.port||3000, envRows:[{key:'API_KEY',value:'••••••••'}], volumeEnabled:false, volumeSize:1, mountPath:'/data'}})
+    }));
+  }
+  setTab = (t) => this.setState({activeTab:t});
+  updDep(depId, patch) {
+    this.setState(s => ({projects: s.projects.map(p => Object.assign({}, p, {deployments: p.deployments.map(d => d.id===depId ? Object.assign({}, d, patch) : d)}))}));
+  }
+  updDetailSettings(depId, patch) {
+    this.setState(s => ({detailSettings: Object.assign({}, s.detailSettings, {[depId]: Object.assign({}, s.detailSettings[depId], patch)})}));
+  }
+  toggleSecret = () => this.setState(s => ({showSecret: !s.showSecret}));
+  addLogLine(depId) {
+    this.setState(s => ({logsExtra: Object.assign({}, s.logsExtra, {[depId]: [...(s.logsExtra[depId]||[]), '[INFO] ヘルスチェック OK (' + new Date().toLocaleTimeString('ja-JP') + ')']})}));
+  }
+
+  componentWillUnmount() { clearInterval(this._timer); }
+
+  renderVals() {
+    const s = this.state;
+    const proj = s.projects.find(p => p.id===s.selectedProjectId) || s.projects[0];
+    const dep = proj ? proj.deployments.find(d => d.id===s.selectedDeploymentId) : null;
+    const w = s.wizard || this.defaultWizard();
+    const pr = s.progress;
+
+    const projectsNav = s.projects.map(p => {
+      const active = p.id===s.selectedProjectId;
+      return {id:p.id, name:p.name, onClick:() => this.selectProject(p.id),
+        itemStyle: this.pillStyle(active), dotStyle: 'width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-right:10px;background:' + (active?'#1a73e8':'#dadce0') + ';'};
+    });
+
+    const isNavDeploymentsActive = s.view !== 'templates';
+    const quotaMax = 5;
+    const quotaUsed = proj ? proj.deployments.length : 0;
+
+    const deploymentsForList = proj ? proj.deployments.map(d => {
+      const sm = this.statusMeta(d.status);
+      return {
+        id:d.id, name:d.name, typeLabel:this.typeLabel(d.type),
+        statusLabel:sm.label, statusColor:sm.color, statusBg:sm.bg,
+        hasPending:d.hasPending, hasUrl: !!d.url, url:d.url,
+        onClick: () => this.openDeploymentDetail(d),
+        onOpenUrl: (e) => e.stopPropagation()
+      };
+    }) : [];
+
+    const templates = [
+      {id:'t1', name:'静的サイト', desc:'HTML/CSS/JSで作ったページをそのまま公開', icon:'DIR', iconBg:'#1a73e8', sourceType:'archive', prefillName:'static-site'},
+      {id:'t2', name:'Node.js Webアプリ', desc:'Node.js製のアプリをGitHubリポジトリから', icon:'JS', iconBg:'#188038', sourceType:'railpack', prefillName:'node-app'},
+      {id:'t3', name:'Python Webアプリ', desc:'Python(Flask/Django)のアプリをGitHubリポジトリから', icon:'PY', iconBg:'#f29900', sourceType:'railpack', prefillName:'python-app'},
+      {id:'t4', name:'既存のDockerイメージ', desc:'公開されているDockerイメージをそのまま起動', icon:'IMG', iconBg:'#5f6368', sourceType:'image_url', prefillName:'my-image-app'}
+    ];
+    const templateCards = templates.map(t => Object.assign({}, t, {onUse: () => this.openWizardFromTemplate(t)}));
+
+    const stepLabels = ['ビルドとポート','環境変数','データの保存','確認'];
+    const wizardSteps = stepLabels.map((label,i) => {
+      const active = i===w.step, done = i<w.step;
+      return {label, num:String(i+1),
+        circleBg: (active||done)?'#1a73e8':'#e8eaed', circleColor: (active||done)?'#ffffff':'#5f6368',
+        labelColor: active?'#1a73e8':(done?'#202124':'#5f6368')};
+    });
+    const sourceValueLabel = w.sourceType==='archive' ? (w.fileName||'未選択') : w.sourceType==='railpack' ? (w.repoUrl||'未入力') : (w.imageUrl||'未入力');
+    const reviewList = [
+      {label:'アプリの名前', value: w.name||'(未入力)'},
+      {label:'ソース', value: this.typeLabel(w.sourceType) + '：' + sourceValueLabel},
+      {label:'ビルダー', value: (w.builder==='dockerfile'?'Dockerfile':'Railpack（自動ビルド）') + '／ディレクトリ：' + (w.buildDirectory||'.')},
+      {label:'公開', value: w.portEnabled ? ('ポート ' + w.port + ' で公開／URL名：' + (w.ingressName || '(アプリ名から自動生成)')) : '公開しない'},
+      {label:'環境変数', value: w.envRows.filter(r=>r.key).length + ' 件'},
+      {label:'保存領域', value: w.volumeEnabled ? (w.volumeSize + 'GB を ' + w.mountPath + ' に保存') : '使用しない'}
+    ];
+    const envRows = w.envRows.map((row,i) => ({
+      key:row.key, value:row.value,
+      onKeyChange:(e)=>this.updateEnvRow(i,'key',e.target.value),
+      onValueChange:(e)=>this.updateEnvRow(i,'value',e.target.value),
+      onRemove:()=>this.removeEnvRow(i),
+      showRemove: w.envRows.length>1
+    }));
+    const volumeSizeOptions = [1,2,3,5].map(n => ({label:n+'GB', value:n, onSelect:()=>this.selectVolumeSize(n), style:this.sizeOptStyle(w.volumeSize===n)}));
+
+    const buildLogsShown = pr ? this.buildLogLines.slice(0, pr.logIndex) : [];
+    const deployChecklistShown = pr ? this.deployChecklistLabels.map((l,i) => {
+      const done = i < pr.checkIndex;
+      return {label:l, iconBg: done?'#188038':'#e8eaed', iconColor: done?'#ffffff':'#5f6368', mark: done?'✓':'…'};
+    }) : [];
+
+    const activeDep = dep || {id:'', name:'', type:'archive', status:'pending', appStatus:'pending', port:3000, url:null, hasPending:false};
+    const sm2 = this.statusMeta(activeDep.status);
+    const tabDefs = [{key:'overview',label:'概要'},{key:'logs',label:'ログ'},{key:'metrics',label:'メトリクス'},{key:'settings',label:'設定'},{key:'webhook',label:'Webhook'}];
+    const tabsList = tabDefs.map(t => {
+      const active = s.activeTab===t.key;
+      return {key:t.key, label:t.label, onClick:()=>this.setTab(t.key),
+        style:'padding:10px 16px;border-radius:6px 6px 0 0;cursor:pointer;font-weight:500;font-size:14px;margin-bottom:-1px;border-bottom:2px solid ' + (active?'#1a73e8':'transparent') + ';color:' + (active?'#1a73e8':'#5f6368') + ';'};
+    });
+
+    const ds = s.detailSettings[activeDep.id] || {portEnabled:activeDep.port!=null, port:activeDep.port||3000, envRows:[{key:'',value:''}], volumeEnabled:false, volumeSize:1, mountPath:'/data'};
+    const settingsEnvRows = ds.envRows.map((row,i) => ({
+      key:row.key, value:row.value,
+      onKeyChange:(e)=>{const rows=ds.envRows.slice();rows[i]=Object.assign({},rows[i],{key:e.target.value});this.updDetailSettings(activeDep.id,{envRows:rows});},
+      onValueChange:(e)=>{const rows=ds.envRows.slice();rows[i]=Object.assign({},rows[i],{value:e.target.value});this.updDetailSettings(activeDep.id,{envRows:rows});},
+      onRemove:()=>{const rows=ds.envRows.slice();rows.splice(i,1);this.updDetailSettings(activeDep.id,{envRows:rows.length?rows:[{key:'',value:''}]});},
+      showRemove: ds.envRows.length>1
+    }));
+    const settingsVolumeSizeOptions = [1,2,3,5].map(n => ({label:n+'GB', value:n, onSelect:()=>this.updDetailSettings(activeDep.id,{volumeSize:n}), style:this.sizeOptStyle(ds.volumeSize===n)}));
+
+    const baseLogs = ['[INFO] コンテナを起動しました', '[INFO] ポート ' + (activeDep.port||'-') + ' を開きました', '[INFO] ヘルスチェック OK'];
+    const detailLogs = baseLogs.concat(s.logsExtra[activeDep.id]||[]);
+
+    const cpuPercent = 20 + (activeDep.id.length*3)%40;
+    const memPercent = 30 + (activeDep.id.length*5)%50;
+    const historyBars = [40,55,48,62,58,70,65,72,68,75,80,78].map(v => ({height:(v*0.9)+'px'}));
+
+    const ver = s.secretVersions[activeDep.id]||0;
+    const secretFull = 'whsec_' + activeDep.id + '_' + (100000+ver*7);
+    const secretDisplay = s.showSecret ? secretFull : secretFull.slice(0,9) + '••••••••••';
+    const curlExample = 'curl -X POST https://api.example.com/webhooks/' + activeDep.id + '/build \\\n  -H "X-Webhook-Secret: ' + secretFull + '"';
+
+    let breadcrumb = proj ? proj.name : '';
+    if (s.view==='templates') breadcrumb += ' / テンプレート';
+    else if (s.view==='wizard') breadcrumb += ' / 新しいアプリを追加';
+    else if (s.view==='progress') breadcrumb += ' / デプロイ中';
+    else if (s.view==='deploymentDetail') breadcrumb += ' / ' + (activeDep.name||'');
+    else breadcrumb += ' / デプロイメント';
+
+    return {
+      projectsNav, onAddProject: this.addProject,
+      navDeploymentsStyle: this.pillStyle(isNavDeploymentsActive), navTemplatesStyle: this.pillStyle(!isNavDeploymentsActive),
+      goDeployments: () => this.setView('deployments'), goTemplates: () => this.setView('templates'),
+      breadcrumb, userInitial:'S',
+
+      isViewDeployments: s.view==='deployments', isViewTemplates: s.view==='templates', isViewWizard: s.view==='wizard',
+      isViewProgress: s.view==='progress', isViewDetail: s.view==='deploymentDetail',
+      isViewLanding: s.view==='landing',
+      landingStyle: 'width:100%;max-width:960px;height:min(56vh,560px);border-radius:20px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;box-sizing:border-box;transition:background .15s,border-color .15s;background:' + (s.dragActive?'#e8f0fe':'#f8f9fa') + ';border:3px dashed ' + (s.dragActive?'#1a73e8':'#dadce0') + ';',
+      onLandingClick:this.onLandingClick, onLandingDragOver:this.onLandingDragOver, onLandingDragLeave:this.onLandingDragLeave, onLandingDrop:this.onLandingDrop, onGoDashboardFromLanding:this.onGoDashboardFromLanding,
+      fileInputRef:this.fileInputRef, onFolderSelected:this.onFolderSelected,
+      wizardOverlayStyle:'position:fixed;inset:0;background:#f8f9fa;z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:72px 32px 32px;box-sizing:border-box;overflow-y:auto;',
+      progressOverlayStyle:'position:fixed;inset:0;background:#f8f9fa;z-index:50;display:flex;align-items:center;justify-content:center;padding:40px;box-sizing:border-box;overflow-y:auto;',
+      onWizardCancel:this.onWizardCancel,
+
+      quotaUsed, quotaMax, quotaBarWidth: Math.min(100, quotaUsed/quotaMax*100)+'%',
+      deploymentsForList, hasDeployments: deploymentsForList.length>0, noDeployments: deploymentsForList.length===0,
+      onAddDeployment: this.openWizard,
+
+      templateCards,
+
+      wizardSteps, isStep0:w.step===0, isStep1:w.step===1, isStep2:w.step===2, isStep3:w.step===3,
+      wizardName:w.name, onNameChange:this.onNameChange,
+      pickArchive:this.pickArchive, pickGithub:this.pickGithub, pickImage:this.pickImage,
+      srcArchiveStyle:this.srcCardStyle(w.sourceType==='archive'), srcGithubStyle:this.srcCardStyle(w.sourceType==='railpack'), srcImageStyle:this.srcCardStyle(w.sourceType==='image_url'),
+      isSrcArchive:w.sourceType==='archive', isSrcGithub:w.sourceType==='railpack', isSrcImage:w.sourceType==='image_url',
+      fileZoneText: w.fileName ? ('選択済み：'+w.fileName) : 'ここをクリックしてフォルダを選択（ドラッグ&ドロップも対応）',
+      onFileZoneClick:this.onFileZoneClick, repoUrl:w.repoUrl, onRepoChange:this.onRepoChange, imageUrl:w.imageUrl, onImageChange:this.onImageChange,
+      portTrackStyle:this.switchStyle(w.portEnabled,'#1a73e8'), portKnobStyle:this.knobStyle(w.portEnabled), onPortToggle:this.onPortToggle,
+      portEnabled:w.portEnabled, port:w.port, onPortChange:this.onPortChange,
+      ingressName:w.ingressName, onIngressNameChange:this.onIngressNameChange,
+      ingressNamePlaceholder: (w.name || 'my-app').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'') || 'my-app',
+      isBuilderRailpack: w.builder==='railpack', isBuilderDockerfile: w.builder==='dockerfile',
+      builderRailpackStyle: this.rowOptionStyle(w.builder==='railpack'), builderDockerfileStyle: this.rowOptionStyle(w.builder==='dockerfile'),
+      builderRailpackRadio: this.radioStyle(w.builder==='railpack'), builderDockerfileRadio: this.radioStyle(w.builder==='dockerfile'),
+      pickBuilderRailpack: this.pickBuilderRailpack, pickBuilderDockerfile: this.pickBuilderDockerfile,
+      buildDirectory: w.buildDirectory, onBuildDirectoryChange: this.onBuildDirectoryChange, buildDirOptions: w.buildDirOptions || ['./'],
+      envRows, onAddEnvRow:this.onAddEnvRow,
+      volumeTrackStyle:this.switchStyle(w.volumeEnabled,'#1a73e8'), volumeKnobStyle:this.knobStyle(w.volumeEnabled), onVolumeToggle:this.onVolumeToggle,
+      volumeEnabled:w.volumeEnabled, volumeSizeOptions, mountPath:w.mountPath, onMountPathChange:this.onMountPathChange,
+      reviewList,
+      wizardBackVisible: w.step>0, onWizardBack:this.wizardBack, onWizardNext:this.wizardNext,
+      wizardNextLabel: w.step===3 ? 'デプロイする' : '次へ',
+
+      isBuilding: !!pr && pr.phase==='building', isDeploying: !!pr && pr.phase==='deploying', isRunning: !!pr && pr.phase==='running',
+      buildLogsShown, deployChecklistShown,
+      runningUrl: pr && pr.draft ? pr.draft.url : '', runningName: pr && pr.draft ? pr.draft.name : '',
+      onGoToDetail:this.goToDetailFromProgress, onBackToList:this.onBackToList,
+
+      detailName:activeDep.name, detailType:this.typeLabel(activeDep.type),
+      detailStatusLabel:sm2.label, detailStatusColor:sm2.color, detailStatusBg:sm2.bg,
+      pendingBannerVisible:activeDep.hasPending,
+      onApplyPending: () => this.updDep(activeDep.id, {hasPending:false, status:'running', appStatus:'running'}),
+      onDiscardPending: () => this.updDep(activeDep.id, {hasPending:false}),
+      tabsList,
+      isOverviewActive: s.activeTab==='overview', isLogsActive: s.activeTab==='logs', isMetricsActive: s.activeTab==='metrics',
+      isSettingsActive: s.activeTab==='settings', isWebhookActive: s.activeTab==='webhook',
+      overviewRows: [
+        {label:'ステータス', value:sm2.label},
+        {label:'アプリの状態', value:this.appStatusMeta(activeDep.appStatus).label},
+        {label:'ソースの種類', value:this.typeLabel(activeDep.type)},
+        {label:'ポート', value: activeDep.port ? String(activeDep.port) : '公開しない'},
+        {label:'アプリのURL', value: activeDep.url || 'まだありません'}
+      ],
+      detailLogs, onAddLogLine: () => this.addLogLine(activeDep.id),
+      cpuPercent, cpuBarWidth:cpuPercent+'%', memPercent, memBarWidth:memPercent+'%', historyBars,
+      settingsPortTrackStyle:this.switchStyle(ds.portEnabled,'#1a73e8'), settingsPortKnobStyle:this.knobStyle(ds.portEnabled),
+      onSettingsPortToggle: () => this.updDetailSettings(activeDep.id,{portEnabled:!ds.portEnabled}),
+      settingsPortEnabled:ds.portEnabled, settingsPort:ds.port, onSettingsPortChange:(e)=>this.updDetailSettings(activeDep.id,{port:e.target.value}),
+      settingsEnvRows, onAddSettingsEnvRow: () => this.updDetailSettings(activeDep.id,{envRows:[...ds.envRows,{key:'',value:''}]}),
+      settingsVolumeTrackStyle:this.switchStyle(ds.volumeEnabled,'#1a73e8'), settingsVolumeKnobStyle:this.knobStyle(ds.volumeEnabled),
+      onSettingsVolumeToggle: () => this.updDetailSettings(activeDep.id,{volumeEnabled:!ds.volumeEnabled}),
+      settingsVolumeEnabled:ds.volumeEnabled, settingsVolumeSizeOptions,
+      onSaveSettings: () => this.updDep(activeDep.id, {hasPending:true, status:'pending'}),
+      secretDisplay, showSecret:s.showSecret, onToggleSecret:this.toggleSecret, toggleSecretLabel: s.showSecret?'隠す':'表示する',
+      curlExample, onRegenerateSecret: () => this.setState(prev => ({secretVersions: Object.assign({}, prev.secretVersions, {[activeDep.id]: (prev.secretVersions[activeDep.id]||0)+1})}))
+    };
+  }
+}
+
+</script>
+</body>
+</html>

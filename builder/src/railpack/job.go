@@ -274,13 +274,13 @@ func buildctlContainer(cfg BuildConfig, res corev1.ResourceRequirements) corev1.
 		insecureFlag = ",registry.insecure=true"
 	}
 
-	// ビルド＆プッシュコマンド。失敗時はキャッシュを利用して最大3回リトライする。
+	// ビルド＆プッシュコマンド。失敗時はキャッシュを利用して最大10回リトライする。
 	// 2回目以降はインラインキャッシュがヒットするためビルドはほぼスキップされ、
-	// プッシュのみ再実行される。リトライ間隔は指数バックオフ（10s, 30s）。
+	// プッシュのみ再実行される。リトライ間隔は固定5秒（Harbor側の一時的なレジストリエラー対策）。
 	buildArgs := fmt.Sprintf(
 		`
-MAX_RETRIES=3
-RETRY_DELAYS="10 30"
+MAX_RETRIES=10
+RETRY_DELAY=5
 attempt=0
 
 run_build() {
@@ -300,9 +300,9 @@ run_build() {
 run_build && exit 0
 attempt=1
 
-for delay in $RETRY_DELAYS; do
-  echo "[buildctl-retry] attempt $((attempt+1))/$MAX_RETRIES failed, retrying in ${delay}s..."
-  sleep "$delay"
+while [ "$attempt" -lt "$MAX_RETRIES" ]; do
+  echo "[buildctl-retry] attempt $((attempt+1))/$MAX_RETRIES failed, retrying in ${RETRY_DELAY}s..."
+  sleep "$RETRY_DELAY"
   attempt=$((attempt+1))
   run_build && exit 0
 done

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { ArrowLeft, X, GitBranch, GitCommit, Clock, CheckCircle2, XCircle, AlertCircle, Ban } from 'lucide-react'
 import { LogViewer } from '@/components/LogViewer'
 import { get, del } from '@/lib/api'
@@ -18,9 +18,13 @@ const BUILD_STATUS_META: Record<BuildStatus, { label: string; icon: React.ReactN
 
 const TERMINAL_STATUSES: BuildStatus[] = ['succeeded', 'failed', 'cancelled'] // 終了ステータスの定義
 
+const WIZARD_BUILD_ID_STORAGE_KEY = 'deploy-wizard-build-id' // DeployWizardPage.tsx と共有するsessionStorageキー
+
 export function BuildLogPage() {
   const { buildId } = useParams<{ buildId: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
+  const returnToWizard = Boolean((location.state as { returnToWizard?: boolean } | null)?.returnToWizard) // デプロイウィザードから遷移してきたかどうか
 
   const [buildData, setBuildData] = useState<Build | null>(null) // ビルド情報を管理する
   const [cancelling, setCancelling] = useState(false) // キャンセル中フラグ
@@ -60,13 +64,24 @@ export function BuildLogPage() {
     setCancelling(true)
     try {
       await del(`/builds/${buildId}`) // ビルドをキャンセルする
-      navigate(-1) // 前のページへ戻る
+      if (returnToWizard) {
+        sessionStorage.removeItem(WIZARD_BUILD_ID_STORAGE_KEY) // 永続化情報が残っているとこの画面に戻されてしまうため消す
+        navigate('/deploy')
+      } else {
+        navigate(-1) // 前のページへ戻る
+      }
     } catch (cancelError) {
       console.error(cancelError)
       toast.error(cancelError instanceof Error ? cancelError.message : 'キャンセルに失敗しました') // エラーをトーストで表示する
     } finally {
       setCancelling(false)
     }
+  }
+
+  // デプロイウィザードの最初の画面（フォルダドロップ）に戻る
+  const handleBackToWizardLanding = () => {
+    sessionStorage.removeItem(WIZARD_BUILD_ID_STORAGE_KEY)
+    navigate('/deploy')
   }
 
   const statusMeta = buildData ? BUILD_STATUS_META[buildData.status] : null // ステータスメタデータを取得する
@@ -79,7 +94,7 @@ export function BuildLogPage() {
       {/* ヘッダー */}
       <header className="border-b border-[#30363D] px-4 py-3 flex items-center gap-3 shrink-0" style={{ background: '#161B22' }}>
         <button
-          onClick={() => navigate(-1)}
+          onClick={returnToWizard ? handleBackToWizardLanding : () => navigate(-1)}
           className="p-1.5 rounded hover:bg-[#21262D] text-[#8B949E] hover:text-[#E6EDF3] transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -128,9 +143,9 @@ export function BuildLogPage() {
 
       {/* 完了/失敗バナー */}
       {isTerminal && statusMeta?.bannerBg && (
-        <div className={`flex items-center gap-2 px-4 py-2 border-b text-sm font-medium shrink-0 ${statusMeta.bannerBg}`}>
-          {statusMeta.icon}
-          <span>
+        <div className={`flex items-center justify-between gap-2 px-4 py-2 border-b text-sm font-medium shrink-0 ${statusMeta.bannerBg}`}>
+          <span className="flex items-center gap-2">
+            {statusMeta.icon}
             ビルドが{statusMeta.label}しました
             {buildData?.finished_at && (
               <span className="font-normal text-xs ml-2 opacity-70">
@@ -138,9 +153,26 @@ export function BuildLogPage() {
               </span>
             )}
           </span>
+          {returnToWizard && (
+            <button
+              onClick={handleBackToWizardLanding}
+              className="flex-shrink-0 bg-white/10 hover:bg-white/20 text-xs px-3 py-1.5 rounded-md transition-colors"
+            >
+              最初の画面に戻る
+            </button>
+          )}
         </div>
       )}
-
+      {!isTerminal && returnToWizard && (
+        <div className="flex items-center justify-end gap-2 px-4 py-2 border-b border-[#30363D] text-sm shrink-0" style={{ background: '#161B22' }}>
+          <button
+            onClick={handleBackToWizardLanding}
+            className="text-xs text-[#8B949E] hover:text-[#E6EDF3] px-3 py-1.5 rounded-md transition-colors"
+          >
+            最初の画面に戻る
+          </button>
+        </div>
+      )}
       {/* ビルドログ */}
       <div className="flex-1 p-4 overflow-hidden">
         <LogViewer

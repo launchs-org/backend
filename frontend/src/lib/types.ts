@@ -5,14 +5,14 @@ export type Project = {
   user_id: string
   name: string
   namespace: string
-  status: 'active' | 'deleting'
+  status: 'provisioning' | 'active' | 'deleting'
   created_at: string
   updated_at: string
 }
 
 // ── Deployment ────────────────────────────────────────────────
 
-export type DeploymentType = 'image_url' | 'dockerfile' | 'railpack'
+export type DeploymentType = 'image_url' | 'dockerfile' | 'railpack' | 'archive'
 
 export type DeploymentStatus = 'not_init' | 'pending' | 'running' | 'failed' | 'deleting'
 
@@ -73,6 +73,8 @@ export type Build = {
   author: string
   directory: string
   dockerfile_path: string
+  archive_file_name: string
+  archive_size_bytes: number
   build_log: string
   started_at: string | null
   finished_at: string | null
@@ -193,6 +195,12 @@ export type PodLogsResponse = {
 export type BuildLogsResponse = {
   logs: string
   last_timestamp: string | null
+}
+
+// ── Archive Upload ────────────────────────────────────────────
+
+export type UploadBuildArchiveResponse = {
+  upload_token: string
 }
 
 // ── Quota ─────────────────────────────────────────────────────
