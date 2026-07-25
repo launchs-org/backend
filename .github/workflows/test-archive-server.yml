@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+name: Test Archive Server
+
+on:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "archive-server/**"
+  pull_request:
+    branches:
+      - "**"
+    paths:
+      - "archive-server/**"
+
+jobs:
+  test:
+    name: archive-server テスト
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Go をセットアップ
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: archive-server/src/go.mod
+
+      - name: archive-server サービスのテストを実行
+        working-directory: archive-server/src
+        run: go test ./... -v -count=1

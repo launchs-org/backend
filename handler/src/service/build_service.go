@@ -81,7 +81,7 @@ type buildServiceImpl struct {
 	k8sClient            kubernetes.Interface                  // k8s クライアント（Harbor クライアント等に使用）
 	registryHost         string                                // ビルドジョブが使う Harbor ホスト名（スキームなし）
 	temporalClient       WorkflowStarter                      // Temporal クライアント（Workflow 起動用）
-	fileIOClient         *fileio.FileIOClient                 // 一時ファイル共有サービス(litterbox) アップロードクライアント
+	fileIOClient         fileio.Uploader                      // アーカイブアップロードクライアント（環境により litterbox / archive-server を切り替える）
 }
 
 // NewBuildService は BuildService の実装を返す
@@ -94,7 +94,7 @@ func NewBuildService(
 	k8sClient kubernetes.Interface,
 	registryHost string,
 	temporalClient WorkflowStarter,
-	fileIOClient *fileio.FileIOClient,
+	fileIOClient fileio.Uploader,
 ) BuildService {
 	return &buildServiceImpl{
 		deploymentRepo:       deploymentRepo,       // deployment リポジトリを注入する
@@ -105,7 +105,7 @@ func NewBuildService(
 		k8sClient:            k8sClient,            // k8s クライアントを注入する
 		registryHost:         registryHost,         // クラスタ内 DNS 名を注入する
 		temporalClient:       temporalClient,       // Temporal クライアントを注入する
-		fileIOClient:         fileIOClient,         // 一時ファイル共有サービス(litterbox) アップロードクライアントを注入する
+		fileIOClient:         fileIOClient,         // アーカイブアップロードクライアントを注入する
 	}
 }
 

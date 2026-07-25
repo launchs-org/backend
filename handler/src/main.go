@@ -118,7 +118,7 @@ func main() {
 
 	// build ハンドラーを DI 組み立てする
 	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)                                                                                                             // build ログチャンクリポジトリを生成する
-	fileIOClient := fileio.NewFileIOClient()                                                                                                                                               // file.io アップロードクライアントを生成する
+	fileIOClient := fileio.NewUploaderFromEnv()                                                                                                                                            // ARCHIVE_STORAGE_MODEに応じてアップロードクライアントを生成する
 	buildServiceImpl := service.NewBuildService(deploymentRepo, buildRepo, projectRepo, harborCredentialRepo, logChunkRepo, k8sClient, "harbor.main-harbor", temporalClient, fileIOClient) // build サービスを生成する（Workflow は builder Worker に委譲する）
 	buildHandler := handler.NewBuildHandler(buildServiceImpl)                                                                                                                              // build ハンドラーを生成する
 
