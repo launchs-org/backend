@@ -1,0 +1,225 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  creationTimestamp: "2026-07-25T11:30:36Z"
+  generation: 1
+  labels:
+    app: railpack
+    build-job-id: 92992f56-ae8d-41e4-9291-cdca59bfe6e6
+    launchs-managed: "true"
+    managed-by: launchs
+  name: railpack-92992f56-ae8d-41e4-9291-cdca59bfe6e6
+  namespace: buildkit
+  resourceVersion: "9654260"
+  uid: 7ba18aba-6b12-426b-96f1-7676acf463e2
+spec:
+  activeDeadlineSeconds: 600
+  backoffLimit: 6
+  completionMode: NonIndexed
+  completions: 1
+  manualSelector: false
+  parallelism: 1
+  podReplacementPolicy: TerminatingOrFailed
+  selector:
+    matchLabels:
+      batch.kubernetes.io/controller-uid: 7ba18aba-6b12-426b-96f1-7676acf463e2
+  suspend: false
+  template:
+    metadata:
+      labels:
+        batch.kubernetes.io/controller-uid: 7ba18aba-6b12-426b-96f1-7676acf463e2
+        batch.kubernetes.io/job-name: railpack-92992f56-ae8d-41e4-9291-cdca59bfe6e6
+        build-job-id: 92992f56-ae8d-41e4-9291-cdca59bfe6e6
+        controller-uid: 7ba18aba-6b12-426b-96f1-7676acf463e2
+        job-name: railpack-92992f56-ae8d-41e4-9291-cdca59bfe6e6
+        managed-by: launchs
+    spec:
+      containers:
+      - args:
+        - |2
+
+          MAX_RETRIES=10
+          RETRY_DELAY=5
+          attempt=0
+
+          run_build() {
+            buildctl-daemonless.sh build \
+              --local context=/workspace/repo/${BUILD_CONTEXT_SUBDIR} \
+              --local dockerfile=/workspace \
+              --frontend=gateway.v0 \
+              --opt source=ghcr.io/railwayapp/railpack-frontend \
+              --opt compression=zstd \
+              --opt push-parallelism=1 \
+              --opt compression-level=22 \
+              --output "type=image,name=harbor.main-harbor.svc.cluster.local/2b319152-2fc2-4092-99b5-bf518f719495/9618ed31-beff-4272-a267-ad8cc59a5020:92992f56-ae8d-41e4-9291-cdca59bfe6e6,push=true" \
+              --export-cache type=inline \
+              --import-cache type=registry,ref=harbor.main-harbor.svc.cluster.local/2b319152-2fc2-4092-99b5-bf518f719495/9618ed31-beff-4272-a267-ad8cc59a5020:92992f56-ae8d-41e4-9291-cdca59bfe6e6
+          }
+
+          run_build && exit 0
+          attempt=1
+
+          while [ "$attempt" -lt "$MAX_RETRIES" ]; do
+            echo "[buildctl-retry] attempt $((attempt+1))/$MAX_RETRIES failed, retrying in ${RETRY_DELAY}s..."
+            sleep "$RETRY_DELAY"
+            attempt=$((attempt+1))
+            run_build && exit 0
+          done
+
+          echo "[buildctl-retry] all $MAX_RETRIES attempts failed"
+          exit 1
+        command:
+        - sh
+        - -c
+        env:
+        - name: BUILD_CONTEXT_SUBDIR
+          value: ./
+        - name: BUILDKITD_FLAGS
+          value: --oci-worker-no-process-sandbox
+        - name: DOCKER_CONFIG
+          value: /workspace/.docker
+        - name: SSL_CERT_FILE
+          value: /workspace/certs/ca-bundle.crt
+        image: moby/buildkit:v0.27.0-rootless
+        imagePullPolicy: IfNotPresent
+        name: buildctl
+        resources:
+          limits:
+            cpu: "2"
+            ephemeral-storage: 1Gi
+            memory: 2Gi
+        securityContext:
+          appArmorProfile:
+            type: Unconfined
+          runAsGroup: 1000
+          runAsUser: 1000
+          seccompProfile:
+            type: Unconfined
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /run/buildkit
+          name: socket
+        - mountPath: /workspace
+          name: workspace
+        workingDir: /workspace
+      dnsPolicy: ClusterFirst
+      initContainers:
+      - args:
+        - |2
+
+          set -e
+
+          # ── 証明書 ──────────────────────────────────────────────────
+          mkdir -p /workspace/certs
+          # システム CA バンドルをベースにコピーし Harbor の証明書チェーンを追記する
+          cp /etc/ssl/certs/ca-certificates.crt /workspace/certs/ca-bundle.crt
+          openssl s_client \
+            -connect "harbor.main-harbor.svc.cluster.local:443" \
+            -showcerts \
+            </dev/null 2>/dev/null \
+          | awk '/-----BEGIN CERTIFICATE-----/{p=1} p{print} /-----END CERTIFICATE-----/{p=0}' \
+          >> /workspace/certs/ca-bundle.crt
+          echo "証明書を取得しました: $(grep -c 'BEGIN CERTIFICATE' /workspace/certs/ca-bundle.crt) 件"
+
+          # ── 認証情報 ─────────────────────────────────────────────────
+          mkdir -p /workspace/.docker
+          AUTH_B64=$(printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_PASSWORD}" | base64 | tr -d '\n')
+          printf '{"auths":{"harbor.main-harbor.svc.cluster.local":{"auth":"%s"}}}\n' "${AUTH_B64}" > /workspace/.docker/config.json
+          echo "config.json を生成しました"
+        command:
+        - sh
+        - -c
+        env:
+        - name: REGISTRY_USERNAME
+          value: robot$2b319152-2fc2-4092-99b5-bf518f719495+robot-2b319152-2fc2-4092-99b5-bf518f719495
+        - name: REGISTRY_PASSWORD
+          value: zogN2suRg7FCoWsLlX1pvkvY3lQkZfep
+        image: moby/buildkit:v0.27.0-rootless
+        imagePullPolicy: IfNotPresent
+        name: setup-env
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /workspace
+          name: workspace
+      - args:
+        - "apk add --no-cache curl tar unzip openssl xxd >/dev/null && \nset -e\n\nmkdir
+          -p /workspace/repo\n\n# file.io からダウンロードする（リンク失効・ダウンロード回数超過時は404で失敗する）\ncurl
+          -fsSL \"${ARCHIVE_URL}\" -o /tmp/archive.enc || { echo \"アーカイブのダウンロードに失敗しました（リンク失効の可能性があります）\";
+          exit 1; }\n\n# ダウンロード結果のSHA256ハッシュを検証する（改竄・破損検知）\nACTUAL_SHA256=$(sha256sum
+          /tmp/archive.enc | awk '{print $1}')\nif [ \"${ACTUAL_SHA256}\" != \"${ARCHIVE_SHA256_HEX}\"
+          ]; then\n  echo \"SHA256ハッシュが一致しません（期待値: ${ARCHIVE_SHA256_HEX}, 実際: ${ACTUAL_SHA256}）\"\n
+          \ exit 1\nfi\n\n# 先頭16byteをIVとして分離し、残りをciphertextとして復号する（iv || ciphertext
+          形式）\ntail -c +17 /tmp/archive.enc > /tmp/archive.ciphertext\nIV_HEX=$(head
+          -c 16 /tmp/archive.enc | xxd -p -c 16)\nopenssl enc -d -aes-256-cbc -K \"${ARCHIVE_ENC_KEY_HEX}\"
+          -iv \"${IV_HEX}\" -in /tmp/archive.ciphertext -out /tmp/archive.raw || {
+          echo \"復号に失敗しました\"; exit 1; }\n\n# マジックバイトでzip/tar.gzを判定して展開する\nif head
+          -c 2 /tmp/archive.raw | grep -q \"PK\"; then\n  unzip -q /tmp/archive.raw
+          -d /workspace/repo\nelse\n  tar -xzf /tmp/archive.raw -C /workspace/repo\nfi\nchmod
+          -R 777 /workspace\n\n# 復号済み中間ファイルをコンテナ内に残さない\nrm -f /tmp/archive.enc /tmp/archive.ciphertext
+          /tmp/archive.raw\n"
+        command:
+        - sh
+        - -c
+        env:
+        - name: ARCHIVE_URL
+          value: http://archive-server.launchs-org:8080/archives/ab81370b-fb35-4eb6-9904-30d68e1686ba
+        - name: ARCHIVE_ENC_KEY_HEX
+          value: 1b095f46de3c63adad850665ca1ae5227504650daac7754945310bb8310e020c
+        - name: ARCHIVE_SHA256_HEX
+          value: c9c87bcc5baf1adde9bf7b7c8d0f4fca8280efd23dab4369403995d839868d3b
+        image: alpine:latest
+        imagePullPolicy: Always
+        name: archive-fetch
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /workspace
+          name: workspace
+      - args:
+        - cd ${BUILD_CONTEXT_SUBDIR} && railpack prepare . --plan-out /workspace/railpack-plan.json
+        command:
+        - sh
+        - -c
+        env:
+        - name: BUILD_CONTEXT_SUBDIR
+          value: ./
+        image: ghcr.io/launchs-org/railpack-container:latest
+        imagePullPolicy: Always
+        name: railpack
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /workspace
+          name: workspace
+        workingDir: /workspace/repo
+      restartPolicy: Never
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - emptyDir:
+          sizeLimit: "966367641"
+        name: workspace
+      - emptyDir: {}
+        name: socket
+  ttlSecondsAfterFinished: 600
+status:
+  active: 1
+  ready: 0
+  startTime: "2026-07-25T11:30:36Z"
+  terminating: 0
+  uncountedTerminatedPods: {}

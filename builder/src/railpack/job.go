@@ -3,6 +3,7 @@ package railpack
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -34,9 +35,40 @@ func newResources(cpu, memory, disk string) corev1.ResourceRequirements {
 	return corev1.ResourceRequirements{Limits: rl}
 }
 
+// resolveHarborHostAlias は cfg.RegistryHost（Harbor 証明書の SAN と一致する短縮名、例: "harbor.main-harbor"）を
+// CoreDNS を介さず解決できるよう、"<service>.<namespace>" 形式から Service の ClusterIP を引いて hostAliases を組み立てる。
+// CoreDNS の kubernetes プラグインは "<service>.<namespace>.svc.cluster.local" 形式の FQDN しか解決できないため、
+// 短縮名のままでは NXDOMAIN になる一方、FQDN を使うと Harbor 証明書の SAN 不一致で TLS 検証エラーになる。
+// その板挟みを Pod の /etc/hosts エントリで解消する。
+func resolveHarborHostAlias(ctx context.Context, cs kubernetes.Interface, registryHost string) (*corev1.HostAlias, error) {
+	parts := strings.SplitN(registryHost, ".", 2)
+	if len(parts) != 2 {
+		return nil, nil // "host.namespace" 形式でない場合は hostAliases 不要（対象外）とみなす
+	}
+	serviceName, namespace := parts[0], parts[1]
+
+	svc, err := cs.CoreV1().Services(namespace).Get(ctx, serviceName, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("Harbor Service (%s) の取得に失敗しました: %w", registryHost, err)
+	}
+	if svc.Spec.ClusterIP == "" || svc.Spec.ClusterIP == corev1.ClusterIPNone {
+		return nil, fmt.Errorf("Harbor Service (%s) に ClusterIP が割り当てられていません", registryHost)
+	}
+	return &corev1.HostAlias{IP: svc.Spec.ClusterIP, Hostnames: []string{registryHost}}, nil
+}
+
 // createJob は BuildConfig を元に Kubernetes Job を作成し jobID を返す。
 func createJob(ctx context.Context, cs kubernetes.Interface, ns string, cfg BuildConfig) (string, error) {
 	r := cfg.Resources
+
+	harborHostAlias, err := resolveHarborHostAlias(ctx, cs, cfg.RegistryHost) // Harbor 短縮名解決用の hostAliases エントリを組み立てる
+	if err != nil {
+		return "", err
+	}
+	var hostAliases []corev1.HostAlias
+	if harborHostAlias != nil {
+		hostAliases = append(hostAliases, *harborHostAlias)
+	}
 
 	buildRes := newResources(r.BuildCPU, r.BuildMemory, r.BuildDisk)
 	initRes := newResources(r.InitCPU, r.InitMemory, "")
@@ -71,6 +103,7 @@ func createJob(ctx context.Context, cs kubernetes.Interface, ns string, cfg Buil
 				},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
+					HostAliases:   hostAliases,
 					Volumes:       buildVolumes(emptyDirSize),
 					InitContainers: []corev1.Container{
 						// 1. Harbor TLS 証明書をシステム CA バンドルと結合して配置
@@ -90,7 +123,7 @@ func createJob(ctx context.Context, cs kubernetes.Interface, ns string, cfg Buil
 		},
 	}
 
-	_, err := cs.BatchV1().Jobs(ns).Create(ctx, job, metav1.CreateOptions{})
+	_, err = cs.BatchV1().Jobs(ns).Create(ctx, job, metav1.CreateOptions{})
 	return cfg.JobID, err
 }
 
