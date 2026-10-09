@@ -142,3 +142,73 @@ func TestCreateJobFailsWhenHarborServiceNotFound(t *testing.T) {
 		t.Fatal("Harbor Service が存在しない場合、createJobはエラーを返すべきです")
 	}
 }
+
+// buildctlEnv は Job の buildctl コンテナの環境変数を名前で引けるようにして返す
+func buildctlEnv(t *testing.T, fakeClientset *fake.Clientset, jobID string) (map[string]string, *string) {
+	t.Helper()
+	job, err := fakeClientset.BatchV1().Jobs("buildkit").Get(context.Background(), "railpack-"+jobID, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Jobの取得に失敗しました: %v", err)
+	}
+	envs := map[string]string{}
+	for _, env := range job.Spec.Template.Spec.Containers[0].Env {
+		envs[env.Name] = env.Value
+	}
+	return envs, job.Spec.Template.Spec.RuntimeClassName
+}
+
+func TestCreateJobUsesRuntimeClassAndNativeSnapshotterWhenConfigured(t *testing.T) {
+	fakeClientset := fake.NewSimpleClientset(newFakeHarborService())
+
+	config := applyDefaults(BuildConfig{
+		SourceType:       "git",
+		GitRepo:          "https://github.com/example/repo",
+		GitBranch:        "main",
+		RegistryUsername: "robot-user",
+		Namespace:        "buildkit",
+		ImageName:        "my-app",
+		ImageTag:         "v1.0.0",
+		JobID:            "test-job-gvisor",
+		RuntimeClassName: "gvisor",
+		Timeout:          10 * time.Minute,
+	})
+	if _, err := createJob(context.Background(), fakeClientset, "buildkit", config); err != nil {
+		t.Fatalf("createJobが失敗しました: %v", err)
+	}
+
+	envs, runtimeClass := buildctlEnv(t, fakeClientset, "test-job-gvisor")
+	if runtimeClass == nil || *runtimeClass != "gvisor" {
+		t.Errorf("runtimeClassName が gvisor ではありません: %v", runtimeClass)
+	}
+	want := "--oci-worker-no-process-sandbox --oci-worker-snapshotter=native"
+	if envs["BUILDKITD_FLAGS"] != want {
+		t.Errorf("BUILDKITD_FLAGS = %q, want %q (gVisor では native スナップショッターが必要)", envs["BUILDKITD_FLAGS"], want)
+	}
+}
+
+func TestCreateJobKeepsDefaultsWhenRuntimeClassNotConfigured(t *testing.T) {
+	fakeClientset := fake.NewSimpleClientset(newFakeHarborService())
+
+	config := applyDefaults(BuildConfig{
+		SourceType:       "git",
+		GitRepo:          "https://github.com/example/repo",
+		GitBranch:        "main",
+		RegistryUsername: "robot-user",
+		Namespace:        "buildkit",
+		ImageName:        "my-app",
+		ImageTag:         "v1.0.0",
+		JobID:            "test-job-default",
+		Timeout:          10 * time.Minute,
+	})
+	if _, err := createJob(context.Background(), fakeClientset, "buildkit", config); err != nil {
+		t.Fatalf("createJobが失敗しました: %v", err)
+	}
+
+	envs, runtimeClass := buildctlEnv(t, fakeClientset, "test-job-default")
+	if runtimeClass != nil {
+		t.Errorf("RuntimeClass を設定していないのに runtimeClassName が指定されています: %q", *runtimeClass)
+	}
+	if envs["BUILDKITD_FLAGS"] != "--oci-worker-no-process-sandbox" {
+		t.Errorf("BUILDKITD_FLAGS = %q (従来どおり --oci-worker-no-process-sandbox のはず)", envs["BUILDKITD_FLAGS"])
+	}
+}

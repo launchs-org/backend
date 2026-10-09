@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"controller/k8s"
@@ -264,7 +265,8 @@ func (activities *ApplyActivities) ExecuteApply(ctx context.Context, input Apply
 			envVarMountValues[mountIndex] = *mountPtr
 		}
 		manifestGenerator := &manifest.Generator{ // マニフェストジェネレーターを生成する
-			InstanceSizes: map[string]models.InstanceSize{instanceSize: instanceSizeData},
+			InstanceSizes:    map[string]models.InstanceSize{instanceSize: instanceSizeData},
+			RuntimeClassName: os.Getenv("APP_RUNTIME_CLASS"), // ユーザーのアプリの RuntimeClass(例: gvisor)。未設定なら従来どおり
 		}
 		deploymentManifest := manifestGenerator.GenerateDeployment(deploymentForManifest, projectData.Namespace, imageURL, envVarMountValues, volumeMountValues) // マニフェストを生成する
 

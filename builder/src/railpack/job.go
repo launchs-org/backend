@@ -102,8 +102,9 @@ func createJob(ctx context.Context, cs kubernetes.Interface, ns string, cfg Buil
 					Labels: map[string]string{"build-job-id": cfg.JobID, "managed-by": "launchs"},
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
-					HostAliases:   hostAliases,
+					RestartPolicy:    corev1.RestartPolicyNever,
+					RuntimeClassName: runtimeClassNamePtr(cfg.RuntimeClassName), // gVisor などのサンドボックスで動かす(空なら指定しない)
+					HostAliases:      hostAliases,
 					Volumes:       buildVolumes(emptyDirSize),
 					InitContainers: []corev1.Container{
 						// 1. Harbor TLS 証明書をシステム CA バンドルと結合して配置
@@ -349,7 +350,7 @@ exit 1
 
 	envVars := []corev1.EnvVar{
 		{Name: "BUILD_CONTEXT_SUBDIR", Value: cfg.Subdir},
-		{Name: "BUILDKITD_FLAGS", Value: "--oci-worker-no-process-sandbox"},
+		{Name: "BUILDKITD_FLAGS", Value: buildkitdFlags(cfg)},
 		// setupEnvContainer が生成した config.json のディレクトリを指定
 		{Name: "DOCKER_CONFIG", Value: "/workspace/.docker"},
 	}
@@ -380,6 +381,25 @@ exit 1
 			{Name: "workspace", MountPath: "/workspace"},
 		},
 	}
+}
+
+// runtimeClassNamePtr は空文字なら nil(RuntimeClass を指定しない)、そうでなければ名前へのポインタを返す
+func runtimeClassNamePtr(name string) *string {
+	if name == "" {
+		return nil
+	}
+	return &name
+}
+
+// buildkitdFlags は buildkitd に渡すフラグを返す。
+// サンドボックス(gVisor)内では overlay のスナップショッターが使えず、RUN ステップが
+// 「/bin/sh が見つからない」で失敗するため、native スナップショッターを使う(コピー方式で遅いが動く)。
+func buildkitdFlags(cfg BuildConfig) string {
+	flags := "--oci-worker-no-process-sandbox"
+	if cfg.RuntimeClassName != "" {
+		flags += " --oci-worker-snapshotter=native"
+	}
+	return flags
 }
 
 // ── Job 管理ヘルパー ────────────────────────────────────────

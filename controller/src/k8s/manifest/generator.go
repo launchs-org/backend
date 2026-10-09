@@ -13,6 +13,9 @@ import (
 // Generator は manifest 生成に必要な設定を保持する構造体
 type Generator struct {
 	InstanceSizes map[string]models.InstanceSize // インスタンスサイズのマップ
+	// RuntimeClassName は Pod の RuntimeClass(例: "gvisor")。空なら指定しない(従来どおり runc)。
+	// ユーザーが持ち込んだイメージを、ホストのカーネルに直接触れさせないサンドボックスで動かすために使う。
+	RuntimeClassName string
 }
 
 // GenerateDeployment は DB の Deployment モデルから k8s Deployment manifest を生成する
@@ -100,6 +103,10 @@ func (generator *Generator) GenerateDeployment(
 
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container}, // コンテナを設定する
+	}
+	if generator.RuntimeClassName != "" { // RuntimeClass が指定されている場合のみ設定する
+		runtimeClassName := generator.RuntimeClassName
+		podSpec.RuntimeClassName = &runtimeClassName
 	}
 	if len(podVolumes) > 0 { // Volume が存在する場合のみ Pod に設定する
 		podSpec.Volumes = podVolumes
