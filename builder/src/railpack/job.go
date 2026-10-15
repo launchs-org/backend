@@ -420,19 +420,39 @@ func DeleteJob(ctx context.Context, cs kubernetes.Interface, ns, jobID string) e
 
 // getJobStatus は指定した jobID の現在の BuildStatus を返す。
 func getJobStatus(ctx context.Context, cs kubernetes.Interface, ns, jobID string) (BuildStatus, error) {
+	status, _, err := JobStatus(ctx, cs, ns, jobID)
+	return status, err
+}
+
+// JobStatus は指定した jobID の現在の BuildStatus と、失敗した場合の理由(Job の condition の reason / message)を返す。
+//
+// Job の condition(Complete / Failed)を先に見る。activeDeadlineSeconds 超過(DeadlineExceeded)などで Job が失敗しても、
+// status.failed(失敗した Pod の数)が 0 のままになることがあり、カウントだけでは失敗を検出できないため。
+func JobStatus(ctx context.Context, cs kubernetes.Interface, ns, jobID string) (BuildStatus, string, error) {
 	job, err := cs.BatchV1().Jobs(ns).Get(ctx, "railpack-"+jobID, metav1.GetOptions{})
 	if err != nil {
-		return StatusFailed, err
+		return StatusFailed, "", err
+	}
+	for _, condition := range job.Status.Conditions { // condition を優先して判定する
+		if condition.Status != corev1.ConditionTrue {
+			continue
+		}
+		switch condition.Type {
+		case batchv1.JobComplete:
+			return StatusComplete, "", nil
+		case batchv1.JobFailed:
+			return StatusFailed, strings.TrimSpace(condition.Reason + ": " + condition.Message), nil
+		}
 	}
 	switch {
 	case job.Status.Succeeded > 0:
-		return StatusComplete, nil
+		return StatusComplete, "", nil
 	case job.Status.Failed > 0:
-		return StatusFailed, nil
+		return StatusFailed, "failed pods: " + fmt.Sprint(job.Status.Failed), nil
 	case job.Status.Active > 0:
-		return StatusRunning, nil
+		return StatusRunning, "", nil
 	default:
-		return StatusInit, nil
+		return StatusInit, "", nil
 	}
 }
 

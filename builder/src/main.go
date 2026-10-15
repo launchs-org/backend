@@ -1,6 +1,7 @@
 package main
 
 import (
+	"time"
 	"app/shared/config"
 	"app/shared/repository"
 	"builder/activity"
@@ -44,6 +45,22 @@ func main() {
 	logChunkRepo := repository.NewBuildLogChunkRepository(repository.Database)            // ビルドログチャンクリポジトリを生成する
 	imageRepo := repository.NewImageRepository(repository.Database)                       // image リポジトリを生成する
 
+	// ビルドの制限時間(例: "30m")。未設定なら railpack の既定(10 分)。gVisor のように遅い環境では延ばす。
+	// ログ転送 Activity のタイムアウト(60 分)を超えないよう、上限を 55 分にする。
+	var buildTimeout time.Duration
+	if rawTimeout := os.Getenv("BUILD_TIMEOUT"); rawTimeout != "" {
+		parsedTimeout, parseErr := time.ParseDuration(rawTimeout)
+		switch {
+		case parseErr != nil || parsedTimeout <= 0:
+			log.Printf("BUILD_TIMEOUT の値が不正です(%q)。既定値を使います", rawTimeout)
+		case parsedTimeout > 55*time.Minute:
+			log.Printf("BUILD_TIMEOUT(%s)が上限を超えているため、55 分にします", parsedTimeout)
+			buildTimeout = 55 * time.Minute
+		default:
+			buildTimeout = parsedTimeout
+		}
+	}
+
 	// Activity を生成する
 	buildActivities := &activity.BuildActivities{ // Build Activity を生成する
 		K8sClient:            k8sClient,             // k8s クライアントを注入する
@@ -57,6 +74,7 @@ func main() {
 		HarborClient:         harborClient,          // Harbor クライアントを注入する
 		HarborEndpoint:       harborEndpoint,        // Harbor エンドポイントを注入する
 		RuntimeClassName:     os.Getenv("BUILD_RUNTIME_CLASS"), // ビルド Pod の RuntimeClass(例: gvisor)。未設定なら従来どおり
+		BuildTimeout:         buildTimeout,                     // ビルド Job の制限時間(未設定なら 0 = 既定の 10 分)
 	}
 	cancelBuildActivities := &activity.CancelBuildActivities{ // CancelBuild Activity を生成する
 		K8sClient: k8sClient, // k8s クライアントを注入する
