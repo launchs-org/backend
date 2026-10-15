@@ -56,6 +56,7 @@ func main() {
 		RegistryHost:         cfg.GetRegistryHost(), // Harbor ホスト名を設定する
 		HarborClient:         harborClient,          // Harbor クライアントを注入する
 		HarborEndpoint:       harborEndpoint,        // Harbor エンドポイントを注入する
+		RuntimeClassName:     os.Getenv("BUILD_RUNTIME_CLASS"), // ビルド Pod の RuntimeClass(例: gvisor)。未設定なら従来どおり
 	}
 	cancelBuildActivities := &activity.CancelBuildActivities{ // CancelBuild Activity を生成する
 		K8sClient: k8sClient, // k8s クライアントを注入する

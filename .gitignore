@@ -26,3 +26,6 @@ config/app.env
 config/database.env
 config/auth.env
 auth/icons/*.png
+
+# 別リポジトリ（launchs-org/manifest.git）のクローンを除外
+manifest/

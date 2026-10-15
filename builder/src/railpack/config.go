@@ -46,6 +46,9 @@ type BuildConfig struct {
 	// ── Kubernetes ───────────────────────────────────────────
 	// Namespace: Job を作成する Kubernetes namespace
 	Namespace string
+	// RuntimeClassName: ビルド Pod の RuntimeClass (例: "gvisor")。空なら指定しない(従来どおり runc)。
+	// 設定されている場合、gVisor 内では overlay のスナップショッターが使えないため、buildkit は native スナップショッターで動かす。
+	RuntimeClassName string
 
 	// ── リソース制限 ─────────────────────────────────────────
 	// Resources: 各コンテナのリソース設定 (省略時: DefaultResourceConfig())

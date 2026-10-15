@@ -77,6 +77,7 @@ func main() {
 		volumeRepo,
 		volumeMountRepo,
 		imageRepo,
+		cfg.GetStorageClassName(), // デプロイ時の PVC にも同じ StorageClass を使う
 	)
 	deploymentActivities := activity.NewDeploymentActivities( // Deployment Activity を生成する
 		k8sClient,

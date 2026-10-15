@@ -33,6 +33,7 @@ type BuildActivities struct {
 	RegistryHost         string                                // ビルドジョブが使う Harbor ホスト名（クラスタ内 DNS 名）
 	HarborClient         *k8s.HarborClient                    // Harbor API クライアント（イメージサイズ取得用）
 	HarborEndpoint       string                                // Harbor API エンドポイント URL
+	RuntimeClassName     string                                // ビルド Pod の RuntimeClass(例: gvisor)。空なら指定しない
 }
 
 // BuildWorkflowInput は BuildWorkflow への入力
@@ -94,6 +95,7 @@ func (act *BuildActivities) CreateBuildJobActivity(ctx context.Context, input Bu
 		RegistryUsername: harborCredential.RobotName,      // robot アカウント名を設定する
 		RegistryPassword: harborCredential.RobotSecret,    // robot シークレットを設定する
 		Namespace:        buildkitNamespace,                // ビルド専用 namespace を設定する
+		RuntimeClassName: act.RuntimeClassName,            // サンドボックス(gVisor)で動かす場合の RuntimeClass を設定する
 	}
 	if input.ArchiveDownloadURL != "" { // archive タイプのビルド
 		buildConfig.SourceType = "archive"
