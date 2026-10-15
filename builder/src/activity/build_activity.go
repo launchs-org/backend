@@ -14,6 +14,7 @@ import (
 	"builder/railpack"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/temporal"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -34,6 +35,7 @@ type BuildActivities struct {
 	HarborClient         *k8s.HarborClient                    // Harbor API クライアント（イメージサイズ取得用）
 	HarborEndpoint       string                                // Harbor API エンドポイント URL
 	RuntimeClassName     string                                // ビルド Pod の RuntimeClass(例: gvisor)。空なら指定しない
+	BuildTimeout         time.Duration                         // ビルド Job の制限時間。0 なら railpack の既定(10 分)
 }
 
 // BuildWorkflowInput は BuildWorkflow への入力
@@ -96,6 +98,7 @@ func (act *BuildActivities) CreateBuildJobActivity(ctx context.Context, input Bu
 		RegistryPassword: harborCredential.RobotSecret,    // robot シークレットを設定する
 		Namespace:        buildkitNamespace,                // ビルド専用 namespace を設定する
 		RuntimeClassName: act.RuntimeClassName,            // サンドボックス(gVisor)で動かす場合の RuntimeClass を設定する
+		Timeout:          act.BuildTimeout,                // ビルドの制限時間を設定する(0 なら既定値)
 	}
 	if input.ArchiveDownloadURL != "" { // archive タイプのビルド
 		buildConfig.SourceType = "archive"
@@ -178,6 +181,38 @@ func (act *BuildActivities) StreamBuildLogsActivity(ctx context.Context, input B
 			activity.RecordHeartbeat(ctx, "streaming logs for build "+buildData.ID) // Heartbeat を送信する
 		case <-ctx.Done(): // コンテキストがキャンセルされた場合は終了する
 			return ctx.Err() // キャンセルエラーを返す
+		}
+	}
+}
+
+// verifyBuildResultWait は、ログの転送が終わった後に、Job が最終状態(Complete / Failed)になるのを待つ最大時間
+const verifyBuildResultWait = 2 * time.Minute
+
+// VerifyBuildResultActivity はビルド Job の最終結果を確認し、成功(Complete)でなければエラーを返す。
+//
+// ログの転送(StreamBuildLogsActivity)は、Pod が終了すると、成功でも失敗でも完了する。
+// ここで Job の結果を確認しないと、失敗したビルド(制限時間の超過、コンパイルエラーなど)を成功として記録し、
+// 存在しないイメージをデプロイして、「デプロイ中」のまま止まってしまう。
+func (act *BuildActivities) VerifyBuildResultActivity(ctx context.Context, input BuildWorkflowInput) error {
+	deadline := time.Now().Add(verifyBuildResultWait)
+	for {
+		status, reason, err := railpack.JobStatus(ctx, act.K8sClient, buildkitNamespace, input.BuildID)
+		if err != nil {
+			return temporal.NewNonRetryableApplicationError(fmt.Sprintf("ビルド Job の状態を取得できません: %v", err), "BuildJobNotFound", err)
+		}
+		switch status {
+		case railpack.StatusComplete:
+			return nil // ビルド成功
+		case railpack.StatusFailed:
+			return temporal.NewNonRetryableApplicationError("ビルド Job が失敗しました: "+reason, "BuildJobFailed", nil)
+		}
+		if time.Now().After(deadline) {
+			return temporal.NewNonRetryableApplicationError("ビルド Job が、ログの終了後も完了しません(状態: "+string(status)+")", "BuildJobNotFinished", nil)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Second): // Job の状態が更新されるのを待つ
 		}
 	}
 }
