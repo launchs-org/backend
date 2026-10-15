@@ -13,6 +13,9 @@ import (
 // Generator は manifest 生成に必要な設定を保持する構造体
 type Generator struct {
 	InstanceSizes map[string]models.InstanceSize // インスタンスサイズのマップ
+	// RuntimeClassName は Pod の RuntimeClass(例: "gvisor")。空なら指定しない(従来どおり runc)。
+	// ユーザーが持ち込んだイメージを、ホストのカーネルに直接触れさせないサンドボックスで動かすために使う。
+	RuntimeClassName string
 }
 
 // GenerateDeployment は DB の Deployment モデルから k8s Deployment manifest を生成する
@@ -26,7 +29,7 @@ func (generator *Generator) GenerateDeployment(
 	instanceSize := generator.InstanceSizes[deploymentData.InstanceSize] // インスタンスサイズを取得する
 
 	container := corev1.Container{
-		Name:  "app",   // コンテナ名を設定する
+		Name:  "app",    // コンテナ名を設定する
 		Image: imageURL, // イメージ URL を設定する
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
@@ -38,6 +41,7 @@ func (generator *Generator) GenerateDeployment(
 				corev1.ResourceMemory: resource.MustParse(instanceSize.MemoryLimit), // メモリリミットを設定する
 			},
 		},
+		SecurityContext: hardenedContainerSecurityContext(), // ユーザーが持ち込んだイメージ向けの、最小限の強化を設定する
 	}
 
 	if len(deploymentData.Command) > 0 { // command が指定されている場合のみ設定する
@@ -71,15 +75,15 @@ func (generator *Generator) GenerateDeployment(
 
 	replicas := deploymentData.Replicas // レプリカ数を取得する
 
-	var podVolumes []corev1.Volume                       // Pod に追加する Volume のリストを定義する
-	var containerVolumeMounts []corev1.VolumeMount       // コンテナに追加する VolumeMount のリストを定義する
+	var podVolumes []corev1.Volume                 // Pod に追加する Volume のリストを定義する
+	var containerVolumeMounts []corev1.VolumeMount // コンテナに追加する VolumeMount のリストを定義する
 
 	for _, volumeMount := range volumeMounts { // VolumeMount ごとに設定を生成する
 		mountPath := volumeMount.PendingMountPath // pending_mount_path を優先して使う
 		if mountPath == "" {                      // pending が空の場合は current 値を使う
 			mountPath = volumeMount.MountPath
 		}
-		pvcName := volumeMount.VolumeID + "-pvc" // PVC 名を VolumeID から生成する（k8s ApplyPVC の命名規則に合わせる）
+		pvcName := volumeMount.VolumeID + "-pvc"       // PVC 名を VolumeID から生成する（k8s ApplyPVC の命名規則に合わせる）
 		podVolumes = append(podVolumes, corev1.Volume{ // Pod の Volumes に PVC を追加する
 			Name: volumeMount.VolumeID, // Volume 名として VolumeID を使う
 			VolumeSource: corev1.VolumeSource{
@@ -100,6 +104,12 @@ func (generator *Generator) GenerateDeployment(
 
 	podSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container}, // コンテナを設定する
+		// ユーザーのアプリは k8s API を使わないため、ServiceAccount のトークンをマウントしない(侵害時に API を叩かれないようにする)
+		AutomountServiceAccountToken: boolPtr(false),
+	}
+	if generator.RuntimeClassName != "" { // RuntimeClass が指定されている場合のみ設定する
+		runtimeClassName := generator.RuntimeClassName
+		podSpec.RuntimeClassName = &runtimeClassName
 	}
 	if len(podVolumes) > 0 { // Volume が存在する場合のみ Pod に設定する
 		podSpec.Volumes = podVolumes
@@ -110,7 +120,7 @@ func (generator *Generator) GenerateDeployment(
 			Name:      deploymentData.Name, // Deployment 名を設定する
 			Namespace: namespace,           // namespace を設定する
 			Labels: map[string]string{
-				"launchs.org/deployment-id": deploymentData.ID,  // デプロイメント ID ラベルを設定する
+				"launchs.org/deployment-id": deploymentData.ID,   // デプロイメント ID ラベルを設定する
 				"app":                       deploymentData.Name, // アプリ名ラベルを設定する
 			},
 		},
@@ -130,6 +140,21 @@ func (generator *Generator) GenerateDeployment(
 }
 
 // boolPtr は bool 値のポインタを返すヘルパー関数
+// hardenedContainerSecurityContext はユーザーのアプリのコンテナに付ける securityContext を返す。
+// root で動く既存のイメージを壊さないよう、runAsNonRoot や capabilities の全削除はしない。
+//   - seccomp: ランタイム既定のプロファイルで、危険なシステムコールを制限する
+//   - allowPrivilegeEscalation=false: setuid などによる権限昇格を防ぐ(no_new_privs)
+//   - capabilities: ネットワーク偽装(NET_RAW)、デバイスの作成(MKNOD)などを外す。nginx など root 起動のイメージが使う CHOWN/SETUID/SETGID/NET_BIND_SERVICE は残す
+func hardenedContainerSecurityContext() *corev1.SecurityContext {
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: boolPtr(false),
+		SeccompProfile:           &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"NET_RAW", "MKNOD", "AUDIT_WRITE", "SETFCAP"},
+		},
+	}
+}
+
 func boolPtr(boolValue bool) *bool {
 	return &boolValue
 }
@@ -165,7 +190,7 @@ func (generator *Generator) GenerateService(
 			Namespace: namespace,               // namespace を設定する
 			Labels: map[string]string{
 				"launchs.org/service-id": serviceData.ID, // サービス ID ラベルを設定する
-				"app":                    deploymentName,  // アプリ名ラベルを設定する
+				"app":                    deploymentName, // アプリ名ラベルを設定する
 			},
 		},
 		Spec: corev1.ServiceSpec{
