@@ -9,7 +9,7 @@ import (
 )
 
 // BuildWorkflow はビルド処理を担う Temporal Workflow
-// Activity 連鎖: VerifyHarborCredential → CreateBuildJob → StreamBuildLogs → SetPendingImage → UpdateBuildStatus
+// Activity 連鎖: VerifyHarborCredential → CreateBuildJob → StreamBuildLogs → VerifyBuildResult → SetPendingImage → UpdateBuildStatus
 func BuildWorkflow(ctx workflow.Context, input activity.BuildWorkflowInput) error {
 	activityOptions := workflow.ActivityOptions{
 		StartToCloseTimeout: buildActivityTimeout, // Activity タイムアウトを設定する
@@ -40,6 +40,11 @@ func BuildWorkflow(ctx workflow.Context, input activity.BuildWorkflowInput) erro
 	longRunningCtx := workflow.WithActivityOptions(ctx, longRunningOptions) // 長時間実行用オプションを設定する
 	if err := workflow.ExecuteActivity(longRunningCtx, "StreamBuildLogsActivity", input).Get(ctx, nil); err != nil {
 		return updateBuildStatusOnError(ctx, input) // エラー時にビルドステータスを failed に更新する
+	}
+
+	// 3.5. ビルド Job の最終結果を確認する(ログの転送は、成功でも失敗でも終わるため、ここで失敗を検出する)
+	if err := workflow.ExecuteActivity(ctx, "VerifyBuildResultActivity", input).Get(ctx, nil); err != nil {
+		return updateBuildStatusOnError(ctx, input) // ビルド失敗として記録し、デプロイに進まない
 	}
 
 	// 4. ビルド成功時: Image レコードを作成し pending_image_id と pending_github_* フィールドを更新し、imageID を受け取る
