@@ -14,6 +14,7 @@ import (
 	"controller/k8s/manifest"
 
 	"gorm.io/gorm"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/dynamic"
 	k8sclient "k8s.io/client-go/kubernetes"
@@ -43,6 +44,7 @@ type ApplyActivities struct {
 	volumeRepo        repository.VolumeRepository                  // volume リポジトリ
 	volumeMountRepo   repository.VolumeMountRepository             // volume_mount リポジトリ
 	imageRepo         repository.ImageRepository                   // image リポジトリ
+	storageClassName  string                                       // PVC に使う StorageClass 名（空なら k8s の既定の StorageClass）
 }
 
 // NewApplyActivities は ApplyActivities を生成して返す
@@ -62,6 +64,7 @@ func NewApplyActivities(
 	volumeRepo repository.VolumeRepository,
 	volumeMountRepo repository.VolumeMountRepository,
 	imageRepo repository.ImageRepository,
+	storageClassName string,
 ) *ApplyActivities {
 	return &ApplyActivities{ // 依存を注入して返す
 		db:                db,
@@ -79,7 +82,16 @@ func NewApplyActivities(
 		volumeRepo:        volumeRepo,
 		volumeMountRepo:   volumeMountRepo,
 		imageRepo:         imageRepo,
+		storageClassName:  storageClassName,
 	}
+}
+
+// buildVolumePVC は VolumeMount に紐づく PVC のマニフェストを生成する。
+// StorageClass は設定値(STORAGE_CLASS_NAME)を使う。空文字を渡すと k8s の既定の StorageClass になり、
+// 既定が RWX 非対応(local-path など)の環境では PVC が Pending のままデプロイが止まるため、必ず設定値を渡す。
+func (activities *ApplyActivities) buildVolumePVC(namespace string, volumeData *models.Volume) *corev1.PersistentVolumeClaim {
+	pvcName := volumeData.ID + "-pvc" // PVC 名を生成する（ボリューム作成時の命名規則と合わせる）
+	return k8s.BuildPVCManifest(namespace, pvcName, volumeData.SizeMB, activities.storageClassName)
 }
 
 // ApplyResultData は ApplyActivity の実行結果を表す
@@ -244,9 +256,8 @@ func (activities *ApplyActivities) ExecuteApply(ctx context.Context, input Apply
 			if volumeErr != nil {
 				return fmt.Errorf("volume find: %w", volumeErr) // 取得エラーを返す
 			}
-			pvcName := volumeData.ID + "-pvc"                                                          // PVC 名を生成する
-			pvcManifest := k8s.BuildPVCManifest(projectData.Namespace, pvcName, volumeData.SizeMB, "") // PVC マニフェストを生成する
-			if pvcErr := k8s.ApplyPVC(ctx, activities.k8sClient, pvcManifest); pvcErr != nil {         // k8s に PVC を apply する
+			pvcManifest := activities.buildVolumePVC(projectData.Namespace, volumeData)        // PVC マニフェストを生成する（StorageClass は設定値を使う）
+			if pvcErr := k8s.ApplyPVC(ctx, activities.k8sClient, pvcManifest); pvcErr != nil { // k8s に PVC を apply する
 				_ = activities.applyProgressRepo.UpdateStepStatus(ctx, tx, input.WorkflowID, models.ApplyProgressStepVolume, models.ApplyProgressStepStatusFailed, pvcErr.Error())  // ボリュームステップを失敗にする
 				applyHistoryRecord := &models.ApplyHistory{DeploymentID: input.DeploymentID, Status: models.ApplyStatusFailed, ErrorMessage: pvcErr.Error(), AppliedAt: time.Now()} // apply_history を生成する
 				if err := activities.applyHistoryRepo.Create(ctx, tx, applyHistoryRecord); err != nil {                                                                             // apply_history を作成する

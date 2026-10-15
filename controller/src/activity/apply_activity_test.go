@@ -146,6 +146,7 @@ func newTestApplyActivitiesWithImageRepo(db *gorm.DB, imageRepo repository.Image
 		repository.NewVolumeRepository(db),
 		repository.NewVolumeMountRepository(db),
 		imageRepo,
+		"longhorn", // テストでは longhorn を StorageClass とする
 	)
 }
 
